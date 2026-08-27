@@ -1,0 +1,11 @@
+{
+  "name": "hockey-practice-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Design and animate hockey practice drills on a rink diagram.",
+  "scripts": {
+    "start": "node serve.js",
+    "check": "node --check js/main.js && node --check js/render.js && node --check js/store.js && node --check js/geometry.js && node --check js/rink.js"
+  }
+}

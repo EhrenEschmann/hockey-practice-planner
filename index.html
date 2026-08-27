@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hockey Practice Planner</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ctext y=%2726%27 font-size=%2726%27%3E🏒%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body data-tool="select">
+
+<header id="topbar">
+  <div class="brand">🏒 Practice Planner</div>
+  <select id="practice-select" title="Switch practice"></select>
+  <button id="btn-new-practice" title="New practice">+ Practice</button>
+  <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
+  <button id="btn-del-practice" title="Delete practice" class="danger">Delete</button>
+  <div class="spacer"></div>
+  <button id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button>
+  <button id="btn-redo" title="Redo (Ctrl+Y)">↷ Redo</button>
+  <span class="sep"></span>
+  <button id="btn-import" title="Import a practice JSON file">Import</button>
+  <button id="btn-export" title="Export this practice as JSON">Export JSON</button>
+  <button id="btn-png" title="Export current drill as PNG">Export PNG</button>
+  <button id="btn-print" title="Print practice plan">Print</button>
+  <input type="file" id="file-import" accept="application/json,.json" hidden>
+</header>
+
+<div id="layout">
+  <nav id="toolbar">
+    <button class="tool" data-tool="select"    title="Select / move (V)"><span class="ico">↖</span><span>Select</span></button>
+    <button class="tool" data-tool="pan"       title="Pan (H) — or hold Space / middle mouse"><span class="ico">✋</span><span>Pan</span></button>
+    <div class="tool-sep"></div>
+    <button class="tool" data-tool="skater"    title="Skater + path (S)"><span class="ico">⛸</span><span>Skater</span></button>
+    <button class="tool" data-tool="arrow"     title="Arrow annotation (A)"><span class="ico">➚</span><span>Arrow</span></button>
+    <div class="tool-sep"></div>
+    <button class="tool" data-tool="cone"      title="Cone (C)"><span class="ico">🔺</span><span>Cone</span></button>
+    <button class="tool" data-tool="tire"      title="Tire (T)"><span class="ico">⭕</span><span>Tire</span></button>
+    <button class="tool" data-tool="puck"      title="Puck (P)"><span class="ico">⚫</span><span>Puck</span></button>
+    <button class="tool" data-tool="net"       title="Net (N)"><span class="ico">🥅</span><span>Net</span></button>
+    <button class="tool" data-tool="obstacle"  title="Obstacle / pad — drag a box (O)"><span class="ico">▬</span><span>Obstacle</span></button>
+    <div class="tool-sep"></div>
+    <button class="tool" data-tool="barricade" title="Barricade / divider — click points, Enter to finish (B)"><span class="ico">🚧</span><span>Barricade</span></button>
+    <button class="tool" data-tool="zone"      title="Zone / station — drag a box (Z)"><span class="ico">▭</span><span>Zone</span></button>
+    <button class="tool" data-tool="text"      title="Text label (X)"><span class="ico">T</span><span>Text</span></button>
+    <div class="tool-sep"></div>
+    <button class="tool" data-tool="erase"     title="Erase (E)"><span class="ico">✖</span><span>Erase</span></button>
+  </nav>
+
+  <main id="stage">
+    <div id="viewbar">
+      <span class="label">View:</span>
+      <button data-view="full">Full ice</button>
+      <button data-view="leftHalf">Left half</button>
+      <button data-view="rightHalf">Right half</button>
+      <button data-view="leftZone">Left zone</button>
+      <button data-view="neutral">Neutral</button>
+      <button data-view="rightZone">Right zone</button>
+      <span class="sep"></span>
+      <button id="btn-zoom-out" title="Zoom out">−</button>
+      <button id="btn-zoom-in" title="Zoom in">+</button>
+      <span class="sep"></span>
+      <label class="check"><input type="checkbox" id="snap-toggle"> Snap to 1 ft</label>
+      <div class="spacer"></div>
+      <span id="hint"></span>
+    </div>
+
+    <div id="canvas-wrap">
+      <svg id="rink" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <div id="animbar">
+      <button id="btn-play" title="Play / pause (Space)">▶</button>
+      <button id="btn-stop" title="Stop &amp; reset">⏹</button>
+      <input type="range" id="timeline" min="0" max="10" step="0.01" value="0">
+      <span id="time-display">0.0 / 0.0 s</span>
+      <label>Speed
+        <select id="anim-speed">
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="anim-loop" checked> Loop</label>
+      <label class="check"><input type="checkbox" id="anim-trails" checked> Show paths</label>
+    </div>
+  </main>
+
+  <aside id="sidebar">
+    <section id="practice-props" class="panel">
+      <h2>Practice</h2>
+      <label class="field"><span>Name</span><input id="practice-name" placeholder="e.g. U13 Tuesday"></label>
+      <label class="field"><span>Team</span><input id="practice-team" placeholder="e.g. U13 AA"></label>
+      <label class="field"><span>Date</span><input id="practice-date" type="date"></label>
+    </section>
+
+    <section id="plan" class="panel">
+      <h2>Drills <span id="plan-total"></span></h2>
+      <ol id="drill-list"></ol>
+      <button id="btn-add-drill">+ Add drill</button>
+    </section>
+
+    <section id="drill-props" class="panel">
+      <h2>Current drill</h2>
+      <label class="field"><span>Name</span><input id="drill-name"></label>
+      <label class="field"><span>Minutes</span><input id="drill-duration" type="number" min="0" step="1"></label>
+      <label class="field"><span>Notes / coaching points</span><textarea id="drill-notes" rows="5"></textarea></label>
+    </section>
+
+    <section id="props" class="panel">
+      <h2>Selection</h2>
+      <div id="props-body"><p class="muted">Nothing selected. Click an object with the Select tool.</p></div>
+    </section>
+
+    <section class="panel help">
+      <h2>Tips</h2>
+      <ul>
+        <li><b>Skater:</b> click to place, keep clicking to add waypoints (or drag to draw freehand). Enter/Esc finishes. Click an existing skater to extend its path.</li>
+        <li><b>Barricade / Arrow:</b> click points, double-click or Enter to finish.</li>
+        <li><b>Zone / Obstacle:</b> drag a box. Use "Focus" on a zone to plan a drill in just that section.</li>
+        <li><b>Select:</b> drag objects, drag waypoint handles, double-click a handle to remove it. Arrow keys nudge. Delete removes.</li>
+        <li>Wheel to zoom, Space/middle-mouse to pan.</li>
+      </ul>
+    </section>
+  </aside>
+</div>
+
+<div id="print-area"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

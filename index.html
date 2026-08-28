@@ -48,6 +48,27 @@
   </nav>
 
   <main id="stage">
+    <div id="contextbar">
+      <div class="ctx-group">
+        <span class="ctx-label">Practice</span>
+        <input id="practice-name" class="ctx-name" placeholder="Practice name" title="Practice name">
+        <input id="practice-team" class="ctx-team" placeholder="Team" title="Team">
+        <input id="practice-date" type="date" class="ctx-date" title="Date">
+      </div>
+      <div class="ctx-group">
+        <span class="ctx-label">Drill</span>
+        <button id="btn-prev-drill" title="Previous drill (PageUp)">◀</button>
+        <span id="drill-pos" class="ctx-pos">1/1</span>
+        <button id="btn-next-drill" title="Next drill (PageDown)">▶</button>
+        <input id="drill-name" class="ctx-name" placeholder="Drill name" title="Drill name">
+        <input id="drill-duration" type="number" min="0" step="1" class="ctx-min" title="Minutes">
+        <span class="ctx-unit">min</span>
+        <button id="btn-notes" title="Show / hide coaching notes">Notes</button>
+      </div>
+    </div>
+    <div id="notesrow" hidden>
+      <textarea id="drill-notes" rows="3" placeholder="Notes / coaching points for this drill"></textarea>
+    </div>
     <div id="viewbar">
       <span class="label">View:</span>
       <button data-view="full">Full ice</button>
@@ -88,29 +109,15 @@
   </main>
 
   <aside id="sidebar">
-    <section id="practice-props" class="panel">
-      <h2>Practice</h2>
-      <label class="field"><span>Name</span><input id="practice-name" placeholder="e.g. U13 Tuesday"></label>
-      <label class="field"><span>Team</span><input id="practice-team" placeholder="e.g. U13 AA"></label>
-      <label class="field"><span>Date</span><input id="practice-date" type="date"></label>
+    <section id="props" class="panel">
+      <h2>Selection</h2>
+      <div id="props-body"><p class="muted">Nothing selected. Click an object with the Select tool.</p></div>
     </section>
 
     <section id="plan" class="panel">
       <h2>Drills <span id="plan-total"></span></h2>
       <ol id="drill-list"></ol>
       <button id="btn-add-drill">+ Add drill</button>
-    </section>
-
-    <section id="drill-props" class="panel">
-      <h2>Current drill</h2>
-      <label class="field"><span>Name</span><input id="drill-name"></label>
-      <label class="field"><span>Minutes</span><input id="drill-duration" type="number" min="0" step="1"></label>
-      <label class="field"><span>Notes / coaching points</span><textarea id="drill-notes" rows="5"></textarea></label>
-    </section>
-
-    <section id="props" class="panel">
-      <h2>Selection</h2>
-      <div id="props-body"><p class="muted">Nothing selected. Click an object with the Select tool.</p></div>
     </section>
 
     <section class="panel help">

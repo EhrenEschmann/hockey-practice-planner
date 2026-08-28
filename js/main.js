@@ -428,6 +428,8 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Enter') { finishActive(); return; }
+  if (e.key === 'PageUp') { e.preventDefault(); stepDrill(-1); return; }
+  if (e.key === 'PageDown') { e.preventDefault(); stepDrill(1); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); deleteObject(sel); return; }
   if (e.key.startsWith('Arrow') && sel) {
     e.preventDefault();
@@ -605,11 +607,30 @@ function renderDrillProps() {
     const el = $(id);
     if (document.activeElement !== el) el.value = d[key] ?? '';
   }
+  const n = store.practice.drills.length;
+  $('#drill-pos').textContent = `${store.drillIndex + 1}/${n}`;
+  $('#btn-prev-drill').disabled = store.drillIndex === 0;
+  $('#btn-next-drill').disabled = store.drillIndex >= n - 1;
+  $('#btn-notes').classList.toggle('has-notes', !!(d.notes || '').trim());
 }
+function stepDrill(delta) {
+  const i = store.drillIndex + delta;
+  if (i < 0 || i >= store.practice.drills.length) return;
+  finishActive(); switchDrill(i);
+}
+$('#btn-prev-drill').addEventListener('click', () => stepDrill(-1));
+$('#btn-next-drill').addEventListener('click', () => stepDrill(1));
+$('#btn-notes').addEventListener('click', () => {
+  const row = $('#notesrow');
+  row.hidden = !row.hidden;
+  $('#btn-notes').classList.toggle('open', !row.hidden);
+  if (!row.hidden) $('#drill-notes').focus();
+  drawSelection();
+});
 for (const [id, key] of [['#drill-name', 'name'], ['#drill-duration', 'duration'], ['#drill-notes', 'notes']]) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
-  el.addEventListener('input', () => { drill()[key] = key === 'duration' ? +el.value : el.value; store.save(); renderPlan(); });
+  el.addEventListener('input', () => { drill()[key] = key === 'duration' ? +el.value : el.value; store.save(); renderPlan(); renderDrillProps(); });
   el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
 

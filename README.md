@@ -36,6 +36,7 @@ npm start          # serves on http://localhost:5173
 | Enter / Esc | Finish current path or polyline |
 | Delete | Remove selection |
 | Arrows (+Shift) | Nudge selection 1 ft (5 ft) |
+| PageUp / PageDown | Previous / next drill |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Space (tap) | Play / pause animation |
 | Space (hold) + drag | Pan |

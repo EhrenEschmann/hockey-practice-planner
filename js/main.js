@@ -809,18 +809,29 @@ function puckProps(o) {
       else problem = 'pick a receiver';
     }
     const status = problem ? `<span class="warn">⚠ ${problem}</span>`
-      : `<span class="muted">t = ${rec.t.toFixed(1)} s</span>${rec.late ? ` <span class="warn" title="The skater passes the marked spot before the puck reaches them, so this happens where they are when it arrives">⚠ puck arrives after the mark</span>` : ''}`;
+      : `<span class="muted">${ev.type === 'pass' && ev.by === 'receiver' ? `arrives t = ${rec.arrive.toFixed(1)} s` : `t = ${rec.t.toFixed(1)} s`}</span>${rec.late ? ` <span class="warn" title="The skater passes the marked spot before the puck reaches them, so this happens where they are when it arrives">⚠ puck arrives after the mark</span>` : ''}`;
     const onPath = ev.dist != null;
-    const where = onPath
-      ? `<span>at</span><input class="wp" type="number" min="0" step="0.5" data-ev="${i}" data-evprop="dist" value="${ev.dist}" title="Feet along the skater's path"><span>ft on path</span>`
-      : `<span>at waypoint</span><input class="wp" type="number" min="0" step="1" data-ev="${i}" data-evprop="wp" value="${ev.wp ?? 0}" title="0 = skater's start, 1… = path waypoints">`;
+    const where = (prefix = 'at ') => onPath
+      ? `<span>${prefix.trim()}</span><input class="wp" type="number" min="0" step="0.5" data-ev="${i}" data-evprop="dist" value="${ev.dist}" title="Feet along the skater's path"><span>ft on path</span>`
+      : `<span>${prefix}waypoint</span><input class="wp" type="number" min="0" step="1" data-ev="${i}" data-evprop="wp" value="${ev.wp ?? 0}" title="0 = skater's start, 1… = path waypoints">`;
     const canMark = !!getObj(eventSkater(o, i))?.path?.length; // only a moving skater has a path to mark
     const mark = `<button data-act="mark" data-ev="${i}" ${canMark ? '' : 'disabled'} title="Click a spot on the skater's path to mark where this happens (you can also drag the marker on the ice)">📍 ${onPath ? 'Move mark' : 'Mark on path'}</button>`
       + (onPath ? `<button data-act="unmark" data-ev="${i}" title="Time this by waypoint instead">✕</button>` : '');
     let body;
-    if (ev.type === 'pass') body = `<span>${who}</span>${where}<span>passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', rec?.carrier)}</select>${mark}`;
-    else if (ev.type === 'shoot') body = `<span>${who}</span>${where}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${mark}`;
-    else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where}${mark}`;
+    if (ev.type === 'pass') {
+      const rcv = getObj(ev.to);
+      const byReceiver = ev.by === 'receiver';
+      // Timing choice only matters when the receiver moves (or is already in use).
+      const bySel = rcv && (rcv.path?.length || byReceiver)
+        ? `<select data-ev="${i}" data-evprop="by" title="Time the pass by where the passer is when it leaves, or by where the receiver should get it">
+             <option value="carrier" ${byReceiver ? '' : 'selected'}>released when ${who} is at</option>
+             <option value="receiver" ${byReceiver ? 'selected' : ''}>arriving as ${playerName(rcv)} reaches</option></select>`
+        : `<span>released when ${who} is at</span>`;
+      const arrive = rec?.ok && byReceiver ? `<span class="muted">(leaves at t = ${rec.t.toFixed(1)} s, arrives ${rec.arrive.toFixed(1)} s)</span>` : '';
+      body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', rec?.carrier)}</select>${bySel}${where('')}${arrive}${mark}`;
+    }
+    else if (ev.type === 'shoot') body = `<span>${who}</span>${where()}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${mark}`;
+    else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where()}${mark}`;
     return `<div class="event">
       <div class="event-head">
         <select data-ev="${i}" data-evprop="type">${Object.entries(EV_TYPES).map(([k, v]) => `<option value="${k}" ${ev.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
@@ -835,13 +846,16 @@ function puckProps(o) {
   return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
     <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
-    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens — drag them along the path to move it. Drag the puck onto a skater to hand it over.</p>`;
+    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives) — drag them along the path to move it. Drag the puck onto a skater to hand it over.</p>`;
 }
 
-/** The player (skater or coach) event `i` of puck `pk` is timed against: the carrier at that point, or the pickup player. */
+/**
+ * The player (skater or coach) event `i` of puck `pk` is timed against: the carrier at that point, the pickup
+ * player, or — for a pass timed by its receiver — the receiver.
+ */
 function eventSkater(pk, i) {
   const ev = pk?.events?.[i]; if (!ev) return null;
-  const who = ev.type === 'pickup' ? ev.skater : sim.puck(pk.id).info[i]?.carrier;
+  const who = ev.type === 'pickup' ? ev.skater : (ev.type === 'pass' && ev.by === 'receiver') ? ev.to : sim.puck(pk.id).info[i]?.carrier;
   return who && isPlayer(getObj(who)) ? who : null;
 }
 /** Distance (ft) along a skater's path of the point nearest to p. */
@@ -866,6 +880,13 @@ propsBody.addEventListener('input', e => {
     if (!ev || !k) return;
     if (k === 'wp') ev.wp = Math.max(0, Math.round(+el.value || 0));
     else if (k === 'dist') ev.dist = el.value === '' ? null : Math.max(0, +el.value || 0);
+    else if (k === 'by') {
+      // wp/dist now refer to a different player's path: reset to a sensible default on it.
+      if (el.value === 'receiver') ev.by = 'receiver'; else delete ev.by;
+      delete ev.dist;
+      const path = getObj(ev.by === 'receiver' ? ev.to : sim.puck(o.id).info[+el.dataset.ev]?.carrier)?.path?.length || 0;
+      ev.wp = ev.by === 'receiver' ? Math.min(1, path) : path;
+    }
     else if (k === 'type') { ev.type = el.value; if (ev.type === 'pickup' && !ev.skater) ev.skater = null; }
     else ev[k] = el.value || null;
     if (el.tagName === 'SELECT') el.blur(); // let the following 'change' re-render the row
@@ -908,7 +929,10 @@ propsBody.addEventListener('click', e => {
       let ev;
       if (btn.dataset.act === 'addpass') {
         const from = carrier ? sim.skaterPos(carrier, sim.wpTime(carrier, wp)) : o;
-        ev = { type: 'pass', wp, to: nearestSkater(from, carrier)?.id || null };
+        const to = nearestSkater(from, carrier);
+        ev = { type: 'pass', wp, to: to?.id || null };
+        // A stationary passer (coach, waiting skater) feeding a moving receiver: time it by the receiver.
+        if (carrier && !getObj(carrier).path?.length && to?.path?.length) { ev.by = 'receiver'; ev.wp = 1; }
       } else if (btn.dataset.act === 'addshoot') {
         ev = { type: 'shoot', wp, target: null };
       } else {

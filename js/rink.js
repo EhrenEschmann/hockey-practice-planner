@@ -43,6 +43,7 @@ export const SVG_STYLE = `
   .puck-ring{fill:none;stroke:#3b82f6;stroke-width:.3}
   .ev-mark circle{fill:#fff;stroke:#333;stroke-width:.3}
   .ev-mark.shoot circle{stroke:#d7263d}
+  .ev-mark.receive circle{stroke:#1f9d55}
   .ev-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .ev-mark.draggable{cursor:move}
   .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}

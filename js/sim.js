@@ -185,7 +185,17 @@ export function makeSim(drill) {
         continue; // nobody to pass/shoot
       } else if (ev.type === 'pass') {
         if (!isSkater(ev.to) || ev.to === carrier) continue;
-        const want = evTime(carrier, ev), tr = Math.max(t, want);
+        const byReceiver = ev.by === 'receiver';
+        let want;
+        if (byReceiver) {
+          // Timed by the receiver: release early enough that the puck arrives as they reach their mark.
+          const tArr = evTime(ev.to, ev);
+          const to = puckAt(ev.to, tArr);
+          let rel = tArr;
+          for (let i = 0; i < 4; i++) rel = tArr - G.dist(puckAt(carrier, rel), to) / passSpeed;
+          want = rel; // may be < 0 or before the passer has the puck: max(t, …) below defers it and flags it late
+        } else want = evTime(carrier, ev);
+        const tr = Math.max(t, want);
         rec.late = tr > want + 1e-6;
         segs.push({ t0: t, t1: tr, kind: 'carried', carrier });
         const from = puckAt(carrier, tr);
@@ -195,7 +205,8 @@ export function makeSim(drill) {
         const to = puckAt(ev.to, tr + travel);
         segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
         t = tr + travel; carrier = ev.to;
-        Object.assign(rec, { ok: true, t: tr, from, to, mark: markAt(rec.carrier, tr) });
+        Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, by: byReceiver ? 'receiver' : 'carrier',
+          mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr) });
       } else if (ev.type === 'shoot') {
         const want = evTime(carrier, ev), tr = Math.max(t, want);
         rec.late = tr > want + 1e-6;

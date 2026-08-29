@@ -529,6 +529,10 @@ function togglePlay() {
   if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); }
   else {
     if (totalDuration() <= 0) return;
+    // Playing is for watching, not editing: drop the selection and finish anything being drawn.
+    finishActive();
+    if (pickTarget) { pickTarget = null; $('#hint').textContent = HINTS[tool] || ''; }
+    if (sel) select(null);
     if (anim.t >= totalDuration()) anim.t = 0;
     anim.playing = true; anim.last = performance.now();
     anim.raf = requestAnimationFrame(tick);

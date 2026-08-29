@@ -1,7 +1,7 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE } from './rink.js';
 import * as G from './geometry.js';
-import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
-import { makeSim, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
+import { renderObjects, standaloneSVG, setStick, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
+import { makeSim, facingOf, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
 import { Store, uid, newDrill, newPractice, cloneObjects, migrateDrill } from './store.js';
 
 const $ = s => document.querySelector(s);
@@ -57,7 +57,7 @@ function drawSelection() {
   if (!sel) return;
   const el = objLayer.querySelector(`[data-id="${sel}"]`);
   if (!el) { sel = null; return; }
-  const target = el.querySelector('.skater-body, .puck-disc') || el;
+  const target = el.querySelector('.body, .puck-disc') || el; // body only, so the stick doesn't inflate the box
   const handlesToHide = Array.from(el.querySelectorAll('.handle'));
   handlesToHide.forEach(h => h.style.display = 'none');
   const bb = target.getBBox();
@@ -488,7 +488,10 @@ function totalDuration() { return sim ? sim.duration() : 0; }
 function applyAnimation(t) {
   for (const o of drill().objects) {
     let el, p;
-    if (o.type === 'skater' && o.path?.length) { p = sim.skaterPos(o.id, t); el = objLayer.querySelector(`.skater-body[data-skater="${o.id}"]`); }
+    if (o.type === 'skater' && o.path?.length) {
+      p = sim.skaterPose(o.id, t); el = objLayer.querySelector(`.skater-body[data-skater="${o.id}"]`);
+      if (el) setStick(el.querySelector('.stick'), p.heading, p.lat);
+    }
     else if (o.type === 'puck') { p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`); }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
   }
@@ -701,9 +704,9 @@ const PROPS = {
   skater: [
     ['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['role', 'select:F=Forward,D=Defense,G=Goalie', 'Role'],
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
-    ['backward', 'checkbox', 'Skating backward'],
+    ['backward', 'checkbox', 'Skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
-  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color']],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
   tire: [],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
@@ -721,7 +724,9 @@ function renderProps() {
   if (body.contains(document.activeElement)) return; // don't clobber an input being edited
   const o = sel && getObj(sel);
   if (!o) { body.innerHTML = '<p class="muted">Nothing selected. Click an object with the Select tool.</p>'; return; }
-  const fields = (PROPS[o.type] || []).map(([key, kind, label]) => {
+  const fields = (PROPS[o.type] || [])
+    .filter(([key]) => !(key === 'facing' && o.type === 'skater' && o.path?.length)) // a moving skater faces along its path
+    .map(([key, kind, label]) => {
     let input;
     const v = o[key] ?? '';
     if (kind === 'text') input = `<input data-prop="${key}" value="${escHtml(v)}">`;
@@ -753,6 +758,7 @@ function renderProps() {
   }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
   if (o.type === 'net') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  if (o.type === 'coach' || (o.type === 'skater' && !o.path?.length)) extra.push(`<button data-act="face45">Turn 45°</button>`);
   if (o.type === 'obstacle') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
   extra.push(`<button data-act="dup">Duplicate</button>`);
   extra.push(`<button data-act="del" class="danger">Delete</button>`);
@@ -826,6 +832,7 @@ propsBody.addEventListener('input', e => {
   }
   if (!key) return;
   o[key] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? +el.value : el.value;
+  if (key === 'facing') o.facing = el.value === '' ? null : +el.value;
   if (key === 'carrier') { o.carrier = el.value || null; el.blur(); }
   if (o.type === 'skater' && key === 'color') lastSkaterColor = o.color;
   store.save(); renderCanvas(); renderAnimBar();
@@ -850,6 +857,7 @@ propsBody.addEventListener('click', e => {
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
     case 'rot90': commit(() => o.rot = ((o.rot || 0) + 90) % 360); break;
+    case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
     case 'givepuck': { const pk = { id: uid(), ...newPuck(o, o.id) }; commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }
     case 'addpass': case 'addshoot': case 'addpickup': {

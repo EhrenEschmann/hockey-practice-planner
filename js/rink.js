@@ -29,6 +29,8 @@ export const SVG_STYLE = `
   .skater-body .body{stroke:#fff;stroke-width:.3}
   .skater-body text{font-family:system-ui,sans-serif;pointer-events:none}
   .coach-body .body{stroke:#fff;stroke-width:.35}
+  .stick .shaft{stroke:#5b3a17;stroke-width:.38;stroke-linecap:round}
+  .stick .blade{stroke:#111;stroke-width:.5;stroke-linecap:round}
   .coach-body text{font-family:system-ui,sans-serif;pointer-events:none}
   .drop-preview{opacity:.65;pointer-events:none}
   .puck{fill:#111}

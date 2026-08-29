@@ -28,7 +28,7 @@ function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
 
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'net', 'arrow', 'tire', 'cone', 'text', 'coach', 'skater', 'puck'];
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'net', 'arrow', 'tire', 'cone', 'minicone', 'text', 'coach', 'skater', 'puck'];
 
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
@@ -98,6 +98,15 @@ const draw = {
     return `<g class="obj cone" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
       <ellipse cy=".7" rx="1.3" ry=".5" fill="#333"/>
       <polygon points="0,-1.4 -1,.7 1,.7" fill="${c}" stroke="#7a3300" stroke-width=".15"/>
+    </g>`;
+  },
+
+  minicone(o) {
+    const c = o.color || '#ffb300';
+    return `<g class="obj minicone" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
+      <circle r="1.4" fill="transparent"/>
+      <ellipse cy=".4" rx=".75" ry=".3" fill="#333"/>
+      <polygon points="0,-.9 -.6,.4 .6,.4" fill="${c}" stroke="#7a4a00" stroke-width=".12"/>
     </g>`;
   },
 

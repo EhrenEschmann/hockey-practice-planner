@@ -100,7 +100,8 @@ const HINTS = {
   skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater to extend',
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
-  cone: 'Click to place a cone', tire: 'Click to place a tire', puck: 'Click a skater or coach to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
+  cone: 'Click to place a cone', tire: 'Click to place a tire',
+  minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
   obstacle: 'Drag a box to add an obstacle / pad',
   barricade: 'Click points to lay a barricade · double-click or Enter to finish',
   zone: 'Drag a box to mark a section / station',
@@ -145,7 +146,8 @@ function newPuck(p, carrier) {
 }
 
 /** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
-const PLACEABLE = new Set(['coach', 'skater', 'cone', 'tire', 'puck', 'net']);
+const PLACEABLE = new Set(['coach', 'skater', 'cone', 'minicone', 'tire', 'puck', 'net']);
+const MINICONE_SPACING = 3; // ft between small cones when laying a row
 
 /** A fresh object of the given placeable type at point p (no id yet). */
 function makePlaceable(type, p) {
@@ -154,6 +156,7 @@ function makePlaceable(type, p) {
     case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black' }; }
     case 'skater': return { type: 'skater', x: p.x, y: p.y, label: String(count('skater') + 1), color: lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [] };
     case 'cone': return { type: 'cone', x: p.x, y: p.y, color: '#ff6a00' };
+    case 'minicone': return { type: 'minicone', x: p.x, y: p.y, color: '#ffb300' };
     case 'tire': return { type: 'tire', x: p.x, y: p.y };
     case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
     case 'puck': {
@@ -164,6 +167,13 @@ function makePlaceable(type, p) {
     }
   }
   return null;
+}
+
+/** Evenly spaced points from a to b, about MINICONE_SPACING ft apart (at least two). */
+function rowPoints(a, b) {
+  const len = G.dist(a, b);
+  const count = Math.max(2, Math.round(len / MINICONE_SPACING) + 1);
+  return Array.from({ length: count }, (_, i) => ({ x: G.round1(a.x + (b.x - a.x) * i / (count - 1)), y: G.round1(a.y + (b.y - a.y) * i / (count - 1)) }));
 }
 
 function deleteObject(id) {
@@ -260,6 +270,7 @@ function onPointerDown(e) {
     }
     case 'coach': select(addObject(makePlaceable('coach', p)).id); break;
     case 'cone': addObject(makePlaceable('cone', p)); break;
+    case 'minicone': drag = { type: 'row', start: p }; break; // click = one cone, drag = a row (decided on pointerup)
     case 'tire': addObject(makePlaceable('tire', p)); break;
     case 'puck': {
       const s = id && getObj(id);
@@ -369,6 +380,11 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'row': {
+      const pts = G.dist(drag.start, p) < 1.5 ? [drag.start] : rowPoints(drag.start, p);
+      overlay.innerHTML = `<g class="drop-preview">${renderObjects({ objects: pts.map((q, i) => ({ id: `row${i}`, ...makePlaceable('minicone', q) })) }, null, {})}</g>`;
+      break;
+    }
     case 'freehand': {
       drag.pts.push(raw);
       if (drag.pts.length > 2) {
@@ -414,6 +430,12 @@ function onPointerUp(e) {
       store.save();
       sel = getObj(dg.id) ? dg.id : null;
       renderAll();
+      break;
+    }
+    case 'row': {
+      const p = snapPt(toRink(e));
+      const pts = G.dist(dg.start, p) < 1.5 ? [dg.start] : rowPoints(dg.start, p);
+      commit(() => { for (const q of pts) drill().objects.push({ id: uid(), ...makePlaceable('minicone', q) }); });
       break;
     }
     case 'freehand': {
@@ -489,7 +511,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', a: 'arrow', c: 'cone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
@@ -737,6 +759,7 @@ const PROPS = {
   ],
   coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
+  minicone: [['color', 'color', 'Color']],
   tire: [],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
   net: [['rot', 'number', 'Rotation (°)']],
@@ -746,7 +769,7 @@ const PROPS = {
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');

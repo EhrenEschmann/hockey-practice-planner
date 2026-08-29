@@ -17,6 +17,11 @@ export const CARRY = {
   avoid: 6,     // ft: cones/tires closer than this push the puck to the far side
   curve: 12,    // lateral ft per rad/ft of turn (puck swings to the outside of a turn)
   step: 0.5,    // ft between precomputed samples along a path
+  // Stickhandling through small cones: the puck goes alternately left and right of successive cones.
+  weave: 1.1,       // ft of clearance the puck keeps from each small cone
+  weaveTau: 0.6,    // ft of travel over which the puck darts to the other side (quick hands)
+  weaveReach: 2,    // a small cone within this many ft (ahead/behind) of the puck is the one being handled
+  weaveOffset: 3.5, // small cones further than this from the path are ignored
 };
 
 /** A skater's full path: its own position followed by its waypoints. */
@@ -60,6 +65,13 @@ function carryFrames(o, dense, cum, objs) {
   const step = len / (N - 1);
   const ease = 1 - Math.exp(-step / CARRY.tau);
   const obstacles = objs.filter(x => x.type === 'cone' || x.type === 'tire');
+  // Small cones near the path, in the order the skater meets them; the puck passes them on alternating sides.
+  const small = objs.filter(x => x.type === 'minicone')
+    .map(c => ({ c, ...G.projectOnPolyline(dense, cum, c) }))
+    .filter(s => s.dist < CARRY.weaveOffset)
+    .sort((a, b) => a.d - b.d)
+    .map((s, i) => ({ c: s.c, side: i % 2 ? -1 : 1 }));
+  const easeFast = 1 - Math.exp(-step / CARRY.weaveTau);
   const h = [], l = [];
   let lat = null, prevH = null;
   for (let i = 0; i < N; i++) {
@@ -76,7 +88,17 @@ function carryFrames(o, dense, cum, objs) {
       target -= Math.sign(side || 1) * (1 - dc / CARRY.avoid) * 2 * CARRY.max;
     }
     target = G.clamp(target, -CARRY.max, CARRY.max);
-    lat = lat === null ? target : lat + (target - lat) * ease;
+    let k = ease;
+    // Stickhandling: which small cone is the puck at right now (in the skater's frame the puck sits `lead` ft ahead)?
+    let handling = null, best = CARRY.weaveReach;
+    for (const s of small) {
+      const dx = s.c.x - p.x, dy = s.c.y - p.y;
+      const f = Math.cos(hd) * dx + Math.sin(hd) * dy, ly = Math.cos(hd) * dy - Math.sin(hd) * dx;
+      const off = Math.abs(f - CARRY.lead);
+      if (off < best && Math.abs(ly) < CARRY.weaveOffset) { best = off; handling = { ly, side: s.side }; }
+    }
+    if (handling) { target = handling.ly + handling.side * CARRY.weave; k = easeFast; }
+    lat = lat === null ? target : lat + (target - lat) * k;
     h.push(hd); l.push(lat); prevH = hd;
   }
   return { step, h, l };

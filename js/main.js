@@ -1,4 +1,4 @@
-import { RINK, VIEWS, rinkSVG, SVG_STYLE } from './rink.js';
+import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
 import { makeSim, facingOf, isPlayer, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
@@ -28,7 +28,7 @@ let lastZoneColor = 0;
 
 const anim = { playing: false, t: 0, speed: 1, loop: true, raf: null, last: 0 };
 let sim = null;          // simulation of the current drill (rebuilt on every canvas render)
-let pickTarget = null;   // { puckId, ev, kind: 'target' | 'dist' } while waiting for a click to set a shot target / path mark
+let pickTarget = null;   // { puckId, ev, kind: 'target' | 'dist' | 'bank' } while waiting for a click to set a shot target / path mark / board bounce
 
 const drill = () => store.drill;
 const getObj = id => drill().objects.find(o => o.id === id);
@@ -210,7 +210,8 @@ function onPointerDown(e) {
     if (pt.kind === 'dist') {
       const who = eventSkater(pk, pt.ev);
       if (who) commit(() => ev.dist = pathDistanceAt(who, raw));
-    } else commit(() => ev.target = { x: p.x, y: p.y });
+    } else if (pt.kind === 'bank') commit(() => ev.bank = boardPt(raw));
+    else commit(() => ev.target = { x: p.x, y: p.y });
     return;
   }
 
@@ -224,7 +225,11 @@ function onPointerDown(e) {
     case 'select': {
       const markEl = e.target.closest('[data-evmark]');
       const markWho = markEl && id ? eventSkater(getObj(id), +markEl.dataset.evmark) : null;
-      if (markWho) {
+      const bankEl = e.target.closest('[data-bank]');
+      if (bankEl && id && getObj(id)?.events?.[+bankEl.dataset.bank]) {
+        drag = { type: 'bank', id, ev: +bankEl.dataset.bank, pushed: false };
+        select(id);
+      } else if (markWho) {
         drag = { type: 'evmark', id, ev: +markEl.dataset.evmark, who: markWho, pushed: false };
         select(id);
       } else if (handleEl && id) {
@@ -349,6 +354,13 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'bank': {
+      const ev = getObj(drag.id)?.events?.[drag.ev]; if (!ev) return;
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      ev.bank = boardPt(raw);
+      renderCanvas();
+      break;
+    }
     case 'rect': {
       const o = getObj(drag.id); if (!o) return;
       const r = G.rectFromPoints(drag.start, p);
@@ -392,7 +404,7 @@ function onPointerUp(e) {
       }
       store.save(); renderAll(); break;
     }
-    case 'handle': case 'evmark': store.save(); renderAll(); break;
+    case 'handle': case 'evmark': case 'bank': store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
@@ -793,10 +805,21 @@ const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
 /** Short name for a skater or coach, e.g. "#3" or "Coach C". */
 function playerName(o) { return !o ? '?' : o.type === 'coach' ? `Coach ${escHtml(o.label)}` : `#${escHtml(o.label)}`; }
 
-function skaterOptions(val, noneLabel, exclude = null) {
+function skaterOptions(val, noneLabel, exclude = null, selfId = null) {
   const players = drill().objects.filter(s => isPlayer(s) && s.id !== exclude);
   return `<option value="" ${!val ? 'selected' : ''}>${noneLabel}</option>` +
-    players.map(s => `<option value="${s.id}" ${s.id === val ? 'selected' : ''}>${playerName(s)} (${s.color}${s.role === 'G' ? ', G' : ''})</option>`).join('');
+    players.map(s => `<option value="${s.id}" ${s.id === val ? 'selected' : ''}>${playerName(s)}${s.id === selfId ? ' (themselves)' : ''} (${s.color}${s.role === 'G' ? ', G' : ''})</option>`).join('');
+}
+
+/** Snap a point to the boards (rounded to 0.1 ft). */
+const boardPt = p => { const q = nearestBoardPoint(p); return { x: G.round1(q.x), y: G.round1(q.y) }; };
+
+/** A sensible first bounce point for pass event `i`: the boards nearest the middle of the pass. */
+function defaultBank(pk, i) {
+  const rec = sim.puck(pk.id).info[i];
+  const a = rec?.from || (rec?.carrier ? sim.puckAt(rec.carrier, rec.t ?? 0) : { x: pk.x, y: pk.y });
+  const b = rec?.to || a;
+  return boardPt({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 }
 
 function puckProps(o) {
@@ -809,7 +832,7 @@ function puckProps(o) {
     if (!rec?.ok) {
       if (ev.type === 'pickup') problem = rec?.carrier ? 'puck is already carried here' : 'pick a player';
       else if (!rec?.carrier) problem = 'nobody has the puck here';
-      else if (ev.type === 'pass' && ev.to === rec.carrier) problem = `${playerName(getObj(rec.carrier))} can't pass to themselves — pick another receiver`;
+      else if (ev.type === 'pass' && ev.to === rec.carrier && !ev.bank) problem = `${playerName(getObj(rec.carrier))} can't pass to themselves — pick another receiver, or bank it off the boards`;
       else problem = 'pick a receiver';
     }
     const status = problem ? `<span class="warn">⚠ ${problem}</span>`
@@ -832,7 +855,10 @@ function puckProps(o) {
              <option value="receiver" ${byReceiver ? 'selected' : ''}>arriving as ${playerName(rcv)} reaches</option></select>`
         : `<span>released when ${who} is at</span>`;
       const arrive = rec?.ok && byReceiver ? `<span class="muted">(leaves at t = ${rec.t.toFixed(1)} s, arrives ${rec.arrive.toFixed(1)} s)</span>` : '';
-      body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', rec?.carrier)}</select>${bySel}${where('')}${arrive}${mark}`;
+      // Off the boards: the receiver may then be the passer themselves.
+      const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
+      body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', ev.bank ? null : rec?.carrier, rec?.carrier)}</select>${bankUI}${bySel}${where('')}${arrive}${mark}`;
     }
     else if (ev.type === 'shoot') body = `<span>${who}</span>${where()}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${mark}`;
     else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where()}${mark}`;
@@ -850,7 +876,7 @@ function puckProps(o) {
   return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
     <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
-    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives) — drag them along the path to move it. Drag the puck onto a skater to hand it over.</p>`;
+    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives, B = a board bounce) — drag them to move them. Drag the puck onto a skater to hand it over.</p>`;
 }
 
 /**
@@ -884,6 +910,7 @@ propsBody.addEventListener('input', e => {
     if (!ev || !k) return;
     if (k === 'wp') ev.wp = Math.max(0, Math.round(+el.value || 0));
     else if (k === 'dist') ev.dist = el.value === '' ? null : Math.max(0, +el.value || 0);
+    else if (k === 'bank') { if (el.checked) ev.bank = defaultBank(o, +el.dataset.ev); else delete ev.bank; }
     else if (k === 'by') {
       // wp/dist now refer to a different player's path: reset to a sensible default on it.
       if (el.value === 'receiver') ev.by = 'receiver'; else delete ev.by;
@@ -951,6 +978,7 @@ propsBody.addEventListener('click', e => {
     case 'evup': commit(() => { [o.events[evIndex - 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex - 1]]; }); renderProps(); break;
     case 'evdown': commit(() => { [o.events[evIndex + 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex + 1]]; }); renderProps(); break;
     case 'pick': pickTarget = { puckId: o.id, ev: evIndex, kind: 'target' }; $('#hint').textContent = 'Click on the ice to set the shot target (Esc to cancel)'; break;
+    case 'bounce': pickTarget = { puckId: o.id, ev: evIndex, kind: 'bank' }; $('#hint').textContent = 'Click near the boards to set where the puck bounces (Esc to cancel)'; break;
     case 'mark': pickTarget = { puckId: o.id, ev: evIndex, kind: 'dist' }; $('#hint').textContent = "Click a spot on the skater's path to mark where the pass / shot happens (Esc to cancel)"; break;
     case 'unmark': commit(() => { delete o.events[evIndex].dist; }); renderProps(); break;
   }

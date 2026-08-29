@@ -184,7 +184,10 @@ export function makeSim(drill) {
       } else if (!carrier) {
         continue; // nobody to pass/shoot
       } else if (ev.type === 'pass') {
-        if (!isSkater(ev.to) || ev.to === carrier) continue;
+        // A bank pass bounces off the boards at ev.bank — and may come back to the passer themselves.
+        const bank = ev.bank && Number.isFinite(+ev.bank.x) && Number.isFinite(+ev.bank.y) ? { x: +ev.bank.x, y: +ev.bank.y } : null;
+        if (!isSkater(ev.to) || (ev.to === carrier && !bank)) continue;
+        const flight = (a, b) => (bank ? G.dist(a, bank) + G.dist(bank, b) : G.dist(a, b)) / passSpeed;
         const byReceiver = ev.by === 'receiver';
         let want;
         if (byReceiver) {
@@ -192,7 +195,7 @@ export function makeSim(drill) {
           const tArr = evTime(ev.to, ev);
           const to = puckAt(ev.to, tArr);
           let rel = tArr;
-          for (let i = 0; i < 4; i++) rel = tArr - G.dist(puckAt(carrier, rel), to) / passSpeed;
+          for (let i = 0; i < 4; i++) rel = tArr - flight(puckAt(carrier, rel), to);
           want = rel; // may be < 0 or before the passer has the puck: max(t, …) below defers it and flags it late
         } else want = evTime(carrier, ev);
         const tr = Math.max(t, want);
@@ -200,12 +203,15 @@ export function makeSim(drill) {
         segs.push({ t0: t, t1: tr, kind: 'carried', carrier });
         const from = puckAt(carrier, tr);
         // Lead the receiver: iterate travel time against where they'll be on arrival.
-        let travel = G.dist(from, puckAt(ev.to, tr)) / passSpeed;
-        for (let i = 0; i < 4; i++) travel = G.dist(from, puckAt(ev.to, tr + travel)) / passSpeed;
+        let travel = flight(from, puckAt(ev.to, tr));
+        for (let i = 0; i < 4; i++) travel = flight(from, puckAt(ev.to, tr + travel));
         const to = puckAt(ev.to, tr + travel);
-        segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
+        if (bank) {
+          const tb = tr + G.dist(from, bank) / passSpeed;
+          segs.push({ t0: tr, t1: tb, kind: 'flying', from, to: bank }, { t0: tb, t1: tr + travel, kind: 'flying', from: bank, to });
+        } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
         t = tr + travel; carrier = ev.to;
-        Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, by: byReceiver ? 'receiver' : 'carrier',
+        Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank, by: byReceiver ? 'receiver' : 'carrier',
           mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr) });
       } else if (ev.type === 'shoot') {
         const want = evTime(carrier, ev), tr = Math.max(t, want);

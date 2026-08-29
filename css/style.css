@@ -54,7 +54,7 @@ body[data-tool=select] #rink{cursor:default}
 body[data-tool=pan] #rink{cursor:grab}
 body[data-tool=erase] #rink{cursor:not-allowed}
 body[data-tool=cone] #rink,body[data-tool=minicone] #rink,body[data-tool=tire] #rink,body[data-tool=puck] #rink,body[data-tool=net] #rink,
-body[data-tool=skater] #rink,body[data-tool=coach] #rink,body[data-tool=arrow] #rink,body[data-tool=barricade] #rink,body[data-tool=text] #rink,
+body[data-tool=skater] #rink,body[data-tool=coach] #rink,body[data-tool=goalie] #rink,body[data-tool=arrow] #rink,body[data-tool=barricade] #rink,body[data-tool=text] #rink,
 body[data-tool=zone] #rink,body[data-tool=obstacle] #rink{cursor:crosshair}
 body.panning #rink{cursor:grabbing}
 

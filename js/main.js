@@ -100,6 +100,7 @@ const HINTS = {
   pan: 'Drag to pan · wheel to zoom',
   skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater or coach to extend their path',
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
+  goalie: 'Click near a net to put a goalie in its crease (facing out) · click open ice for a goalie anywhere',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
   cone: 'Click to place a cone', tire: 'Click to place a tire',
   minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
@@ -147,7 +148,9 @@ function newPuck(p, carrier) {
 }
 
 /** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
-const PLACEABLE = new Set(['coach', 'skater', 'cone', 'minicone', 'tire', 'puck', 'net']);
+const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'net']);
+const CREASE_DEPTH = 3.5;  // ft in front of the goal line where a goalie stands
+const NET_SNAP = 8;        // ft: a goalie placed this close to a net goes into its crease
 const MINICONE_SPACING = 3; // ft between small cones when laying a row
 
 /** A fresh object of the given placeable type at point p (no id yet). */
@@ -156,6 +159,10 @@ function makePlaceable(type, p) {
   switch (type) {
     case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black', speed: 10, delay: 0, path: [] }; }
     case 'skater': return { type: 'skater', x: p.x, y: p.y, label: String(count('skater') + 1), color: lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [] };
+    case 'goalie': {
+      const net = drill().objects.filter(o => o.type === 'net' && G.dist(o, p) < NET_SNAP).sort((a, b) => G.dist(a, p) - G.dist(b, p))[0];
+      return makeGoalie(net, p);
+    }
     case 'cone': return { type: 'cone', x: p.x, y: p.y, color: '#ff6a00' };
     case 'minicone': return { type: 'minicone', x: p.x, y: p.y, color: '#ffb300' };
     case 'tire': return { type: 'tire', x: p.x, y: p.y };
@@ -168,6 +175,25 @@ function makePlaceable(type, p) {
     }
   }
   return null;
+}
+
+/** Where a goalie stands for a net: just in front of the goal line, on the side the net opens to. */
+function creaseSpot(net) {
+  const a = (net.rot || 0) * Math.PI / 180;
+  return { x: G.round1(net.x + CREASE_DEPTH * Math.cos(a)), y: G.round1(net.y + CREASE_DEPTH * Math.sin(a)) };
+}
+/** A goalie in the crease of `net` (facing out of it), or at point p if no net is given. */
+function makeGoalie(net, p) {
+  const n = drill().objects.filter(o => o.type === 'skater' && o.role === 'G').length;
+  const pos = net ? creaseSpot(net) : p;
+  const g = { type: 'skater', x: pos.x, y: pos.y, label: n ? `G${n + 1}` : 'G', color: 'black', role: 'G', speed: 20, delay: 0, backward: false, path: [] };
+  if (net) g.facing = ((net.rot || 0) % 360 + 360) % 360;
+  return g;
+}
+/** The goalie already standing in a net's crease, if any. */
+function goalieOf(net) {
+  const spot = creaseSpot(net);
+  return drill().objects.find(o => o.type === 'skater' && o.role === 'G' && G.dist(o, spot) < 4) || null;
 }
 
 /** Evenly spaced points from a to b, about MINICONE_SPACING ft apart (at least two). */
@@ -272,6 +298,7 @@ function onPointerDown(e) {
       break;
     }
     case 'coach': select(addObject(makePlaceable('coach', p)).id); break;
+    case 'goalie': select(addObject(makePlaceable('goalie', p)).id); break;
     case 'cone': addObject(makePlaceable('cone', p)); break;
     case 'minicone': drag = { type: 'row', start: p }; break; // click = one cone, drag = a row (decided on pointerup)
     case 'tire': addObject(makePlaceable('tire', p)); break;
@@ -514,7 +541,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
@@ -815,7 +842,11 @@ function renderProps() {
     if (o.type === 'coach') extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.</p>`);
   }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
-  if (o.type === 'net') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  if (o.type === 'net') {
+    const g = goalieOf(o);
+    extra.push(g ? `<button data-act="selgoalie">Goalie ${escHtml(g.label)}…</button>` : `<button data-act="addgoalie">Add goalie</button>`);
+    extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  }
   if (isPlayer(o) && !o.path?.length) extra.push(`<button data-act="face45">Turn 45°</button>`);
   if (o.type === 'obstacle') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
   extra.push(`<button data-act="dup">Duplicate</button>`);
@@ -992,6 +1023,8 @@ propsBody.addEventListener('click', e => {
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
     case 'rot90': commit(() => o.rot = ((o.rot || 0) + 90) % 360); break;
+    case 'addgoalie': { const g = { id: uid(), ...makeGoalie(o) }; commit(() => drill().objects.push(g)); select(g.id); renderProps(); break; }
+    case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
     case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
     case 'givepuck': { const pk = { id: uid(), ...newPuck(o, o.id) }; commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }

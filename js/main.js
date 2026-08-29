@@ -1,7 +1,7 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
-import { makeSim, facingOf, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
+import { makeSim, facingOf, isPlayer, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
 import { Store, uid, newDrill, newPractice, cloneObjects, migrateDrill } from './store.js';
 
 const $ = s => document.querySelector(s);
@@ -28,7 +28,7 @@ let lastZoneColor = 0;
 
 const anim = { playing: false, t: 0, speed: 1, loop: true, raf: null, last: 0 };
 let sim = null;          // simulation of the current drill (rebuilt on every canvas render)
-let pickTarget = null;   // { puckId, ev } while waiting for a click to set a shot target
+let pickTarget = null;   // { puckId, ev, kind: 'target' | 'dist' } while waiting for a click to set a shot target / path mark
 
 const drill = () => store.drill;
 const getObj = id => drill().objects.find(o => o.id === id);
@@ -100,7 +100,7 @@ const HINTS = {
   skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater to extend',
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
-  cone: 'Click to place a cone', tire: 'Click to place a tire', puck: 'Click a skater to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
+  cone: 'Click to place a cone', tire: 'Click to place a tire', puck: 'Click a skater or coach to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
   obstacle: 'Drag a box to add an obstacle / pad',
   barricade: 'Click points to lay a barricade · double-click or Enter to finish',
   zone: 'Drag a box to mark a section / station',
@@ -157,8 +157,8 @@ function makePlaceable(type, p) {
     case 'tire': return { type: 'tire', x: p.x, y: p.y };
     case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
     case 'puck': {
-      // Dropped onto a skater without a puck → that skater carries it.
-      const s = drill().objects.find(o => o.type === 'skater' && G.dist(o, p) < 3);
+      // Dropped onto a skater or coach without a puck → they carry it.
+      const s = drill().objects.find(o => isPlayer(o) && G.dist(o, p) < 3);
       const taken = s && drill().objects.some(o => o.type === 'puck' && o.carrier === s.id);
       return newPuck(p, s && !taken ? s.id : null);
     }
@@ -172,7 +172,7 @@ function deleteObject(id) {
   commit(() => {
     const d = drill();
     d.objects = d.objects.filter(o => o.id !== id);
-    if (victim?.type === 'skater') for (const pk of d.objects) if (pk.type === 'puck') {
+    if (isPlayer(victim)) for (const pk of d.objects) if (pk.type === 'puck') {
       if (pk.carrier === id) { pk.carrier = null; pk.x = victim.x; pk.y = victim.y; }
       pk.events = (pk.events || []).filter(ev => ev.to !== id && ev.skater !== id);
     }
@@ -203,10 +203,14 @@ function onPointerDown(e) {
   const handleEl = e.target.closest('[data-handle]');
 
   if (pickTarget) {
-    const ev = getObj(pickTarget.puckId)?.events?.[pickTarget.ev];
-    pickTarget = null;
+    const pt = pickTarget; pickTarget = null;
     $('#hint').textContent = HINTS[tool] || '';
-    if (ev) commit(() => ev.target = { x: p.x, y: p.y });
+    const pk = getObj(pt.puckId); const ev = pk?.events?.[pt.ev];
+    if (!ev) return;
+    if (pt.kind === 'dist') {
+      const who = eventSkater(pk, pt.ev);
+      if (who) commit(() => ev.dist = pathDistanceAt(who, raw));
+    } else commit(() => ev.target = { x: p.x, y: p.y });
     return;
   }
 
@@ -218,7 +222,12 @@ function onPointerDown(e) {
 
   switch (tool) {
     case 'select': {
-      if (handleEl && id) {
+      const markEl = e.target.closest('[data-evmark]');
+      const markWho = markEl && id ? eventSkater(getObj(id), +markEl.dataset.evmark) : null;
+      if (markWho) {
+        drag = { type: 'evmark', id, ev: +markEl.dataset.evmark, who: markWho, pushed: false };
+        select(id);
+      } else if (handleEl && id) {
         const o = getObj(id);
         drag = { type: 'handle', id, index: +handleEl.dataset.handle, key: o.type === 'skater' ? 'path' : 'points', pushed: false };
         select(id);
@@ -249,7 +258,7 @@ function onPointerDown(e) {
     case 'tire': addObject(makePlaceable('tire', p)); break;
     case 'puck': {
       const s = id && getObj(id);
-      if (s?.type === 'skater') {
+      if (isPlayer(s)) {
         const existing = drill().objects.find(o => o.type === 'puck' && o.carrier === s.id);
         if (existing) select(existing.id);
         else select(addObject(newPuck(p, s.id)).id);
@@ -333,6 +342,13 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'evmark': {
+      const ev = getObj(drag.id)?.events?.[drag.ev]; if (!ev) return;
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      ev.dist = pathDistanceAt(drag.who, raw);
+      renderCanvas();
+      break;
+    }
     case 'rect': {
       const o = getObj(drag.id); if (!o) return;
       const r = G.rectFromPoints(drag.start, p);
@@ -371,12 +387,12 @@ function onPointerUp(e) {
     case 'move': {
       const o = getObj(dg.id);
       if (o?.type === 'puck' && dg.pushed) {
-        const target = d.objects.find(s => s.type === 'skater' && G.dist(s, o) < 3);
+        const target = d.objects.find(s => isPlayer(s) && G.dist(s, o) < 3);
         o.carrier = target ? target.id : null;
       }
       store.save(); renderAll(); break;
     }
-    case 'handle': store.save(); renderAll(); break;
+    case 'handle': case 'evmark': store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
@@ -703,7 +719,7 @@ const PROPS = {
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
     ['backward', 'checkbox', 'Skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
-  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color']],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
   tire: [],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
@@ -753,9 +769,14 @@ function renderProps() {
     extra.push(`<button data-act="extend">Extend path</button>`);
     extra.push(`<button data-act="clearpath" ${o.path?.length ? '' : 'disabled'}>Clear path</button>`);
   }
+  if (o.type === 'coach') {
+    const myPuck = drill().objects.find(pk => pk.type === 'puck' && pk.carrier === o.id);
+    extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
+    extra.push(`<p class="muted small">A coach can receive passes and pass or shoot the puck. Facing sets which way they hold it.</p>`);
+  }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
   if (o.type === 'net') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
-  if (o.type === 'skater' && !o.path?.length) extra.push(`<button data-act="face45">Turn 45°</button>`);
+  if (isPlayer(o) && !o.path?.length) extra.push(`<button data-act="face45">Turn 45°</button>`);
   if (o.type === 'obstacle') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
   extra.push(`<button data-act="dup">Duplicate</button>`);
   extra.push(`<button data-act="del" class="danger">Delete</button>`);
@@ -765,10 +786,13 @@ function renderProps() {
 
 const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
 
+/** Short name for a skater or coach, e.g. "#3" or "Coach C". */
+function playerName(o) { return !o ? '?' : o.type === 'coach' ? `Coach ${escHtml(o.label)}` : `#${escHtml(o.label)}`; }
+
 function skaterOptions(val, noneLabel) {
-  const skaters = drill().objects.filter(s => s.type === 'skater');
+  const players = drill().objects.filter(isPlayer);
   return `<option value="" ${!val ? 'selected' : ''}>${noneLabel}</option>` +
-    skaters.map(s => `<option value="${s.id}" ${s.id === val ? 'selected' : ''}>#${escHtml(s.label)} (${s.color}${s.role === 'G' ? ', G' : ''})</option>`).join('');
+    players.map(s => `<option value="${s.id}" ${s.id === val ? 'selected' : ''}>${playerName(s)} (${s.color}${s.role === 'G' ? ', G' : ''})</option>`).join('');
 }
 
 function puckProps(o) {
@@ -776,19 +800,26 @@ function puckProps(o) {
   const evs = o.events || [];
   const rows = evs.map((ev, i) => {
     const rec = ps.info[i];
-    const who = rec?.carrier ? '#' + escHtml(getObj(rec.carrier)?.label ?? '?') : 'loose puck';
+    const who = rec?.carrier ? playerName(getObj(rec.carrier)) : 'loose puck';
     let problem = '';
     if (!rec?.ok) {
-      if (ev.type === 'pickup') problem = rec?.carrier ? 'puck is already carried here' : 'pick a skater';
+      if (ev.type === 'pickup') problem = rec?.carrier ? 'puck is already carried here' : 'pick a player';
       else if (!rec?.carrier) problem = 'nobody has the puck here';
       else problem = 'pick a receiver';
     }
-    const status = problem ? `<span class="warn">⚠ ${problem}</span>` : `<span class="muted">t = ${rec.t.toFixed(1)} s</span>`;
-    const wp = `<input class="wp" type="number" min="0" step="1" data-ev="${i}" data-evprop="wp" value="${ev.wp ?? 0}" title="0 = skater's start, 1… = path waypoints">`;
+    const status = problem ? `<span class="warn">⚠ ${problem}</span>`
+      : `<span class="muted">t = ${rec.t.toFixed(1)} s</span>${rec.late ? ` <span class="warn" title="The skater passes the marked spot before the puck reaches them, so this happens where they are when it arrives">⚠ puck arrives after the mark</span>` : ''}`;
+    const onPath = ev.dist != null;
+    const where = onPath
+      ? `<span>at</span><input class="wp" type="number" min="0" step="0.5" data-ev="${i}" data-evprop="dist" value="${ev.dist}" title="Feet along the skater's path"><span>ft on path</span>`
+      : `<span>at waypoint</span><input class="wp" type="number" min="0" step="1" data-ev="${i}" data-evprop="wp" value="${ev.wp ?? 0}" title="0 = skater's start, 1… = path waypoints">`;
+    const canMark = !!getObj(eventSkater(o, i))?.path?.length; // only a moving skater has a path to mark
+    const mark = `<button data-act="mark" data-ev="${i}" ${canMark ? '' : 'disabled'} title="Click a spot on the skater's path to mark where this happens (you can also drag the marker on the ice)">📍 ${onPath ? 'Move mark' : 'Mark on path'}</button>`
+      + (onPath ? `<button data-act="unmark" data-ev="${i}" title="Time this by waypoint instead">✕</button>` : '');
     let body;
-    if (ev.type === 'pass') body = `<span>${who} at waypoint</span>${wp}<span>passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —')}</select>`;
-    else if (ev.type === 'shoot') body = `<span>${who} at waypoint</span>${wp}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>`;
-    else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— skater —')}</select><span>picks it up at waypoint</span>${wp}`;
+    if (ev.type === 'pass') body = `<span>${who}</span>${where}<span>passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —')}</select>${mark}`;
+    else if (ev.type === 'shoot') body = `<span>${who}</span>${where}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${mark}`;
+    else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where}${mark}`;
     return `<div class="event">
       <div class="event-head">
         <select data-ev="${i}" data-evprop="type">${Object.entries(EV_TYPES).map(([k, v]) => `<option value="${k}" ${ev.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
@@ -803,13 +834,25 @@ function puckProps(o) {
   return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
     <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
-    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). Drag the puck onto a skater to hand it over.</p>`;
+    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens — drag them along the path to move it. Drag the puck onto a skater to hand it over.</p>`;
+}
+
+/** The player (skater or coach) event `i` of puck `pk` is timed against: the carrier at that point, or the pickup player. */
+function eventSkater(pk, i) {
+  const ev = pk?.events?.[i]; if (!ev) return null;
+  const who = ev.type === 'pickup' ? ev.skater : sim.puck(pk.id).info[i]?.carrier;
+  return who && isPlayer(getObj(who)) ? who : null;
+}
+/** Distance (ft) along a skater's path of the point nearest to p. */
+function pathDistanceAt(skaterId, p) {
+  const tm = sim.skater(skaterId);
+  return G.round1(G.projectOnPolyline(tm.dense, tm.cum, p).d);
 }
 
 /** Who holds the puck after all of its events. */
 function finalCarrier(o) { const last = sim.puck(o.id).segs.at(-1); return last.kind === 'carried' ? last.carrier : null; }
 function nearestSkater(p, exclude) {
-  return drill().objects.filter(s => s.type === 'skater' && s.id !== exclude).sort((a, b) => G.dist(a, p) - G.dist(b, p))[0] || null;
+  return drill().objects.filter(s => isPlayer(s) && s.id !== exclude).sort((a, b) => G.dist(a, p) - G.dist(b, p))[0] || null;
 }
 
 const propsBody = $('#props-body');
@@ -821,6 +864,7 @@ propsBody.addEventListener('input', e => {
     const ev = o.events?.[+el.dataset.ev]; const k = el.dataset.evprop;
     if (!ev || !k) return;
     if (k === 'wp') ev.wp = Math.max(0, Math.round(+el.value || 0));
+    else if (k === 'dist') ev.dist = el.value === '' ? null : Math.max(0, +el.value || 0);
     else if (k === 'type') { ev.type = el.value; if (ev.type === 'pickup' && !ev.skater) ev.skater = null; }
     else ev[k] = el.value || null;
     if (el.tagName === 'SELECT') el.blur(); // let the following 'change' re-render the row
@@ -877,7 +921,9 @@ propsBody.addEventListener('click', e => {
     case 'evdel': commit(() => o.events.splice(evIndex, 1)); renderProps(); break;
     case 'evup': commit(() => { [o.events[evIndex - 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex - 1]]; }); renderProps(); break;
     case 'evdown': commit(() => { [o.events[evIndex + 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex + 1]]; }); renderProps(); break;
-    case 'pick': pickTarget = { puckId: o.id, ev: evIndex }; $('#hint').textContent = 'Click on the ice to set the shot target (Esc to cancel)'; break;
+    case 'pick': pickTarget = { puckId: o.id, ev: evIndex, kind: 'target' }; $('#hint').textContent = 'Click on the ice to set the shot target (Esc to cancel)'; break;
+    case 'mark': pickTarget = { puckId: o.id, ev: evIndex, kind: 'dist' }; $('#hint').textContent = "Click a spot on the skater's path to mark where the pass / shot happens (Esc to cancel)"; break;
+    case 'unmark': commit(() => { delete o.events[evIndex].dist; }); renderProps(); break;
   }
 });
 

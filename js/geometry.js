@@ -69,6 +69,21 @@ function perpDist(p, a, b) {
   return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
 }
 
+/** Closest point on a polyline to p: its coordinates, arc-length distance `d` along the line, and `dist` from p. */
+export function projectOnPolyline(pts, cum, p) {
+  if (pts.length === 1) return { x: pts[0].x, y: pts[0].y, d: 0, dist: dist(p, pts[0]) };
+  let best = null;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    const t = l2 ? clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / l2, 0, 1) : 0;
+    const q = { x: a.x + t * dx, y: a.y + t * dy };
+    const dd = dist(p, q);
+    if (!best || dd < best.dist) best = { x: q.x, y: q.y, d: cum[i] + t * Math.sqrt(l2), dist: dd };
+  }
+  return best;
+}
+
 export function rectFromPoints(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
 }

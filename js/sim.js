@@ -30,9 +30,12 @@ export function carriedPuckPos(pose) {
 
 const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
 
+/** Skaters and coaches can carry, pass and receive the puck. */
+export const isPlayer = o => o?.type === 'skater' || o?.type === 'coach';
+
 /**
- * Heading (radians) of a skater that is not moving along a path: the explicit `facing` if set, otherwise
- * skaters face the nearest net and goalies face centre ice.
+ * Heading (radians) of a player that is not moving along a path: the explicit `facing` if set, otherwise
+ * skaters face the nearest net; goalies and coaches face centre ice.
  */
 export function facingOf(o, objs = []) {
   if (o.facing !== undefined && o.facing !== null && o.facing !== '') return (+o.facing) * Math.PI / 180;
@@ -86,7 +89,9 @@ function carryFrames(o, dense, cum, objs) {
 export function makeSim(drill) {
   const objs = drill.objects;
   const byId = id => objs.find(o => o.id === id);
-  const isSkater = id => byId(id)?.type === 'skater';
+  const isSkater = id => isPlayer(byId(id)); // any puck-handling player (skater or coach)
+  /** Where to draw an event marker: the player's spot on their path — none for players that don't move. */
+  const markAt = (id, t) => (byId(id)?.path?.length ? skaterPos(id, t) : null);
   const timings = new Map();
   const pucks = new Map();
 
@@ -133,6 +138,18 @@ export function makeSim(drill) {
     return tm.delay + tm.cum[Math.min(idx, tm.cum.length - 1)] / tm.speed;
   }
 
+  /**
+   * When an event fires for skater `id`: at `ev.dist` ft along their path if it was marked on the path,
+   * otherwise when they reach waypoint `ev.wp`.
+   */
+  function evTime(id, ev) {
+    if (ev.dist != null && ev.dist !== '') {
+      const tm = skater(id);
+      return tm.delay + G.clamp(+ev.dist || 0, 0, tm.len) / tm.speed;
+    }
+    return wpTime(id, ev.wp);
+  }
+
   function nearestNet(p) {
     let best = null, bd = Infinity;
     for (const o of objs) if (o.type === 'net') { const d = G.dist(o, p); if (d < bd) { bd = d; best = o; } }
@@ -141,7 +158,8 @@ export function makeSim(drill) {
 
   /**
    * Puck timeline: a list of segments {t0,t1,kind:'carried'|'flying'|'loose',...} plus per-event info
-   * (whether it resolved, when it fires, and the pass/shot line endpoints for drawing).
+   * (whether it resolved, when it fires, the pass/shot line endpoints for drawing, and `mark`: where the
+   * skater is on their path when it happens).
    */
   function puck(id) {
     let s = pucks.get(id);
@@ -159,15 +177,16 @@ export function makeSim(drill) {
       info.push(rec);
       if (ev.type === 'pickup') {
         if (carrier || !isSkater(ev.skater)) continue;
-        const tp = Math.max(t, wpTime(ev.skater, ev.wp));
+        const want = evTime(ev.skater, ev), tp = Math.max(t, want);
         segs.push({ t0: t, t1: tp, kind: 'loose', at: loose });
         t = tp; carrier = ev.skater;
-        Object.assign(rec, { ok: true, t: tp, at: loose });
+        Object.assign(rec, { ok: true, t: tp, late: tp > want + 1e-6, at: loose, mark: markAt(ev.skater, tp) });
       } else if (!carrier) {
         continue; // nobody to pass/shoot
       } else if (ev.type === 'pass') {
         if (!isSkater(ev.to) || ev.to === carrier) continue;
-        const tr = Math.max(t, wpTime(carrier, ev.wp));
+        const want = evTime(carrier, ev), tr = Math.max(t, want);
+        rec.late = tr > want + 1e-6;
         segs.push({ t0: t, t1: tr, kind: 'carried', carrier });
         const from = puckAt(carrier, tr);
         // Lead the receiver: iterate travel time against where they'll be on arrival.
@@ -176,16 +195,17 @@ export function makeSim(drill) {
         const to = puckAt(ev.to, tr + travel);
         segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
         t = tr + travel; carrier = ev.to;
-        Object.assign(rec, { ok: true, t: tr, from, to });
+        Object.assign(rec, { ok: true, t: tr, from, to, mark: markAt(rec.carrier, tr) });
       } else if (ev.type === 'shoot') {
-        const tr = Math.max(t, wpTime(carrier, ev.wp));
+        const want = evTime(carrier, ev), tr = Math.max(t, want);
+        rec.late = tr > want + 1e-6;
         segs.push({ t0: t, t1: tr, kind: 'carried', carrier });
         const from = puckAt(carrier, tr);
         const to = ev.target || nearestNet(from);
         const travel = G.dist(from, to) / shotSpeed;
         segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
         t = tr + travel; carrier = null; loose = to;
-        Object.assign(rec, { ok: true, t: tr, from, to });
+        Object.assign(rec, { ok: true, t: tr, from, to, mark: markAt(rec.carrier, tr) });
       }
     }
     segs.push(carrier ? { t0: t, t1: Infinity, kind: 'carried', carrier } : { t0: t, t1: Infinity, kind: 'loose', at: loose });
@@ -220,5 +240,5 @@ export function makeSim(drill) {
     return Math.round(T * 100) / 100;
   }
 
-  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, puck, puckPos, puckCarrierAt, duration };
+  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, evTime, puck, puckPos, puckCarrierAt, duration };
 }

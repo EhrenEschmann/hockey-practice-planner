@@ -41,6 +41,11 @@ export const SVG_STYLE = `
   .pass-line{stroke:#333;stroke-width:.35;stroke-dasharray:1.2 .9}
   .shot-line{stroke:#333;stroke-width:.6}
   .puck-ring{fill:none;stroke:#3b82f6;stroke-width:.3}
+  .ev-mark circle{fill:#fff;stroke:#333;stroke-width:.3}
+  .ev-mark.shoot circle{stroke:#d7263d}
+  .ev-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
+  .ev-mark.draggable{cursor:move}
+  .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
   .wp-label circle{fill:#fff;stroke:#555;stroke-width:.2}
   .wp-label text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .barricade .stripe{fill:none;stroke:#f5a623;stroke-width:.7;stroke-dasharray:2 2;stroke-linecap:butt}

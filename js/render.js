@@ -109,7 +109,11 @@ const draw = {
       ? `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.6)}`
       : `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 2)}`
     ).join('');
-    return `<g class="obj puck" data-id="${o.id}"><g class="puck-lines">${lines}</g>
+    const letter = { pass: 'P', shoot: 'S', pickup: 'U' };
+    const marks = ps.info.map((r, i) => r.ok && r.mark
+      ? `<g class="ev-mark ${r.type}${sel ? ' draggable' : ''}" data-evmark="${i}" transform="translate(${n(r.mark.x)} ${n(r.mark.y)})"><circle r="1.25"/><text y=".55" font-size="1.5" text-anchor="middle">${letter[r.type] || '?'}</text></g>`
+      : '').join('');
+    return `<g class="obj puck" data-id="${o.id}"><g class="puck-lines">${lines}</g>${marks}
       <g class="puck-disc" data-puck="${o.id}" transform="translate(${n(pos.x)} ${n(pos.y)})"><circle r="1.6" fill="transparent"/><circle r=".65" class="puck"/>${sel ? '<circle r="1.3" class="puck-ring"/>' : ''}</g></g>`;
   },
 

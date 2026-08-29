@@ -1,6 +1,6 @@
 // Pure SVG-string rendering of drill objects.
 import { smoothPath } from './geometry.js';
-import { makeSim, skaterPoints, stickGeom, facingOf, STICK } from './sim.js';
+import { makeSim, skaterPoints } from './sim.js';
 export { skaterPoints };
 
 export const SKATER_COLORS = {
@@ -24,35 +24,6 @@ function arrowHead(dense, color, size = 2.2) {
   return `<polygon points="${n(b.x)},${n(b.y)} ${p(size, Math.PI - 0.5)} ${p(size, Math.PI + 0.5)}" fill="${color}"/>`;
 }
 
-const deg = rad => n(rad * 180 / Math.PI);
-
-/** Stick attribute values for a heading (radians) and lateral blade offset. */
-function stickAttrs(heading, lat) {
-  const g = stickGeom(lat);
-  return {
-    transform: `rotate(${deg(heading)})`,
-    shaft: { x1: 0, y1: 0, x2: n(g.bx), y2: n(g.by) },
-    blade: { x1: n(g.bx - 0.45 * g.nx), y1: n(g.by - 0.45 * g.ny), x2: n(g.bx + 0.95 * g.nx), y2: n(g.by + 0.95 * g.ny) },
-  };
-}
-
-/** SVG for a stick held by a player at the origin, facing `heading`, blade `lat` ft to the side. */
-export function stickSVG(heading, lat) {
-  const a = stickAttrs(heading, lat);
-  const attrs = o => Object.entries(o).map(([k, v]) => `${k}="${v}"`).join(' ');
-  return `<g class="stick" transform="${a.transform}"><line class="shaft" ${attrs(a.shaft)}/><line class="blade" ${attrs(a.blade)}/></g>`;
-}
-
-/** Update an existing <g class="stick"> in place (used by the animation loop). */
-export function setStick(el, heading, lat) {
-  if (!el) return;
-  const a = stickAttrs(heading, lat);
-  el.setAttribute('transform', a.transform);
-  const set = (child, o) => { for (const [k, v] of Object.entries(o)) child.setAttribute(k, v); };
-  set(el.querySelector('.shaft'), a.shaft);
-  set(el.querySelector('.blade'), a.blade);
-}
-
 function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
@@ -64,7 +35,7 @@ export function renderObjects(drill, selId, opts = {}) {
     .map((o, i) => ({ o, i }))
     .sort((a, b) => (Z_ORDER.indexOf(a.o.type) - Z_ORDER.indexOf(b.o.type)) || (a.i - b.i))
     .map(x => x.o);
-  const o2 = { ...opts, sim: opts.sim || makeSim(drill), objs: drill.objects };
+  const o2 = { ...opts, sim: opts.sim || makeSim(drill) };
   return objs.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('');
 }
 
@@ -142,12 +113,11 @@ const draw = {
       <g class="puck-disc" data-puck="${o.id}" transform="translate(${n(pos.x)} ${n(pos.y)})"><circle r="1.6" fill="transparent"/><circle r=".65" class="puck"/>${sel ? '<circle r="1.3" class="puck-ring"/>' : ''}</g></g>`;
   },
 
-  coach(o, sel, opts) {
+  coach(o) {
     const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.black;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
     return `<g class="obj coach" data-id="${o.id}">
       <g class="coach-body" transform="translate(${n(o.x)} ${n(o.y)})">
-        ${stickSVG(facingOf(o, opts.objs || []), STICK.rest)}
         <polygon class="body" points="0,-2.5 2.5,0 0,2.5 -2.5,0" fill="${color}"/>
         <text y=".65" font-size="1.8" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>
       </g>
@@ -175,10 +145,8 @@ const draw = {
     const wps = opts.numberWaypoints && o.path?.length
       ? o.path.map((p, i) => `<g class="wp-label" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.1"/><text y=".5" font-size="1.4" text-anchor="middle">${i + 1}</text></g>`).join('')
       : '';
-    const pose = opts.sim.skaterPose(o.id, 0);
     return `<g class="obj skater" data-id="${o.id}">${path}${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
-        ${stickSVG(pose.heading, pose.lat)}
         ${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>
       </g>
     </g>`;

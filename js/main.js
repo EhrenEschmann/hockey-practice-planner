@@ -1,6 +1,6 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE } from './rink.js';
 import * as G from './geometry.js';
-import { renderObjects, standaloneSVG, setStick, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
+import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
 import { makeSim, facingOf, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
 import { Store, uid, newDrill, newPractice, cloneObjects, migrateDrill } from './store.js';
 
@@ -57,7 +57,7 @@ function drawSelection() {
   if (!sel) return;
   const el = objLayer.querySelector(`[data-id="${sel}"]`);
   if (!el) { sel = null; return; }
-  const target = el.querySelector('.body, .puck-disc') || el; // body only, so the stick doesn't inflate the box
+  const target = el.querySelector('.skater-body, .puck-disc') || el;
   const handlesToHide = Array.from(el.querySelectorAll('.handle'));
   handlesToHide.forEach(h => h.style.display = 'none');
   const bb = target.getBBox();
@@ -488,10 +488,7 @@ function totalDuration() { return sim ? sim.duration() : 0; }
 function applyAnimation(t) {
   for (const o of drill().objects) {
     let el, p;
-    if (o.type === 'skater' && o.path?.length) {
-      p = sim.skaterPose(o.id, t); el = objLayer.querySelector(`.skater-body[data-skater="${o.id}"]`);
-      if (el) setStick(el.querySelector('.stick'), p.heading, p.lat);
-    }
+    if (o.type === 'skater' && o.path?.length) { p = sim.skaterPos(o.id, t); el = objLayer.querySelector(`.skater-body[data-skater="${o.id}"]`); }
     else if (o.type === 'puck') { p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`); }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
   }
@@ -706,7 +703,7 @@ const PROPS = {
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
     ['backward', 'checkbox', 'Skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
-  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['facing', 'number', 'Facing (°, blank = auto)']],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color']],
   cone: [['color', 'color', 'Color']],
   tire: [],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
@@ -725,7 +722,7 @@ function renderProps() {
   const o = sel && getObj(sel);
   if (!o) { body.innerHTML = '<p class="muted">Nothing selected. Click an object with the Select tool.</p>'; return; }
   const fields = (PROPS[o.type] || [])
-    .filter(([key]) => !(key === 'facing' && o.type === 'skater' && o.path?.length)) // a moving skater faces along its path
+    .filter(([key]) => !(key === 'facing' && o.path?.length)) // a moving skater faces along its path; facing only places a stationary skater's puck
     .map(([key, kind, label]) => {
     let input;
     const v = o[key] ?? '';
@@ -758,7 +755,7 @@ function renderProps() {
   }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
   if (o.type === 'net') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
-  if (o.type === 'coach' || (o.type === 'skater' && !o.path?.length)) extra.push(`<button data-act="face45">Turn 45°</button>`);
+  if (o.type === 'skater' && !o.path?.length) extra.push(`<button data-act="face45">Turn 45°</button>`);
   if (o.type === 'obstacle') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
   extra.push(`<button data-act="dup">Duplicate</button>`);
   extra.push(`<button data-act="del" class="danger">Delete</button>`);

@@ -31,6 +31,7 @@ export function migrateDrill(d) {
     }
   }
   for (const o of d.objects) if (o.type === 'puck') { o.events ||= []; o.carrier ??= null; o.passSpeed ??= 45; o.shotSpeed ??= 90; }
+  for (const o of d.objects) if (o.type === 'coach') { o.path ||= []; o.speed ??= 10; o.delay ??= 0; } // coaches learned to move
   return d;
 }
 
@@ -41,6 +42,7 @@ export function cloneObjects(objects) {
   return objects.map(o => {
     const c = JSON.parse(JSON.stringify(o));
     c.id = map.get(o.id);
+    if (c.trigger?.player) c.trigger.player = re(c.trigger.player);
     if (c.type === 'puck') {
       c.carrier = re(c.carrier);
       for (const ev of c.events || []) { if ('to' in ev) ev.to = re(ev.to); if ('skater' in ev) ev.skater = re(ev.skater); }

@@ -117,6 +117,21 @@ export function makeSim(drill) {
   const timings = new Map();
   const pucks = new Map();
 
+  /**
+   * When a player starts moving: their start delay, plus — if they are triggered by another player — the
+   * moment that player reaches the trigger waypoint. (A cycle of triggers falls back to the plain delay.)
+   */
+  const starting = new Set();
+  function startTime(o) {
+    let t0 = +o.delay || 0;
+    const tr = o.trigger;
+    if (tr && tr.player !== o.id && isSkater(tr.player) && !starting.has(o.id)) {
+      starting.add(o.id);
+      try { t0 += evTime(tr.player, { wp: tr.wp ?? 0, dist: tr.dist }); } finally { starting.delete(o.id); }
+    }
+    return t0;
+  }
+
   function skater(id) {
     let t = timings.get(id);
     if (!t) {
@@ -124,7 +139,7 @@ export function makeSim(drill) {
       const pts = skaterPoints(o);
       const dense = G.smoothPath(pts, SEG);
       const cum = G.cumulative(dense);
-      t = { dense, cum, len: cum[cum.length - 1], delay: +o.delay || 0, speed: Math.max(1, +o.speed || 20), nPts: pts.length, frames: carryFrames(o, dense, cum, objs) };
+      t = { dense, cum, len: cum[cum.length - 1], delay: startTime(o), speed: Math.max(1, +o.speed || 20), nPts: pts.length, frames: carryFrames(o, dense, cum, objs) };
       timings.set(id, t);
     }
     return t;
@@ -273,7 +288,7 @@ export function makeSim(drill) {
   function duration() {
     let T = 0;
     for (const o of objs) {
-      if (o.type === 'skater' && o.path?.length) T = Math.max(T, skaterEnd(o.id));
+      if (isPlayer(o) && o.path?.length) T = Math.max(T, skaterEnd(o.id));
       if (o.type === 'puck') T = Math.max(T, puck(o.id).end);
     }
     return Math.round(T * 100) / 100;

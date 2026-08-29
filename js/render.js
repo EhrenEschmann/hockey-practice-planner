@@ -24,6 +24,11 @@ function arrowHead(dense, color, size = 2.2) {
   return `<polygon points="${n(b.x)},${n(b.y)} ${p(size, Math.PI - 0.5)} ${p(size, Math.PI + 0.5)}" fill="${color}"/>`;
 }
 
+/** Numbered waypoint badges (shown while a puck is selected, or a player is triggered by a waypoint). */
+function wpLabels(o) {
+  return (o.path || []).map((p, i) => `<g class="wp-label" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.1"/><text y=".5" font-size="1.4" text-anchor="middle">${i + 1}</text></g>`).join('');
+}
+
 function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
@@ -129,11 +134,18 @@ const draw = {
       <g class="puck-disc" data-puck="${o.id}" transform="translate(${n(pos.x)} ${n(pos.y)})"><circle r="1.6" fill="transparent"/><circle r=".65" class="puck"/>${sel ? '<circle r="1.3" class="puck-ring"/>' : ''}</g></g>`;
   },
 
-  coach(o) {
+  coach(o, sel, opts) {
     const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.black;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
-    return `<g class="obj coach" data-id="${o.id}">
-      <g class="coach-body" transform="translate(${n(o.x)} ${n(o.y)})">
+    let path = '';
+    if (o.path?.length && opts.showPaths !== false) {
+      const dense = smoothPath(skaterPoints(o));
+      path = `<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" stroke-dasharray="2.5 1.5"/>${arrowHead(dense, color)}`;
+    }
+    const h = sel ? handles(o.path || []) : '';
+    const wps = opts.numberWaypoints ? wpLabels(o) : '';
+    return `<g class="obj coach" data-id="${o.id}">${path}${h}${wps}
+      <g class="coach-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         <polygon class="body" points="0,-2.5 2.5,0 0,2.5 -2.5,0" fill="${color}"/>
         <text y=".65" font-size="1.8" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>
       </g>
@@ -158,9 +170,7 @@ const draw = {
       ? `<rect class="body" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".7" fill="${color}"/>`
       : `<circle class="body" r="1.75" fill="${color}"/>`;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
-    const wps = opts.numberWaypoints && o.path?.length
-      ? o.path.map((p, i) => `<g class="wp-label" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.1"/><text y=".5" font-size="1.4" text-anchor="middle">${i + 1}</text></g>`).join('')
-      : '';
+    const wps = opts.numberWaypoints ? wpLabels(o) : '';
     return `<g class="obj skater" data-id="${o.id}">${path}${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         ${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>

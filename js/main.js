@@ -44,7 +44,8 @@ function renderCanvas() {
   const d = drill();
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
-  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: getObj(sel)?.type === 'puck' });
+  const selObj = getObj(sel);
+  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger });
   drawSelection();
   if (anim.t > 0) applyAnimation(anim.t);
   $$('#viewbar [data-view]').forEach(b => b.classList.toggle('active', sameView(VIEWS[b.dataset.view], d.view)));
@@ -57,7 +58,7 @@ function drawSelection() {
   if (!sel) return;
   const el = objLayer.querySelector(`[data-id="${sel}"]`);
   if (!el) { sel = null; return; }
-  const target = el.querySelector('.skater-body, .puck-disc') || el;
+  const target = el.querySelector('.skater-body, .coach-body, .puck-disc') || el;
   const handlesToHide = Array.from(el.querySelectorAll('.handle'));
   handlesToHide.forEach(h => h.style.display = 'none');
   const bb = target.getBBox();
@@ -97,7 +98,7 @@ function commit(fn) {
 const HINTS = {
   select: 'Click to select · drag to move · drag handles to reshape · double-click a waypoint to delete it · Delete removes',
   pan: 'Drag to pan · wheel to zoom',
-  skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater to extend',
+  skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater or coach to extend their path',
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
   cone: 'Click to place a cone', tire: 'Click to place a tire',
@@ -153,7 +154,7 @@ const MINICONE_SPACING = 3; // ft between small cones when laying a row
 function makePlaceable(type, p) {
   const count = t => drill().objects.filter(x => x.type === t).length;
   switch (type) {
-    case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black' }; }
+    case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black', speed: 10, delay: 0, path: [] }; }
     case 'skater': return { type: 'skater', x: p.x, y: p.y, label: String(count('skater') + 1), color: lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [] };
     case 'cone': return { type: 'cone', x: p.x, y: p.y, color: '#ff6a00' };
     case 'minicone': return { type: 'minicone', x: p.x, y: p.y, color: '#ffb300' };
@@ -182,6 +183,7 @@ function deleteObject(id) {
   commit(() => {
     const d = drill();
     d.objects = d.objects.filter(o => o.id !== id);
+    if (isPlayer(victim)) for (const x of d.objects) if (x.trigger?.player === id) delete x.trigger;
     if (isPlayer(victim)) for (const pk of d.objects) if (pk.type === 'puck') {
       if (pk.carrier === id) { pk.carrier = null; pk.x = victim.x; pk.y = victim.y; }
       pk.events = (pk.events || []).filter(ev => ev.to !== id && ev.skater !== id);
@@ -244,7 +246,7 @@ function onPointerDown(e) {
         select(id);
       } else if (handleEl && id) {
         const o = getObj(id);
-        drag = { type: 'handle', id, index: +handleEl.dataset.handle, key: o.type === 'skater' ? 'path' : 'points', pushed: false };
+        drag = { type: 'handle', id, index: +handleEl.dataset.handle, key: isPlayer(o) ? 'path' : 'points', pushed: false };
         select(id);
       } else if (id) {
         const o = getObj(id);
@@ -258,7 +260,8 @@ function onPointerDown(e) {
     }
     case 'skater': {
       const o = id && getObj(id);
-      if (o?.type === 'skater' && o.id !== activeSkater) {
+      if (isPlayer(o) && o.id !== activeSkater) {
+        o.path ||= [];
         activeSkater = o.id; select(o.id);
       } else if (activeSkater && getObj(activeSkater)) {
         drag = { type: 'freehand', id: activeSkater, pts: [raw], start: p };
@@ -460,7 +463,7 @@ function onDblClick(e) {
   const idEl = e.target.closest('[data-id]');
   if (tool === 'select' && handleEl && idEl) {
     const o = getObj(idEl.dataset.id);
-    const key = o.type === 'skater' ? 'path' : 'points';
+    const key = isPlayer(o) ? 'path' : 'points';
     if (key === 'points' && o.points.length <= 2) return;
     commit(() => o[key].splice(+handleEl.dataset.handle, 1));
     return;
@@ -538,7 +541,7 @@ function totalDuration() { return sim ? sim.duration() : 0; }
 function applyAnimation(t) {
   for (const o of drill().objects) {
     let el, p;
-    if (o.type === 'skater' && o.path?.length) { p = sim.skaterPos(o.id, t); el = objLayer.querySelector(`.skater-body[data-skater="${o.id}"]`); }
+    if (isPlayer(o) && o.path?.length) { p = sim.skaterPos(o.id, t); el = objLayer.querySelector(`[data-skater="${o.id}"]`); }
     else if (o.type === 'puck') { p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`); }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
   }
@@ -757,7 +760,7 @@ const PROPS = {
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
     ['backward', 'checkbox', 'Skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
-  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['facing', 'number', 'Facing (°, blank = auto)']],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
   minicone: [['color', 'color', 'Color']],
   tire: [],
@@ -798,20 +801,18 @@ function renderProps() {
     return `<label class="field inline"><span>${label}</span>${input}</label>`;
   }).join('');
 
-  const custom = o.type === 'puck' ? puckProps(o) : '';
+  const custom = o.type === 'puck' ? puckProps(o) : isPlayer(o) ? triggerProps(o) : '';
   const extra = [];
-  if (o.type === 'skater') {
+  if (isPlayer(o)) {
     const tm = sim.skater(o.id);
-    extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${o.path?.length ? '' : ' (no path yet — use the Skater tool to add waypoints)'}</p>`);
+    const hasPath = !!o.path?.length;
+    const start = tm.delay > 0 || o.trigger ? ` · starts at ${tm.delay.toFixed(1)} s` : '';
+    extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${start}${hasPath ? '' : ` (no path yet — use the Skater tool on this ${o.type} to add waypoints)`}</p>`);
     const myPuck = drill().objects.find(pk => pk.type === 'puck' && pk.carrier === o.id);
     extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
-    extra.push(`<button data-act="extend">Extend path</button>`);
-    extra.push(`<button data-act="clearpath" ${o.path?.length ? '' : 'disabled'}>Clear path</button>`);
-  }
-  if (o.type === 'coach') {
-    const myPuck = drill().objects.find(pk => pk.type === 'puck' && pk.carrier === o.id);
-    extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
-    extra.push(`<p class="muted small">A coach can receive passes and pass or shoot the puck. Facing sets which way they hold it.</p>`);
+    extra.push(`<button data-act="extend">${hasPath ? 'Extend path' : 'Add path'}</button>`);
+    extra.push(`<button data-act="clearpath" ${hasPath ? '' : 'disabled'}>Clear path</button>`);
+    if (o.type === 'coach') extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.</p>`);
   }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
   if (o.type === 'net') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
@@ -824,6 +825,17 @@ function renderProps() {
 }
 
 const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
+
+/** "Starts moving" controls for a skater or coach: at t = 0, or when another player reaches a waypoint. */
+function triggerProps(o) {
+  const tr = o.trigger;
+  const others = drill().objects.filter(s => isPlayer(s) && s.id !== o.id);
+  const opts = `<option value="" ${!tr ? 'selected' : ''}>at the start (t = 0)</option>`
+    + others.map(s => `<option value="${s.id}" ${tr?.player === s.id ? 'selected' : ''}>when ${playerName(s)} reaches…</option>`).join('');
+  const wp = tr ? `<label class="field inline"><span>…their waypoint</span><input data-prop="triggerWp" type="number" min="0" step="1" value="${tr.wp ?? 0}" title="0 = their start position, 1… = their path waypoints (numbered on the ice while this player is selected)"></label>` : '';
+  const bad = tr && !others.some(s => s.id === tr.player) ? `<p class="warn">⚠ That player no longer exists — pick another.</p>` : '';
+  return `<label class="field inline"><span>Starts moving</span><select data-prop="triggerPlayer">${opts}</select></label>${wp}${bad}${tr ? '<p class="muted small">Start delay is added after the trigger.</p>' : ''}`;
+}
 
 /** Short name for a skater or coach, e.g. "#3" or "Coach C". */
 function playerName(o) { return !o ? '?' : o.type === 'coach' ? `Coach ${escHtml(o.label)}` : `#${escHtml(o.label)}`; }
@@ -948,6 +960,12 @@ propsBody.addEventListener('input', e => {
     return;
   }
   if (!key) return;
+  if (key === 'triggerPlayer' || key === 'triggerWp') {
+    if (key === 'triggerPlayer') { if (el.value) o.trigger = { player: el.value, wp: o.trigger?.wp ?? 1 }; else delete o.trigger; el.blur(); }
+    else if (o.trigger) o.trigger.wp = Math.max(0, Math.round(+el.value || 0));
+    store.save(); renderCanvas(); renderAnimBar();
+    return;
+  }
   o[key] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? +el.value : el.value;
   if (key === 'facing') o.facing = el.value === '' ? null : +el.value;
   if (key === 'carrier') { o.carrier = el.value || null; el.blur(); }

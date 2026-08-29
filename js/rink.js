@@ -28,6 +28,9 @@ export const SVG_STYLE = `
   .arrow-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .skater-body .body{stroke:#fff;stroke-width:.3}
   .skater-body text{font-family:system-ui,sans-serif;pointer-events:none}
+  .coach-body .body{stroke:#fff;stroke-width:.35}
+  .coach-body text{font-family:system-ui,sans-serif;pointer-events:none}
+  .drop-preview{opacity:.65;pointer-events:none}
   .puck{fill:#111}
   .handle{fill:#fff;stroke:#3b82f6;stroke-width:.35;cursor:move}
   .handle:hover{fill:#bfdbfe}

@@ -16,6 +16,7 @@ npm start          # serves on http://localhost:5173
 
 - **Rink canvas** in real feet (200 × 85 NHL rink) with view presets — full ice, either half, either end zone, neutral zone — plus wheel zoom and Space/middle-mouse pan so you can plan on any piece of the ice.
 - **Equipment tools**: cones, tires, pucks, nets (rotatable), and obstacle pads (drag a box, any size/rotation).
+- **Coaches**: a labelled diamond marker (label and colour editable). Drag the Coach button straight from the toolbar onto the ice to drop one where you want it — the same drag-and-drop works for skaters, cones, tires, pucks and nets.
 - **Barricades**: click points to lay dividers across the ice; **Zones** mark labelled stations (drag a box, pick a colour, "Focus view on zone" to plan a drill in just that section).
 - **Skaters with paths**: click to place a skater, keep clicking to add waypoints (or drag to draw freehand). Paths are smoothed splines. Each skater has a label, colour, role (F/D/G), speed (ft/s), start delay, puck-carrier flag and backward-skating flag.
 - **Pucks**: use the Puck tool on a skater to give them a puck (or on open ice for a loose puck), or drag a puck onto a skater to hand it over. Select the puck to build its sequence: **Pass** to another skater when the carrier reaches a waypoint (the pass leads the receiver so it arrives where they will be), **Shoot** at a picked target (defaults to the nearest net), or **Pickup** of a loose puck. Pass/shot lines are drawn on the diagram and the puck follows the sequence during animation.
@@ -30,7 +31,7 @@ npm start          # serves on http://localhost:5173
 | Key | Action |
 |---|---|
 | V / H | Select / Pan |
-| S, A | Skater, Arrow |
+| S, K, A | Skater, Coach, Arrow |
 | C, T, P, N, O | Cone, Tire, Puck, Net, Obstacle |
 | B, Z, X, E | Barricade, Zone, Text, Erase |
 | Enter / Esc | Finish current path or polyline |
@@ -54,4 +55,4 @@ js/geometry.js   splines, arc-length sampling, path simplification
 serve.js         zero-dependency static server
 ```
 
-Data model: a **practice** has `drills[]`; a **drill** has a `view` (viewBox in feet) and `objects[]`, each with a `type` (`skater`, `cone`, `tire`, `puck`, `net`, `obstacle`, `barricade`, `zone`, `arrow`, `text`) and feet-based coordinates.
+Data model: a **practice** has `drills[]`; a **drill** has a `view` (viewBox in feet) and `objects[]`, each with a `type` (`skater`, `coach`, `cone`, `tire`, `puck`, `net`, `obstacle`, `barricade`, `zone`, `arrow`, `text`) and feet-based coordinates.

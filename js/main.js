@@ -98,6 +98,7 @@ const HINTS = {
   select: 'Click to select · drag to move · drag handles to reshape · double-click a waypoint to delete it · Delete removes',
   pan: 'Drag to pan · wheel to zoom',
   skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater to extend',
+  coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
   cone: 'Click to place a cone', tire: 'Click to place a tire', puck: 'Click a skater to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
   obstacle: 'Drag a box to add an obstacle / pad',
@@ -141,6 +142,28 @@ function addObject(o) {
 
 function newPuck(p, carrier) {
   return { type: 'puck', x: p.x, y: p.y, carrier, events: [], passSpeed: DEFAULT_PASS_SPEED, shotSpeed: DEFAULT_SHOT_SPEED };
+}
+
+/** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
+const PLACEABLE = new Set(['coach', 'skater', 'cone', 'tire', 'puck', 'net']);
+
+/** A fresh object of the given placeable type at point p (no id yet). */
+function makePlaceable(type, p) {
+  const count = t => drill().objects.filter(x => x.type === t).length;
+  switch (type) {
+    case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black' }; }
+    case 'skater': return { type: 'skater', x: p.x, y: p.y, label: String(count('skater') + 1), color: lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [] };
+    case 'cone': return { type: 'cone', x: p.x, y: p.y, color: '#ff6a00' };
+    case 'tire': return { type: 'tire', x: p.x, y: p.y };
+    case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
+    case 'puck': {
+      // Dropped onto a skater without a puck → that skater carries it.
+      const s = drill().objects.find(o => o.type === 'skater' && G.dist(o, p) < 3);
+      const taken = s && drill().objects.some(o => o.type === 'puck' && o.carrier === s.id);
+      return newPuck(p, s && !taken ? s.id : null);
+    }
+  }
+  return null;
 }
 
 function deleteObject(id) {
@@ -216,14 +239,14 @@ function onPointerDown(e) {
       } else if (activeSkater && getObj(activeSkater)) {
         drag = { type: 'freehand', id: activeSkater, pts: [raw], start: p };
       } else {
-        const count = drill().objects.filter(x => x.type === 'skater').length;
-        const s = addObject({ type: 'skater', x: p.x, y: p.y, label: String(count + 1), color: lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [] });
+        const s = addObject(makePlaceable('skater', p));
         activeSkater = s.id; select(s.id);
       }
       break;
     }
-    case 'cone': addObject({ type: 'cone', x: p.x, y: p.y, color: '#ff6a00' }); break;
-    case 'tire': addObject({ type: 'tire', x: p.x, y: p.y }); break;
+    case 'coach': select(addObject(makePlaceable('coach', p)).id); break;
+    case 'cone': addObject(makePlaceable('cone', p)); break;
+    case 'tire': addObject(makePlaceable('tire', p)); break;
     case 'puck': {
       const s = id && getObj(id);
       if (s?.type === 'skater') {
@@ -237,7 +260,7 @@ function onPointerDown(e) {
       }
       break;
     }
-    case 'net': addObject({ type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 }); break;
+    case 'net': addObject(makePlaceable('net', p)); break;
     case 'text': { const t = addObject({ type: 'text', x: p.x, y: p.y, text: 'Label', size: 3, color: '#111' }); select(t.id); focusProp('text'); break; }
     case 'obstacle':
     case 'zone': {
@@ -438,7 +461,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', a: 'arrow', c: 'cone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', a: 'arrow', c: 'cone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
@@ -523,7 +546,67 @@ $$('#viewbar [data-view]').forEach(b => b.addEventListener('click', () => setVie
 $('#btn-zoom-in').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1 / 1.25); });
 $('#btn-zoom-out').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1.25); });
 $('#snap-toggle').addEventListener('change', e => snap = e.target.checked);
-$$('#toolbar .tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+$$('#toolbar .tool').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.dragged) { delete b.dataset.dragged; return; } // the click that follows a drag-and-drop
+  setTool(b.dataset.tool);
+}));
+
+// ---------- drag a tool from the toolbar onto the ice ----------
+const canvasWrap = $('#canvas-wrap');
+const ghost = document.createElement('div');
+ghost.id = 'drag-ghost'; ghost.hidden = true;
+document.body.appendChild(ghost);
+let paletteDrag = null; // { type, btn, sx, sy, active }
+
+function overRink(e) {
+  const r = canvasWrap.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}
+
+function endPaletteDrag(e) {
+  const pd = paletteDrag; paletteDrag = null;
+  if (!pd?.active) return; // a plain click — the button's click handler picks the tool
+  ghost.hidden = true; ghost.classList.remove('over');
+  canvasWrap.classList.remove('drop-target');
+  document.body.classList.remove('palette-dragging');
+  pd.btn.dataset.dragged = '1';
+  setTimeout(() => delete pd.btn.dataset.dragged, 0);
+  drawSelection(); // clears the drop preview
+  if (e.type !== 'pointerup' || !overRink(e)) return;
+  finishActive();
+  const o = addObject(makePlaceable(pd.type, snapPt(toRink(e))));
+  select(o.id);
+  if (pd.type === 'coach') focusProp('label');
+}
+
+$$('#toolbar .tool').forEach(btn => {
+  const type = btn.dataset.tool;
+  if (!PLACEABLE.has(type)) return;
+  btn.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    paletteDrag = { type, btn, sx: e.clientX, sy: e.clientY, active: false };
+    btn.setPointerCapture(e.pointerId);
+  });
+  btn.addEventListener('pointermove', e => {
+    if (!paletteDrag || paletteDrag.btn !== btn) return;
+    if (!paletteDrag.active) {
+      if (Math.hypot(e.clientX - paletteDrag.sx, e.clientY - paletteDrag.sy) < 6) return;
+      paletteDrag.active = true;
+      ghost.innerHTML = btn.innerHTML; ghost.hidden = false;
+      document.body.classList.add('palette-dragging');
+    }
+    ghost.style.left = `${e.clientX}px`; ghost.style.top = `${e.clientY}px`;
+    const over = overRink(e);
+    ghost.classList.toggle('over', over);
+    canvasWrap.classList.toggle('drop-target', over);
+    if (over) {
+      const o = { id: 'drop-preview', ...makePlaceable(type, snapPt(toRink(e))) };
+      overlay.innerHTML = `<g class="drop-preview">${renderObjects({ objects: [o] }, null, {})}</g>`;
+    } else drawSelection();
+  });
+  btn.addEventListener('pointerup', endPaletteDrag);
+  btn.addEventListener('pointercancel', endPaletteDrag);
+});
 $('#btn-undo').addEventListener('click', doUndo);
 $('#btn-redo').addEventListener('click', doRedo);
 
@@ -620,6 +703,7 @@ const PROPS = {
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
     ['backward', 'checkbox', 'Skating backward'],
   ],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color']],
   cone: [['color', 'color', 'Color']],
   tire: [],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
@@ -630,7 +714,7 @@ const PROPS = {
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { skater: 'Skater', cone: 'Cone', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');

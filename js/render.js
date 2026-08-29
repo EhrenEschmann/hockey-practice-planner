@@ -28,7 +28,7 @@ function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
 
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'net', 'arrow', 'tire', 'cone', 'text', 'skater', 'puck'];
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'net', 'arrow', 'tire', 'cone', 'text', 'coach', 'skater', 'puck'];
 
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
@@ -111,6 +111,17 @@ const draw = {
     ).join('');
     return `<g class="obj puck" data-id="${o.id}"><g class="puck-lines">${lines}</g>
       <g class="puck-disc" data-puck="${o.id}" transform="translate(${n(pos.x)} ${n(pos.y)})"><circle r="1.6" fill="transparent"/><circle r=".65" class="puck"/>${sel ? '<circle r="1.3" class="puck-ring"/>' : ''}</g></g>`;
+  },
+
+  coach(o) {
+    const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.black;
+    const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
+    return `<g class="obj coach" data-id="${o.id}">
+      <g class="coach-body" transform="translate(${n(o.x)} ${n(o.y)})">
+        <polygon class="body" points="0,-2.5 2.5,0 0,2.5 -2.5,0" fill="${color}"/>
+        <text y=".65" font-size="1.8" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>
+      </g>
+    </g>`;
   },
 
   text(o) {

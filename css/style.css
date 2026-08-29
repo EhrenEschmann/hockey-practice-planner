@@ -27,7 +27,7 @@ textarea{resize:vertical}
 #layout{display:grid;grid-template-columns:76px 1fr 340px;flex:1;min-height:0}
 
 #toolbar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;gap:2px;padding:6px 4px;overflow-y:auto}
-#toolbar .tool{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 2px;background:transparent;border-color:transparent;font-size:10.5px;color:var(--muted)}
+#toolbar .tool{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 2px;background:transparent;border-color:transparent;font-size:10.5px;color:var(--muted);touch-action:none}
 #toolbar .tool .ico{font-size:18px;line-height:1;color:var(--text)}
 #toolbar .tool:hover{background:var(--panel-2)}
 #toolbar .tool.active{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -54,9 +54,17 @@ body[data-tool=select] #rink{cursor:default}
 body[data-tool=pan] #rink{cursor:grab}
 body[data-tool=erase] #rink{cursor:not-allowed}
 body[data-tool=cone] #rink,body[data-tool=tire] #rink,body[data-tool=puck] #rink,body[data-tool=net] #rink,
-body[data-tool=skater] #rink,body[data-tool=arrow] #rink,body[data-tool=barricade] #rink,body[data-tool=text] #rink,
+body[data-tool=skater] #rink,body[data-tool=coach] #rink,body[data-tool=arrow] #rink,body[data-tool=barricade] #rink,body[data-tool=text] #rink,
 body[data-tool=zone] #rink,body[data-tool=obstacle] #rink{cursor:crosshair}
 body.panning #rink{cursor:grabbing}
+
+/* dragging a tool from the toolbar onto the ice */
+#drag-ghost{position:fixed;z-index:1000;pointer-events:none;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 8px;background:var(--panel-2);border:1px solid var(--accent);border-radius:6px;font-size:10.5px;color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.45)}
+#drag-ghost[hidden]{display:none}
+#drag-ghost .ico{font-size:18px;line-height:1}
+#drag-ghost.over{opacity:0} /* on the ice the SVG preview takes over */
+#canvas-wrap.drop-target{box-shadow:inset 0 0 0 2px var(--accent)}
+body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 
 #sidebar{background:var(--panel);border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
 .panel{padding:10px 12px;border-bottom:1px solid var(--border)}

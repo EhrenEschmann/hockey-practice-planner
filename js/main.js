@@ -26,7 +26,7 @@ let showPaths = true;
 let lastSkaterColor = 'blue';
 let lastZoneColor = 0;
 
-const anim = { playing: false, t: 0, speed: 1, loop: true, raf: null, last: 0 };
+const anim = { playing: false, t: 0, speed: 1, loop: false, raf: null, last: 0 };
 let sim = null;          // simulation of the current drill (rebuilt on every canvas render)
 let pickTarget = null;   // { puckId, ev, kind: 'target' | 'dist' | 'bank' } while waiting for a click to set a shot target / path mark / board bounce
 

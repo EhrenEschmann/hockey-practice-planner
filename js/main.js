@@ -789,8 +789,8 @@ const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
 /** Short name for a skater or coach, e.g. "#3" or "Coach C". */
 function playerName(o) { return !o ? '?' : o.type === 'coach' ? `Coach ${escHtml(o.label)}` : `#${escHtml(o.label)}`; }
 
-function skaterOptions(val, noneLabel) {
-  const players = drill().objects.filter(isPlayer);
+function skaterOptions(val, noneLabel, exclude = null) {
+  const players = drill().objects.filter(s => isPlayer(s) && s.id !== exclude);
   return `<option value="" ${!val ? 'selected' : ''}>${noneLabel}</option>` +
     players.map(s => `<option value="${s.id}" ${s.id === val ? 'selected' : ''}>${playerName(s)} (${s.color}${s.role === 'G' ? ', G' : ''})</option>`).join('');
 }
@@ -805,6 +805,7 @@ function puckProps(o) {
     if (!rec?.ok) {
       if (ev.type === 'pickup') problem = rec?.carrier ? 'puck is already carried here' : 'pick a player';
       else if (!rec?.carrier) problem = 'nobody has the puck here';
+      else if (ev.type === 'pass' && ev.to === rec.carrier) problem = `${playerName(getObj(rec.carrier))} can't pass to themselves — pick another receiver`;
       else problem = 'pick a receiver';
     }
     const status = problem ? `<span class="warn">⚠ ${problem}</span>`
@@ -817,7 +818,7 @@ function puckProps(o) {
     const mark = `<button data-act="mark" data-ev="${i}" ${canMark ? '' : 'disabled'} title="Click a spot on the skater's path to mark where this happens (you can also drag the marker on the ice)">📍 ${onPath ? 'Move mark' : 'Mark on path'}</button>`
       + (onPath ? `<button data-act="unmark" data-ev="${i}" title="Time this by waypoint instead">✕</button>` : '');
     let body;
-    if (ev.type === 'pass') body = `<span>${who}</span>${where}<span>passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —')}</select>${mark}`;
+    if (ev.type === 'pass') body = `<span>${who}</span>${where}<span>passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', rec?.carrier)}</select>${mark}`;
     else if (ev.type === 'shoot') body = `<span>${who}</span>${where}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${mark}`;
     else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where}${mark}`;
     return `<div class="event">

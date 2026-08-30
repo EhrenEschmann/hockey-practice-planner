@@ -103,7 +103,8 @@ const HINTS = {
   goalie: 'Click near a net to put a goalie in its crease (facing out) · click open ice for a goalie anywhere',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
   cone: 'Click to place a cone', tire: 'Click to place a tire',
-  minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
+  minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click a pile to take a puck from it · click open ice for a loose puck',
+  pile: 'Click to place a pile of pucks · skaters take pucks from it ("Take puck from pile" in their panel)', net: 'Click to place a net (rotate in Selection panel)',
   obstacle: 'Drag a box to add an obstacle / pad',
   raisedpad: 'Click to place a raised pad on tires · skaters whose path runs through it slide under',
   jumppad: 'Click to place a low pad · skaters whose path runs over it jump it',
@@ -150,7 +151,7 @@ function newPuck(p, carrier) {
 }
 
 /** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
-const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'net', 'raisedpad', 'jumppad']);
+const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'pile', 'net', 'raisedpad', 'jumppad']);
 const CREASE_DEPTH = 3.5;  // ft in front of the goal line where a goalie stands
 const NET_SNAP = 8;        // ft: a goalie placed this close to a net goes into its crease
 const MINICONE_SPACING = 3; // ft between small cones when laying a row
@@ -168,6 +169,7 @@ function makePlaceable(type, p) {
     case 'cone': return { type: 'cone', x: p.x, y: p.y, color: '#ff6a00' };
     case 'minicone': return { type: 'minicone', x: p.x, y: p.y, color: '#ffb300' };
     case 'tire': return { type: 'tire', x: p.x, y: p.y };
+    case 'pile': return { type: 'pile', x: p.x, y: p.y, count: 12 };
     case 'raisedpad': return { type: 'raisedpad', x: p.x, y: p.y, w: 6, h: 2, rot: 0, label: '' };
     case 'jumppad': return { type: 'jumppad', x: p.x, y: p.y, w: 6, h: 1.5, rot: 0, label: '' };
     case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
@@ -179,6 +181,25 @@ function makePlaceable(type, p) {
     }
   }
   return null;
+}
+
+/** A puck that starts in `pile`, picked up by `player` where their path passes closest to the pile. */
+function puckFromPile(pile, player) {
+  const pk = { id: uid(), type: 'puck', x: pile.x, y: pile.y, carrier: null, pile: pile.id, events: [], passSpeed: DEFAULT_PASS_SPEED, shotSpeed: DEFAULT_SHOT_SPEED };
+  if (player) {
+    const tm = sim.skater(player.id);
+    const ev = { type: 'pickup', skater: player.id, wp: 0 };
+    if (player.path?.length) ev.dist = G.round1(G.projectOnPolyline(tm.dense, tm.cum, pile).d);
+    pk.events.push(ev);
+  }
+  return pk;
+}
+/** The pile closest to a player's path (or to the player), if there is one. */
+function nearestPile(player) {
+  const piles = drill().objects.filter(o => o.type === 'pile');
+  if (!piles.length) return null;
+  const tm = sim.skater(player.id);
+  return piles.sort((a, b) => G.projectOnPolyline(tm.dense, tm.cum, a).dist - G.projectOnPolyline(tm.dense, tm.cum, b).dist)[0];
 }
 
 /** Where a goalie stands for a net: just in front of the goal line, on the side the net opens to. */
@@ -214,6 +235,7 @@ function deleteObject(id) {
     const d = drill();
     d.objects = d.objects.filter(o => o.id !== id);
     if (isPlayer(victim)) for (const x of d.objects) if (x.trigger?.player === id) delete x.trigger;
+    if (victim?.type === 'pile') for (const pk of d.objects) if (pk.type === 'puck' && pk.pile === id) { pk.x = victim.x; pk.y = victim.y; delete pk.pile; }
     if (isPlayer(victim)) for (const pk of d.objects) if (pk.type === 'puck') {
       if (pk.carrier === id) { pk.carrier = null; pk.x = victim.x; pk.y = victim.y; }
       pk.events = (pk.events || []).filter(ev => ev.to !== id && ev.skater !== id);
@@ -280,7 +302,7 @@ function onPointerDown(e) {
         select(id);
       } else if (id) {
         const o = getObj(id);
-        if (o.type === 'puck' && o.carrier) { const q = sim.puckPos(o.id, 0); o.x = G.round1(q.x); o.y = G.round1(q.y); }
+        if (o.type === 'puck' && (o.carrier || o.pile)) { const q = sim.puckPos(o.id, 0); o.x = G.round1(q.x); o.y = G.round1(q.y); }
         drag = { type: 'move', id, start: raw, orig: JSON.parse(JSON.stringify(o)), pushed: false };
         select(id);
       } else {
@@ -306,6 +328,7 @@ function onPointerDown(e) {
     case 'cone': addObject(makePlaceable('cone', p)); break;
     case 'minicone': drag = { type: 'row', start: p }; break; // click = one cone, drag = a row (decided on pointerup)
     case 'tire': addObject(makePlaceable('tire', p)); break;
+    case 'pile': select(addObject(makePlaceable('pile', p)).id); break;
     case 'raisedpad': select(addObject(makePlaceable('raisedpad', p)).id); break;
     case 'jumppad': select(addObject(makePlaceable('jumppad', p)).id); break;
     case 'puck': {
@@ -314,6 +337,9 @@ function onPointerDown(e) {
         const existing = drill().objects.find(o => o.type === 'puck' && o.carrier === s.id);
         if (existing) select(existing.id);
         else select(addObject(newPuck(p, s.id)).id);
+      } else if (s?.type === 'pile') {
+        const pk = puckFromPile(s, null);
+        commit(() => drill().objects.push(pk)); select(pk.id);
       } else if (s?.type === 'puck') {
         select(s.id);
       } else {
@@ -383,7 +409,7 @@ function onPointerMove(e) {
       const tr = q => ({ x: G.round1(q.x + dx), y: G.round1(q.y + dy) });
       if (o.points) o.points = drag.orig.points.map(tr);
       else { Object.assign(o, tr(drag.orig)); if (o.path) o.path = drag.orig.path.map(tr); }
-      if (o.type === 'puck') o.carrier = null; // dragging detaches; dropping on a skater re-attaches (see onPointerUp)
+      if (o.type === 'puck') { o.carrier = null; delete o.pile; } // dragging detaches; dropping on a skater re-attaches (see onPointerUp)
       renderCanvas();
       break;
     }
@@ -547,7 +573,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', r: 'raisedpad', j: 'jumppad', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
@@ -592,6 +618,12 @@ function applyAnimation(t) {
       }
     }
     else if (o.type === 'puck') { p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`); }
+    else if (o.type === 'pile') {
+      // Count down as pucks are taken; before the drill starts the badge shows what the pile holds.
+      const taken = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id && (t > 0 ? (sim.puck(pk.id).info[0]?.t ?? Infinity) <= t : false)).length;
+      const badge = objLayer.querySelector(`[data-id="${o.id}"] .pile-count`);
+      if (badge) badge.textContent = Math.max(0, Math.round(+o.count || 0) - (t > 0 ? taken : drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id).length));
+    }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
   }
 }
@@ -813,6 +845,7 @@ const PROPS = {
   cone: [['color', 'color', 'Color']],
   minicone: [['color', 'color', 'Color']],
   tire: [],
+  pile: [['count', 'number', 'Pucks in pile']],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
   net: [['rot', 'number', 'Rotation (°)']],
   obstacle: [['label', 'text', 'Label'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
@@ -823,7 +856,7 @@ const PROPS = {
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');
@@ -863,7 +896,13 @@ function renderProps() {
     extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
     extra.push(`<button data-act="extend">${hasPath ? 'Extend path' : 'Add path'}</button>`);
     extra.push(`<button data-act="clearpath" ${hasPath ? '' : 'disabled'}>Clear path</button>`);
+    if (drill().objects.some(x => x.type === 'pile')) extra.push(`<button data-act="takepuck" title="Add a puck they pick up from the nearest pile where their path passes it">Take puck from pile</button>`);
     if (o.type === 'coach') extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.</p>`);
+  }
+  if (o.type === 'pile') {
+    const taken = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id);
+    extra.push(`<p class="muted">${taken.length} taken so far · ${Math.max(0, Math.round(+o.count || 0) - taken.length)} left</p>`);
+    extra.push(`<label class="field inline"><span>Give a puck to</span><select data-prop="pilegive">${skaterOptions('', '— choose a player —')}</select></label>`);
   }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
   if (o.type === 'net') {
@@ -965,7 +1004,7 @@ function puckProps(o) {
       <div class="event-body">${body}</div>
     </div>`;
   }).join('');
-  return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, 'Loose on the ice')}</select></label>
+  return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, o.pile ? 'In the puck pile' : 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
     <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
     <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives, B = a board bounce) — drag them to move them. Drag the puck onto a skater to hand it over.</p>`;
@@ -1017,6 +1056,11 @@ propsBody.addEventListener('input', e => {
     return;
   }
   if (!key) return;
+  if (key === 'pilegive') {
+    const player = getObj(el.value); el.value = '';
+    if (player) { const pk = puckFromPile(o, player); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); }
+    return;
+  }
   if (key === 'triggerPlayer' || key === 'triggerWp') {
     if (key === 'triggerPlayer') { if (el.value) o.trigger = { player: el.value, wp: o.trigger?.wp ?? 1 }; else delete o.trigger; el.blur(); }
     else if (o.trigger) o.trigger.wp = Math.max(0, Math.round(+el.value || 0));
@@ -1025,7 +1069,7 @@ propsBody.addEventListener('input', e => {
   }
   o[key] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? +el.value : el.value;
   if (key === 'facing') o.facing = el.value === '' ? null : +el.value;
-  if (key === 'carrier') { o.carrier = el.value || null; el.blur(); }
+  if (key === 'carrier') { o.carrier = el.value || null; if (o.carrier) delete o.pile; el.blur(); }
   if (o.type === 'skater' && key === 'color') lastSkaterColor = o.color;
   store.save(); renderCanvas(); renderAnimBar();
 });
@@ -1052,6 +1096,7 @@ propsBody.addEventListener('click', e => {
     case 'addgoalie': { const g = { id: uid(), ...makeGoalie(o) }; commit(() => drill().objects.push(g)); select(g.id); renderProps(); break; }
     case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
     case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
+    case 'takepuck': { const pile = nearestPile(o); if (!pile) break; const pk = puckFromPile(pile, o); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'givepuck': { const pk = { id: uid(), ...newPuck(o, o.id) }; commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }
     case 'addpass': case 'addshoot': case 'addpickup': {

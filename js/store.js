@@ -45,6 +45,7 @@ export function cloneObjects(objects) {
     if (c.trigger?.player) c.trigger.player = re(c.trigger.player);
     if (c.type === 'puck') {
       c.carrier = re(c.carrier);
+      if (c.pile) c.pile = re(c.pile);
       for (const ev of c.events || []) { if ('to' in ev) ev.to = re(ev.to); if ('skater' in ev) ev.skater = re(ev.skater); }
     }
     return c;

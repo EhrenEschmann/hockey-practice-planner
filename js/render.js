@@ -33,14 +33,14 @@ function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
 
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'text', 'coach', 'skater', 'puck'];
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck'];
 
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
     .map((o, i) => ({ o, i }))
     .sort((a, b) => (Z_ORDER.indexOf(a.o.type) - Z_ORDER.indexOf(b.o.type)) || (a.i - b.i))
     .map(x => x.o);
-  const o2 = { ...opts, sim: opts.sim || makeSim(drill) };
+  const o2 = { ...opts, sim: opts.sim || makeSim(drill), objs: drill.objects };
   // Raised pads are drawn in two parts: tires in normal order, and the slab on top of everything so
   // skaters visibly slide underneath it.
   return objs.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
@@ -126,6 +126,21 @@ const draw = {
     return `<g class="obj cone" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
       <ellipse cy=".7" rx="1.3" ry=".5" fill="#333"/>
       <polygon points="0,-1.4 -1,.7 1,.7" fill="${c}" stroke="#7a3300" stroke-width=".15"/>
+    </g>`;
+  },
+
+  pile(o, sel, opts) {
+    // A heap of pucks: a few discs in a fixed scatter plus a badge with how many are left.
+    const spots = [[0, 0], [1.1, .3], [-1, .5], [.4, -1], [-.5, -.9], [1.3, -.8], [-1.3, -.4]];
+    const count = Math.max(0, Math.round(+o.count || 0));
+    const taken = (opts.objs || []).filter(p => p.type === 'puck' && p.pile === o.id).length;
+    const left = Math.max(0, count - taken);
+    const discs = spots.slice(0, Math.min(spots.length, Math.max(1, left))).map(([x, y]) => `<circle cx="${n(x)}" cy="${n(y)}" r=".65" class="puck"/>`).join('');
+    return `<g class="obj pile" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
+      <circle r="3.4" fill="transparent"/>
+      <circle r="2.6" fill="#fff" fill-opacity=".6" stroke="#666" stroke-width=".2" stroke-dasharray=".6 .5"/>
+      ${discs}
+      <g class="pile-badge" transform="translate(2.3 -2.1)"><circle r="1.25" fill="#fff" stroke="#333" stroke-width=".2"/><text class="pile-count" y=".5" font-size="1.4" text-anchor="middle" fill="#111" font-weight="700">${left}</text></g>
     </g>`;
   },
 

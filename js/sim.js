@@ -245,7 +245,9 @@ export function makeSim(drill) {
     const segs = [], info = [];
     let t = 0;
     let carrier = isSkater(p.carrier) ? p.carrier : null;
-    let loose = { x: p.x, y: p.y };
+    // A puck taken from a pile starts in the pile (and follows it if the pile is moved).
+    const pile = p.pile ? byId(p.pile) : null;
+    let loose = pile?.type === 'pile' ? { x: pile.x, y: pile.y } : { x: p.x, y: p.y };
     const passSpeed = +p.passSpeed || DEFAULT_PASS_SPEED;
     const shotSpeed = +p.shotSpeed || DEFAULT_SHOT_SPEED;
 

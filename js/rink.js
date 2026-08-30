@@ -47,6 +47,7 @@ export const SVG_STYLE = `
   .coach-body text{font-family:system-ui,sans-serif;pointer-events:none}
   .drop-preview{opacity:.65;pointer-events:none}
   .puck{fill:#111}
+  .pile-count{font-family:system-ui,sans-serif;pointer-events:none}
   .handle{fill:#fff;stroke:#3b82f6;stroke-width:.35;cursor:move}
   .handle:hover{fill:#bfdbfe}
   .obj{cursor:pointer}

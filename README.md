@@ -25,6 +25,7 @@ npm start          # serves on http://localhost:5173
 - **Barricades**: click points to lay dividers across the ice; **Zones** mark labelled stations (drag a box, pick a colour, "Focus view on zone" to plan a drill in just that section).
 - **Skaters with paths**: click to place a skater, keep clicking to add waypoints (or drag to draw freehand). Paths are smoothed splines. Each skater has a label, colour, role (F/D/G), speed (ft/s), start delay, puck-carrier flag and backward-skating flag.
 - **Puck carrying**: a carried puck leads the skater — it sits about 4.5 ft ahead in the direction they face (along their path, reversed when skating backward; a stationary skater faces the nearest net, or a manual **Facing** angle). During animation the puck stickhandles: it rides on the forehand side on straights, swings to the outside of turns, and is pulled to the far side of any cone or tire the skater passes within 6 ft of, so weaving through cones moves the puck from side to side.
+- **Puck pile**: a heap of pucks (count editable) that skaters take from. *Take puck from pile* in a skater's panel adds a puck that sits in the pile until that skater's path passes it, then rides with them — add passes/shots after. The pile's panel can *Give a puck to…* any player, and the Puck tool on a pile takes a loose one. The pile's badge counts down during animation, and pucks in it move with the pile.
 - **Pucks**: use the Puck tool on a skater to give them a puck (or on open ice for a loose puck), or drag a puck onto a skater to hand it over. Select the puck to build its sequence: **Pass** to another skater when the carrier reaches a waypoint (the pass leads the receiver so it arrives where they will be), **Shoot** at a picked target (defaults to the nearest net), or **Pickup** of a loose puck. Each event fires either when the skater reaches a waypoint or at a spot **marked on the path**: click *Mark on path* and then the path, or drag the P / S / U marker along the path on the ice (stored as feet along the path, so it moves with the skater). A pass can be timed by either end: *released when the passer is at …* or *arriving as the receiver reaches …* — the latter back-computes the release so the puck meets a moving receiver exactly at their waypoint or R mark (handy for a coach or a waiting skater feeding a player on the move); if the passer doesn't have the puck early enough, the row warns that it arrives late. Tick **off the boards** for a bank pass: the puck goes passer → boards → receiver via a bounce point that snaps to the boards (drag the B marker or click *Bounce point…*), and the receiver may be the passer themselves — skate on and collect your own bank pass. Pass/shot lines and the markers are drawn on the diagram and the puck follows the sequence during animation.
 - **Animation**: play/pause/stop, scrub timeline, playback speed, loop. Total drill time is derived from each skater's path length ÷ speed + delay.
 - **Arrows & text** for annotations (skate / pass / shot / backward styles).
@@ -38,7 +39,7 @@ npm start          # serves on http://localhost:5173
 |---|---|
 | V / H | Select / Pan |
 | S, K, G, A | Skater, Coach, Goalie, Arrow |
-| C, M, T, P, N, O, R, J | Cone, Small cone, Tire, Puck, Net, Obstacle, Raised pad, Jump pad |
+| C, M, T, P, L, N, O, R, J | Cone, Small cone, Tire, Puck, Puck pile, Net, Obstacle, Raised pad, Jump pad |
 | B, Z, X, E | Barricade, Zone, Text, Erase |
 | Enter / Esc | Finish current path or polyline |
 | Delete | Remove selection |
@@ -61,4 +62,4 @@ js/geometry.js   splines, arc-length sampling, path simplification
 serve.js         zero-dependency static server
 ```
 
-Data model: a **practice** has `drills[]`; a **drill** has a `view` (viewBox in feet) and `objects[]`, each with a `type` (`skater`, `coach`, `cone`, `minicone`, `tire`, `raisedpad`, `jumppad`, `puck`, `net`, `obstacle`, `barricade`, `zone`, `arrow`, `text`) and feet-based coordinates.
+Data model: a **practice** has `drills[]`; a **drill** has a `view` (viewBox in feet) and `objects[]`, each with a `type` (`skater`, `coach`, `cone`, `minicone`, `tire`, `raisedpad`, `jumppad`, `pile`, `puck`, `net`, `obstacle`, `barricade`, `zone`, `arrow`, `text`) and feet-based coordinates.

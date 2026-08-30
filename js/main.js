@@ -3,6 +3,7 @@ import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
 import { Store, uid, newDrill, newPractice, cloneObjects, migrateDrill } from './store.js';
+import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1172,13 +1173,12 @@ $('#file-import').addEventListener('change', async e => {
   try {
     const data = JSON.parse(await f.text());
     const list = data.practice ? [data.practice] : data.practices ? data.practices : Array.isArray(data) ? data : [data];
-    let last = null;
     for (const p of list) {
       if (!p || !Array.isArray(p.drills)) throw new Error('Not a practice file');
       p.id = uid(); p.drills.forEach(d => { d.id = uid(); d.view = d.view || { ...VIEWS.full }; d.objects = cloneObjects(migrateDrill(d).objects); });
-      store.data.practices.push(p); last = p.id;
+      finishActive(); store.addPractice(p); // each import is an edit, so it is auto-saved to the cloud too
     }
-    finishActive(); store.switchPractice(last); sel = null; stopAnim(); renderAll();
+    sel = null; stopAnim(); renderAll();
   } catch (err) { alert('Import failed: ' + err.message); }
 });
 
@@ -1216,6 +1216,35 @@ $('#btn-print').addEventListener('click', () => {
       </div>`).join('')}`;
   window.print();
 });
+
+// ---------- cloud sync (Firebase) ----------
+const CLOUD_LABELS = { signedout: 'Not signed in (local only)', syncing: 'Syncing…', saving: 'Saving…', saved: 'Saved ✓', error: 'Cloud error' };
+function renderCloudStatus(sync, state, detail) {
+  const u = sync.user;
+  $('#cloud-status').textContent = (u && state !== 'signedout' ? `${u.name} · ` : '') + (CLOUD_LABELS[state] || '') + (state === 'error' && detail ? ` (${detail})` : '');
+  $('#cloud-status').classList.toggle('warn', state === 'error');
+  $('#btn-signin').hidden = !!u;
+  $('#btn-signout').hidden = !u;
+}
+(async () => {
+  // `globalThis.__hppBackend` lets tests plug in a fake backend; otherwise use Firebase when configured.
+  let backend = globalThis.__hppBackend || null;
+  if (!backend) { const cfg = await loadConfig(); if (cfg) backend = await firebaseBackend(cfg); }
+  if (!backend) return; // no config: local-only, the cloud controls stay hidden
+  $('#cloud').hidden = false;
+  const sync = createSync({
+    store, backend,
+    onStatus: (state, detail) => renderCloudStatus(sync, state, detail),
+    onRemote: ids => {
+      // Practices changed from another device (or first sync): refresh what is on screen.
+      if (ids.includes(store.data.currentId) || !store.practice) { finishActive(); sel = null; stopAnim(); renderAll(); }
+      else renderPracticeSelect();
+    },
+  });
+  $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
+  $('#btn-signout').addEventListener('click', () => sync.signOut().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
+  renderCloudStatus(sync, 'signedout');
+})();
 
 // ---------- boot ----------
 setTool('select');

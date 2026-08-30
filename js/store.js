@@ -73,10 +73,22 @@ export class Store {
     return p.drills[this.drillIndex];
   }
 
+  /** An edit was made to the current practice: stamp it, persist locally and notify cloud sync (if any). */
   save() {
+    if (this.practice) this.practice.updatedAt = Date.now();
+    this.persist();
+    this.onSave?.(this.practice);
+  }
+
+  /** Write everything to browser storage without marking anything as edited. */
+  persist() {
     try { localStorage.setItem(KEY, JSON.stringify(this.data)); }
     catch (e) { console.warn('Save failed', e); }
   }
+
+  /** Normalise every practice (used after practices arrive from the cloud). */
+  migrate() { for (const p of this.data.practices) for (const d of p.drills || []) migrateDrill(d); }
+  blankPractice() { return newPractice(); }
 
   snapshot() { return JSON.stringify(this.practice); }
 
@@ -118,15 +130,17 @@ export class Store {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.pending = null;
-    this.save();
+    this.persist(); // switching is not an edit
   }
   addPractice(p) {
     this.data.practices.push(p);
     this.switchPractice(p.id);
+    this.save(); // a new practice is an edit: stamp it so it is uploaded
   }
   deletePractice(id) {
     this.data.practices = this.data.practices.filter(p => p.id !== id);
-    if (!this.data.practices.length) this.data.practices.push(newPractice());
-    this.switchPractice(this.data.practices[0].id);
+    this.onDelete?.(id);
+    if (!this.data.practices.length) { this.data.practices.push(newPractice()); this.switchPractice(this.data.practices[0].id); this.save(); }
+    else this.switchPractice(this.data.practices[0].id);
   }
 }

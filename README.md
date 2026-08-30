@@ -12,6 +12,18 @@ npm start          # serves on http://localhost:5173
 
 (Any static file server works, e.g. `python3 -m http.server 5173`.)
 
+## Cloud save (Firebase)
+
+Practices auto-save to Firebase so they follow you between devices. Without a config the app keeps working local-only (browser storage), exactly as before.
+
+1. Create a Firebase project, add a **Web app**, and copy its config.
+2. Enable **Authentication → Sign-in method → Google**.
+3. Create a **Firestore** database and paste [firestore.rules](firestore.rules) as its rules (each user can only read/write their own practices).
+4. `cp js/firebase-config.example.js js/firebase-config.js` and paste the config in. (The file is git-ignored; putting it at the project root as `firebase-config.js` works too.)
+5. Reload: a **Sign in** button appears in the top bar.
+
+Once signed in, every edit is written about a second after you stop making changes (status shows *Saving… / Saved to cloud ✓*), deletes propagate, and edits from another device appear live. On sign-in, local and cloud practices are merged — the newer copy of each practice wins and practices that exist only on one side are copied to the other. Data lives at `users/{uid}/practices/{practiceId}`, one document per practice. The SDK is loaded from Google's CDN, so there is still no build step.
+
 ## Features
 
 - **Rink canvas** in real feet (200 × 85 NHL rink) with view presets — full ice, either half, either end zone, neutral zone — plus wheel zoom and Space/middle-mouse pan so you can plan on any piece of the ice.
@@ -57,6 +69,7 @@ js/main.js       tools, pointer/keyboard handling, animation, sidebar, import/ex
 js/render.js     SVG rendering of drill objects (pure functions of state)
 js/rink.js       rink drawing, view presets, SVG styles
 js/store.js      practice/drill data model, localStorage persistence, undo/redo
+js/cloud.js      Firebase auto-save & live sync (Firestore + Google sign-in); no-op without a config
 js/sim.js        skater timing and puck timeline (carry / pass / shoot / pickup)
 js/geometry.js   splines, arc-length sampling, path simplification
 serve.js         zero-dependency static server

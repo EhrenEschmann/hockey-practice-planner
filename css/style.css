@@ -22,7 +22,10 @@ textarea{resize:vertical}
 
 #topbar{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
 #topbar .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
-#topbar select{width:220px}
+#topbar select{width:200px}
+#topbar button{white-space:nowrap}
+#cloud{display:flex;align-items:center;gap:6px;min-width:0}
+#cloud-status{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 #layout{display:grid;grid-template-columns:76px 1fr 340px;flex:1;min-height:0}
 

@@ -25,6 +25,8 @@ let spaceDown = false;
 let snap = false;
 let showPaths = true;
 let lastSkaterColor = 'blue';
+const SIDES = { O: { color: 'blue', name: 'Offense' }, D: { color: 'red', name: 'Defense' } };
+let newSide = 'O';            // side (and colour) given to newly placed skaters
 let lastZoneColor = 0;
 
 const anim = { playing: false, t: 0, speed: 1, loop: false, raf: null, last: 0 };
@@ -162,7 +164,12 @@ function makePlaceable(type, p) {
   const count = t => drill().objects.filter(x => x.type === t).length;
   switch (type) {
     case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black', speed: 10, delay: 0, path: [] }; }
-    case 'skater': return { type: 'skater', x: p.x, y: p.y, label: String(count('skater') + 1), color: lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [] };
+    case 'skater': {
+      // Offense (blue) or defense (red), numbered per side; a custom last colour is used when no side is set.
+      const side = SIDES[newSide] ? newSide : null;
+      const n = drill().objects.filter(x => x.type === 'skater' && x.role !== 'G' && (side ? x.side === side : !x.side)).length + 1;
+      return { type: 'skater', x: p.x, y: p.y, label: String(n), color: side ? SIDES[side].color : lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [], ...(side ? { side } : {}) };
+    }
     case 'goalie': {
       const net = drill().objects.filter(o => o.type === 'net' && G.dist(o, p) < NET_SNAP).sort((a, b) => G.dist(a, p) - G.dist(b, p))[0];
       return makeGoalie(net, p);
@@ -685,6 +692,10 @@ $$('#viewbar [data-view]').forEach(b => b.addEventListener('click', () => setVie
 $('#btn-zoom-in').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1 / 1.25); });
 $('#btn-zoom-out').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1.25); });
 $('#snap-toggle').addEventListener('change', e => snap = e.target.checked);
+$$('#toolbar [data-side]').forEach(b => b.addEventListener('click', () => {
+  newSide = b.dataset.side;
+  $$('#toolbar [data-side]').forEach(x => x.classList.toggle('active', x === b));
+}));
 $$('#toolbar .tool').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.dragged) { delete b.dataset.dragged; return; } // the click that follows a drag-and-drop
   setTool(b.dataset.tool);
@@ -838,7 +849,7 @@ for (const [id, key] of [['#drill-name', 'name'], ['#drill-duration', 'duration'
 // ---------- selection properties ----------
 const PROPS = {
   skater: [
-    ['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['role', 'select:F=Forward,D=Defense,G=Goalie', 'Role'],
+    ['label', 'text', 'Label'], ['side', 'select:=— none —,O=Offense (blue),D=Defense (red)', 'Side'], ['color', 'swatch', 'Color'], ['role', 'select:F=Forward,D=Defense,G=Goalie', 'Role'],
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
     ['backward', 'checkbox', 'Skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
@@ -1072,6 +1083,7 @@ propsBody.addEventListener('input', e => {
   if (key === 'facing') o.facing = el.value === '' ? null : +el.value;
   if (key === 'carrier') { o.carrier = el.value || null; if (o.carrier) delete o.pile; el.blur(); }
   if (o.type === 'skater' && key === 'color') lastSkaterColor = o.color;
+  if (key === 'side') { if (SIDES[o.side]) o.color = SIDES[o.side].color; else delete o.side; el.blur(); }
   store.save(); renderCanvas(); renderAnimBar();
 });
 propsBody.addEventListener('change', () => { store.commitPending(); renderUI(); });

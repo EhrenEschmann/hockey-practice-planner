@@ -41,7 +41,13 @@ textarea{resize:vertical}
 #animbar{border-bottom:none;border-top:1px solid var(--border)}
 #viewbar .label{color:var(--muted)}
 #viewbar button.active{background:var(--accent);border-color:var(--accent)}
-#hint{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+#toolbar .side-switch{display:flex;margin:0 4px 2px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+#toolbar .side-switch button{flex:1;display:flex;align-items:center;justify-content:center;gap:3px;padding:3px 0;border:none;border-radius:0;background:transparent;font-size:11px;color:var(--muted)}
+#toolbar .side-switch button+button{border-left:1px solid var(--border)}
+#toolbar .side-switch button.active{background:var(--panel-2);color:var(--text)}
+#toolbar .side-switch .dot{width:8px;height:8px;border-radius:50%;border:1px solid #fff;display:inline-block}
+#viewbar{flex-wrap:nowrap}
+#hint{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:0;text-align:right}
 label.check{display:flex;align-items:center;gap:5px;white-space:nowrap}
 #animbar label{display:flex;align-items:center;gap:5px;white-space:nowrap}
 #animbar select{width:auto}

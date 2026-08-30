@@ -38,6 +38,10 @@
     <button class="tool" data-tool="pan"       title="Pan (H) — or hold Space / middle mouse"><span class="ico">✋</span><span>Pan</span></button>
     <div class="tool-sep"></div>
     <button class="tool" data-tool="skater"    title="Skater + path (S) — or drag onto the ice"><span class="ico">⛸</span><span>Skater</span></button>
+    <div class="side-switch" title="New skaters: O = offense (blue), D = defense (red)">
+      <button data-side="O" class="active" title="New skaters are offensive players (blue)"><span class="dot" style="background:#1e56d6"></span>O</button>
+      <button data-side="D" title="New skaters are defensive players (red)"><span class="dot" style="background:#d62828"></span>D</button>
+    </div>
     <button class="tool" data-tool="coach"     title="Coach (K) — click to place, or drag onto the ice"><span class="ico">📋</span><span>Coach</span></button>
     <button class="tool" data-tool="goalie"    title="Goalie (G) — click or drop near a net to put a goalie in its crease"><span class="ico">🧤</span><span>Goalie</span></button>
     <button class="tool" data-tool="arrow"     title="Arrow annotation (A)"><span class="ico">➚</span><span>Arrow</span></button>
@@ -73,7 +77,7 @@
       <button id="btn-zoom-in" title="Zoom in">+</button>
       <span class="sep"></span>
       <label class="check"><input type="checkbox" id="snap-toggle"> Snap to 1 ft</label>
-      <div class="spacer"></div>
+
       <span id="hint"></span>
     </div>
 
@@ -133,6 +137,7 @@
         <li><b>Goalie:</b> click (or drag the Goalie button) near a net and the goalie is placed in the crease facing out; or select a net and press <b>Add goalie</b>.</li>
         <li><b>Coach:</b> a diamond marker with a label. Coaches can receive passes and pass or shoot — use the Puck tool on a coach (or drop a puck on them) and set their Facing. They can move too: use the Skater tool on a coach to give them a path.</li>
         <li><b>Starts moving:</b> in a skater's or coach's panel, choose "when #1 reaches…" and a waypoint — they wait until that player gets there (plus their start delay).</li>
+        <li><b>Offense / Defense:</b> the O / D switch under the Skater tool colours new skaters blue (offense) or red (defense), numbered per side. Change a skater's side (and colour) in its Selection panel.</li>
         <li><b>Skater:</b> click to place, keep clicking to add waypoints (or drag to draw freehand). Enter/Esc finishes. Click an existing skater to extend its path.</li>
         <li><b>Puck pile:</b> place a pile, then in a skater's panel press <b>Take puck from pile</b> — they pick one up where their path passes the pile (or use <b>Give a puck to…</b> on the pile). Then add passes and shots as usual.</li>
         <li><b>Passes &amp; shots:</b> select a puck, add a Pass/Shoot, then <b>Mark on path</b> and click where on the skater's path it happens — or drag the P / S marker along the path. A pass to a moving player can instead be timed by the receiver ("arriving as #2 reaches …") — the R marker shows where they get it. Tick <b>off the boards</b> for a bank pass (drag the B marker along the boards) — a player can bank it to themselves.</li>

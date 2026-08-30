@@ -41,6 +41,7 @@ export const SVG_STYLE = `
   .path-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .arrow-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .skater-body .body{stroke:#fff;stroke-width:.3}
+  .skater-body.sliding .body{stroke-dasharray:.6 .4}
   .skater-body text{font-family:system-ui,sans-serif;pointer-events:none}
   .coach-body .body{stroke:#fff;stroke-width:.35}
   .coach-body text{font-family:system-ui,sans-serif;pointer-events:none}

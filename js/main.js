@@ -1,7 +1,7 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
-import { makeSim, facingOf, isPlayer, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
+import { makeSim, facingOf, isPlayer, underPad, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
 import { Store, uid, newDrill, newPractice, cloneObjects, migrateDrill } from './store.js';
 
 const $ = s => document.querySelector(s);
@@ -105,6 +105,7 @@ const HINTS = {
   cone: 'Click to place a cone', tire: 'Click to place a tire',
   minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
   obstacle: 'Drag a box to add an obstacle / pad',
+  raisedpad: 'Click to place a raised pad on tires · skaters whose path runs through it slide under',
   barricade: 'Click points to lay a barricade · double-click or Enter to finish',
   zone: 'Drag a box to mark a section / station',
   text: 'Click to place a text label',
@@ -148,7 +149,7 @@ function newPuck(p, carrier) {
 }
 
 /** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
-const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'net']);
+const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'net', 'raisedpad']);
 const CREASE_DEPTH = 3.5;  // ft in front of the goal line where a goalie stands
 const NET_SNAP = 8;        // ft: a goalie placed this close to a net goes into its crease
 const MINICONE_SPACING = 3; // ft between small cones when laying a row
@@ -166,6 +167,7 @@ function makePlaceable(type, p) {
     case 'cone': return { type: 'cone', x: p.x, y: p.y, color: '#ff6a00' };
     case 'minicone': return { type: 'minicone', x: p.x, y: p.y, color: '#ffb300' };
     case 'tire': return { type: 'tire', x: p.x, y: p.y };
+    case 'raisedpad': return { type: 'raisedpad', x: p.x, y: p.y, w: 6, h: 2, rot: 0, label: '' };
     case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
     case 'puck': {
       // Dropped onto a skater or coach without a puck → they carry it.
@@ -302,6 +304,7 @@ function onPointerDown(e) {
     case 'cone': addObject(makePlaceable('cone', p)); break;
     case 'minicone': drag = { type: 'row', start: p }; break; // click = one cone, drag = a row (decided on pointerup)
     case 'tire': addObject(makePlaceable('tire', p)); break;
+    case 'raisedpad': select(addObject(makePlaceable('raisedpad', p)).id); break;
     case 'puck': {
       const s = id && getObj(id);
       if (isPlayer(s)) {
@@ -541,7 +544,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', r: 'raisedpad', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
@@ -566,9 +569,18 @@ function doRedo() { if (store.redo()) { sel = null; renderAll(); } }
 function totalDuration() { return sim ? sim.duration() : 0; }
 
 function applyAnimation(t) {
+  const pads = drill().objects.filter(o => o.type === 'raisedpad');
   for (const o of drill().objects) {
     let el, p;
-    if (isPlayer(o) && o.path?.length) { p = sim.skaterPos(o.id, t); el = objLayer.querySelector(`[data-skater="${o.id}"]`); }
+    if (isPlayer(o) && o.path?.length) {
+      p = sim.skaterPose(o.id, t); el = objLayer.querySelector(`[data-skater="${o.id}"]`);
+      if (el && o.type === 'skater') {
+        // Under a raised pad the skater slides: body stretched along their heading and flattened.
+        const sliding = pads.some(pd => underPad(p, pd, 1));
+        el.classList.toggle('sliding', sliding);
+        el.querySelector('.body')?.setAttribute('transform', sliding ? `rotate(${(p.heading * 180 / Math.PI).toFixed(1)}) scale(1.7 .55)` : '');
+      }
+    }
     else if (o.type === 'puck') { p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`); }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
   }
@@ -794,12 +806,13 @@ const PROPS = {
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
   net: [['rot', 'number', 'Rotation (°)']],
   obstacle: [['label', 'text', 'Label'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
+  raisedpad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   zone: [['label', 'text', 'Label'], ['color', 'zoneswatch', 'Color'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)']],
   barricade: [],
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');
@@ -848,7 +861,8 @@ function renderProps() {
     extra.push(`<button data-act="rot90">Rotate 90°</button>`);
   }
   if (isPlayer(o) && !o.path?.length) extra.push(`<button data-act="face45">Turn 45°</button>`);
-  if (o.type === 'obstacle') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  if (o.type === 'obstacle' || o.type === 'raisedpad') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  if (o.type === 'raisedpad') extra.push(`<p class="muted small">Skaters whose path runs under the pad slide under it, pushing the puck ahead.</p>`);
   extra.push(`<button data-act="dup">Duplicate</button>`);
   extra.push(`<button data-act="del" class="danger">Delete</button>`);
 

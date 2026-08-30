@@ -22,15 +22,27 @@ export const CARRY = {
   weaveTau: 0.6,    // ft of travel over which the puck darts to the other side (quick hands)
   weaveReach: 2,    // a small cone within this many ft (ahead/behind) of the puck is the one being handled
   weaveOffset: 3.5, // small cones further than this from the path are ignored
+  // Sliding under a raised pad: the puck is pushed straight ahead and further out.
+  slideLead: 3,     // extra ft the puck is pushed ahead while sliding under a pad
+  slideReach: 3,    // ft before/after the pad's edge where the slide (and the push) begins/ends
 };
+
+/** Is point p within `margin` ft of a raised pad's footprint (a w x h rectangle rotated by pad.rot)? */
+export function underPad(p, pad, margin = 1) {
+  const a = -(pad.rot || 0) * Math.PI / 180;
+  const dx = p.x - pad.x, dy = p.y - pad.y;
+  const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+  return Math.abs(lx) <= (pad.w || 6) / 2 + margin && Math.abs(ly) <= (pad.h || 2) / 2 + margin;
+}
 
 /** A skater's full path: its own position followed by its waypoints. */
 export function skaterPoints(o) { return [{ x: o.x, y: o.y }, ...(o.path || [])]; }
 
-/** World position of a carried puck for a skater pose {x, y, heading (rad), lat}. */
+/** World position of a carried puck for a skater pose {x, y, heading (rad), lat, lead?}. */
 export function carriedPuckPos(pose) {
   const c = Math.cos(pose.heading), s = Math.sin(pose.heading);
-  return { x: pose.x + c * CARRY.lead - s * pose.lat, y: pose.y + s * CARRY.lead + c * pose.lat };
+  const lead = pose.lead ?? CARRY.lead;
+  return { x: pose.x + c * lead - s * pose.lat, y: pose.y + s * lead + c * pose.lat };
 }
 
 const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
@@ -59,7 +71,7 @@ export function facingOf(o, objs = []) {
  */
 function carryFrames(o, dense, cum, objs) {
   const len = cum[cum.length - 1];
-  if (len < 0.01) return { step: 0, h: [facingOf(o, objs)], l: [CARRY.rest] };
+  if (len < 0.01) return { step: 0, h: [facingOf(o, objs)], l: [CARRY.rest], f: [CARRY.lead] };
   const flip = o.backward ? Math.PI : 0;
   const N = Math.max(2, Math.ceil(len / CARRY.step) + 1);
   const step = len / (N - 1);
@@ -72,8 +84,9 @@ function carryFrames(o, dense, cum, objs) {
     .sort((a, b) => a.d - b.d)
     .map((s, i) => ({ c: s.c, side: i % 2 ? -1 : 1 }));
   const easeFast = 1 - Math.exp(-step / CARRY.weaveTau);
-  const h = [], l = [];
-  let lat = null, prevH = null;
+  const pads = objs.filter(x => x.type === 'raisedpad');
+  const h = [], l = [], f = [];
+  let lat = null, lead = CARRY.lead, prevH = null;
   for (let i = 0; i < N; i++) {
     const d = i * step;
     const p = G.pointAt(dense, cum, d);
@@ -98,10 +111,14 @@ function carryFrames(o, dense, cum, objs) {
       if (off < best && Math.abs(ly) < CARRY.weaveOffset) { best = off; handling = { ly, side: s.side }; }
     }
     if (handling) { target = handling.ly + handling.side * CARRY.weave; k = easeFast; }
+    // Sliding under a raised pad: push the puck straight ahead and further out, then slide after it.
+    let leadTarget = CARRY.lead;
+    if (pads.some(pd => underPad(p, pd, CARRY.slideReach))) { target = 0; leadTarget = CARRY.lead + CARRY.slideLead; k = easeFast; }
     lat = lat === null ? target : lat + (target - lat) * k;
-    h.push(hd); l.push(lat); prevH = hd;
+    lead += (leadTarget - lead) * easeFast;
+    h.push(hd); l.push(lat); f.push(lead); prevH = hd;
   }
-  return { step, h, l };
+  return { step, h, l, f };
 }
 
 /**
@@ -155,11 +172,11 @@ export function makeSim(drill) {
     const tm = skater(id);
     const d = G.clamp((t - tm.delay) * tm.speed, 0, tm.len);
     const p = G.pointAt(tm.dense, tm.cum, d);
-    const { step, h, l } = tm.frames;
-    if (h.length < 2) return { x: p.x, y: p.y, heading: h[0], lat: l[0] };
-    const f = G.clamp(d / step, 0, h.length - 1);
-    const i = Math.min(Math.floor(f), h.length - 2), u = f - i;
-    return { x: p.x, y: p.y, heading: h[i] + wrapAngle(h[i + 1] - h[i]) * u, lat: l[i] + (l[i + 1] - l[i]) * u };
+    const { step, h, l, f } = tm.frames;
+    if (h.length < 2) return { x: p.x, y: p.y, heading: h[0], lat: l[0], lead: f[0] };
+    const q = G.clamp(d / step, 0, h.length - 1);
+    const i = Math.min(Math.floor(q), h.length - 2), u = q - i;
+    return { x: p.x, y: p.y, heading: h[i] + wrapAngle(h[i + 1] - h[i]) * u, lat: l[i] + (l[i + 1] - l[i]) * u, lead: f[i] + (f[i + 1] - f[i]) * u };
   }
 
   /** Where a puck carried by skater `id` is at time t (ahead of the skater). */

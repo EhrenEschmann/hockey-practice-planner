@@ -33,7 +33,7 @@ function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
 
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'net', 'arrow', 'tire', 'cone', 'minicone', 'text', 'coach', 'skater', 'puck'];
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'text', 'coach', 'skater', 'puck'];
 
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
@@ -41,7 +41,10 @@ export function renderObjects(drill, selId, opts = {}) {
     .sort((a, b) => (Z_ORDER.indexOf(a.o.type) - Z_ORDER.indexOf(b.o.type)) || (a.i - b.i))
     .map(x => x.o);
   const o2 = { ...opts, sim: opts.sim || makeSim(drill) };
-  return objs.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('');
+  // Raised pads are drawn in two parts: tires in normal order, and the slab on top of everything so
+  // skaters visibly slide underneath it.
+  return objs.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
+    + objs.filter(o => o.type === 'raisedpad').map(raisedPadTop).join('');
 }
 
 const draw = {
@@ -89,6 +92,16 @@ const draw = {
       <polyline class="arrow-line" points="${ptsStr(dense)}" stroke="${color}" ${dash} ${width}/>
       ${arrowHead(dense, color, o.style === 'shot' ? 2.8 : 2.2)}
       ${sel ? handles(o.points) : ''}
+    </g>`;
+  },
+
+  raisedpad(o) {
+    const w = o.w || 6, h = o.h || 2;
+    const tx = Math.max(0, w / 2 - 1.3);
+    const tire = x => `<g transform="translate(${n(x)} 0)"><circle r="1.4" fill="#222"/><circle r=".7" fill="#dfe3ea"/></g>`;
+    return `<g class="obj raisedpad" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)}) rotate(${n(o.rot || 0)})">
+      <rect x="${n(-w / 2)}" y="${n(-h / 2 - 1)}" width="${n(w)}" height="${n(h + 2)}" fill="transparent"/>
+      ${tire(-tx)}${tire(tx)}
     </g>`;
   },
 
@@ -178,6 +191,16 @@ const draw = {
     </g>`;
   },
 };
+
+/** The slab of a raised pad, drawn above skaters (see renderObjects). */
+function raisedPadTop(o) {
+  const w = o.w || 6, h = o.h || 2;
+  return `<g class="obj raisedpad-top" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)}) rotate(${n(o.rot || 0)})">
+    <rect x="${n(-w / 2 + 0.3)}" y="${n(-h / 2 + 0.4)}" width="${n(w)}" height="${n(h)}" rx=".4" fill="#000" fill-opacity=".18"/>
+    <rect x="${n(-w / 2)}" y="${n(-h / 2)}" width="${n(w)}" height="${n(h)}" rx=".4" fill="#c7cdd8" fill-opacity=".85" stroke="#3a3f4b" stroke-width=".35"/>
+    ${o.label ? `<text y=".6" font-size="${Math.min(1.8, h * 0.7)}" text-anchor="middle" fill="#111" font-weight="600">${esc(o.label)}</text>` : ''}
+  </g>`;
+}
 
 /** Standalone SVG document string for export/print. */
 export function standaloneSVG(drill, rinkSVG, style, view) {

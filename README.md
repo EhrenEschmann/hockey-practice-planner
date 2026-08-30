@@ -17,6 +17,7 @@ npm start          # serves on http://localhost:5173
 - **Rink canvas** in real feet (200 × 85 NHL rink) with view presets — full ice, either half, either end zone, neutral zone — plus wheel zoom and Space/middle-mouse pan so you can plan on any piece of the ice.
 - **Equipment tools**: cones, tires, pucks, nets (rotatable), and obstacle pads (drag a box, any size/rotation).
 - **Raised pad on tires**: a pad resting on two tires (click to place; length/depth/rotation editable). It's drawn above the players, and a skater whose path runs through it slides under during animation — body stretched flat along their heading, puck pushed straight ahead of them.
+- **Jump pad**: a low striped pad (click to place; length/depth/rotation editable). A skater whose path crosses it jumps over during animation — the figure rises and lands in an arc timed across the pad along their direction of travel, with a shadow falling away beneath — and the puck is pushed straight ahead first.
 - **Small cones for stickhandling**: click to place one, or drag to lay a row about 3 ft apart. When a puck carrier's path runs along the row, the animation stickhandles the puck through them — alternately left and right of each cone — while the skater glides along the line.
 - **Goalies**: the Goalie tool (or dragging its button) near a net puts a goalie in that net's crease facing out — it follows the net's rotation; a net's panel also has *Add goalie*. Goalies are skaters with role G (square marker) and can be given paths, pucks and passes like anyone else.
 - **Coaches**: a labelled diamond marker (label and colour editable). Drag the Coach button straight from the toolbar onto the ice to drop one where you want it — the same drag-and-drop works for skaters, cones, tires, pucks and nets. Coaches take part in puck play like a skater: they can receive passes, carry a puck (Puck tool on a coach, drop a puck on them, or *Give puck*), and pass or shoot it; **Facing** sets which way they hold it while standing. They can also move — use the Skater tool on a coach to give them a path (speed defaults to 10 ft/s).
@@ -37,7 +38,7 @@ npm start          # serves on http://localhost:5173
 |---|---|
 | V / H | Select / Pan |
 | S, K, G, A | Skater, Coach, Goalie, Arrow |
-| C, M, T, P, N, O, R | Cone, Small cone, Tire, Puck, Net, Obstacle, Raised pad |
+| C, M, T, P, N, O, R, J | Cone, Small cone, Tire, Puck, Net, Obstacle, Raised pad, Jump pad |
 | B, Z, X, E | Barricade, Zone, Text, Erase |
 | Enter / Esc | Finish current path or polyline |
 | Delete | Remove selection |
@@ -60,4 +61,4 @@ js/geometry.js   splines, arc-length sampling, path simplification
 serve.js         zero-dependency static server
 ```
 
-Data model: a **practice** has `drills[]`; a **drill** has a `view` (viewBox in feet) and `objects[]`, each with a `type` (`skater`, `coach`, `cone`, `minicone`, `tire`, `raisedpad`, `puck`, `net`, `obstacle`, `barricade`, `zone`, `arrow`, `text`) and feet-based coordinates.
+Data model: a **practice** has `drills[]`; a **drill** has a `view` (viewBox in feet) and `objects[]`, each with a `type` (`skater`, `coach`, `cone`, `minicone`, `tire`, `raisedpad`, `jumppad`, `puck`, `net`, `obstacle`, `barricade`, `zone`, `arrow`, `text`) and feet-based coordinates.

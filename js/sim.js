@@ -27,12 +27,35 @@ export const CARRY = {
   slideReach: 3,    // ft before/after the pad's edge where the slide (and the push) begins/ends
 };
 
-/** Is point p within `margin` ft of a raised pad's footprint (a w x h rectangle rotated by pad.rot)? */
-export function underPad(p, pad, margin = 1) {
+/** Point p in a pad's own frame (x along its length, y across its depth). */
+function padLocal(p, pad) {
   const a = -(pad.rot || 0) * Math.PI / 180;
   const dx = p.x - pad.x, dy = p.y - pad.y;
-  const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+  return { lx: dx * Math.cos(a) - dy * Math.sin(a), ly: dx * Math.sin(a) + dy * Math.cos(a) };
+}
+
+/** Is point p within `margin` ft of a pad's footprint (a w x h rectangle rotated by pad.rot)? */
+export function underPad(p, pad, margin = 1) {
+  const { lx, ly } = padLocal(p, pad);
   return Math.abs(lx) <= (pad.w || 6) / 2 + margin && Math.abs(ly) <= (pad.h || 2) / 2 + margin;
+}
+
+/** Pads that skaters go over or under (and push the puck ahead of). */
+export const isPad = o => o?.type === 'raisedpad' || o?.type === 'jumppad';
+
+/**
+ * How high a skater is in a jump over `pad` at pose {x, y, heading}: 0 on the ice, 1 at the peak over the
+ * pad's centre line. The take-off and landing are `reach` ft either side of the pad, measured along the
+ * skater's direction of travel, so the arc fits the pad however it is crossed.
+ */
+export function jumpHeight(pose, pad, reach = 1.5) {
+  if (!underPad(pose, pad, reach)) return 0;
+  const rot = (pad.rot || 0) * Math.PI / 180;
+  const th = pose.heading - rot; // travel direction in the pad's frame
+  const half = (pad.w || 6) / 2 * Math.abs(Math.cos(th)) + (pad.h || 1.5) / 2 * Math.abs(Math.sin(th)) + reach;
+  const { lx, ly } = padLocal(pose, pad);
+  const s = lx * Math.cos(th) + ly * Math.sin(th); // progress across the pad along the travel direction
+  return Math.max(0, Math.cos(Math.PI / 2 * s / half));
 }
 
 /** A skater's full path: its own position followed by its waypoints. */
@@ -84,7 +107,7 @@ function carryFrames(o, dense, cum, objs) {
     .sort((a, b) => a.d - b.d)
     .map((s, i) => ({ c: s.c, side: i % 2 ? -1 : 1 }));
   const easeFast = 1 - Math.exp(-step / CARRY.weaveTau);
-  const pads = objs.filter(x => x.type === 'raisedpad');
+  const pads = objs.filter(isPad);
   const h = [], l = [], f = [];
   let lat = null, lead = CARRY.lead, prevH = null;
   for (let i = 0; i < N; i++) {
@@ -111,7 +134,7 @@ function carryFrames(o, dense, cum, objs) {
       if (off < best && Math.abs(ly) < CARRY.weaveOffset) { best = off; handling = { ly, side: s.side }; }
     }
     if (handling) { target = handling.ly + handling.side * CARRY.weave; k = easeFast; }
-    // Sliding under a raised pad: push the puck straight ahead and further out, then slide after it.
+    // Sliding under a raised pad or jumping a low one: push the puck straight ahead and further out first.
     let leadTarget = CARRY.lead;
     if (pads.some(pd => underPad(p, pd, CARRY.slideReach))) { target = 0; leadTarget = CARRY.lead + CARRY.slideLead; k = easeFast; }
     lat = lat === null ? target : lat + (target - lat) * k;

@@ -33,7 +33,7 @@ function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
 
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'text', 'coach', 'skater', 'puck'];
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'text', 'coach', 'skater', 'puck'];
 
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
@@ -92,6 +92,16 @@ const draw = {
       <polyline class="arrow-line" points="${ptsStr(dense)}" stroke="${color}" ${dash} ${width}/>
       ${arrowHead(dense, color, o.style === 'shot' ? 2.8 : 2.2)}
       ${sel ? handles(o.points) : ''}
+    </g>`;
+  },
+
+  jumppad(o) {
+    const w = o.w || 6, h = o.h || 1.5;
+    const stripes = [-1, 0, 1].map(i => `<line x1="${n(i * w / 4 - h / 2)}" y1="${n(-h / 2)}" x2="${n(i * w / 4 + h / 2)}" y2="${n(h / 2)}" stroke="#333" stroke-width=".35"/>`).join('');
+    return `<g class="obj jumppad" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)}) rotate(${n(o.rot || 0)})">
+      <rect x="${n(-w / 2)}" y="${n(-h / 2)}" width="${n(w)}" height="${n(h)}" rx=".3" fill="#f4c542" stroke="#333" stroke-width=".35"/>
+      ${stripes}
+      ${o.label ? `<text y="${n(-h / 2 - 0.6)}" font-size="1.6" text-anchor="middle" fill="#111" font-weight="600">${esc(o.label)}</text>` : ''}
     </g>`;
   },
 
@@ -186,7 +196,8 @@ const draw = {
     const wps = opts.numberWaypoints ? wpLabels(o) : '';
     return `<g class="obj skater" data-id="${o.id}">${path}${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
-        ${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>
+        <ellipse class="shadow" rx="1.9" ry="1.2" fill="#000" fill-opacity=".22" style="display:none"/>
+        <g class="figure">${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text></g>
       </g>
     </g>`;
   },

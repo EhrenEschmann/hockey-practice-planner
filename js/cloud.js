@@ -99,7 +99,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
       const r = remote.find(x => x.id === p.id);
       if (!r || newer(p, r)) await backend.save(uid, clean(p));
     }
-    if (changed.length) onRemote(changed);
+    onRemote(changed, { full: true });
     status(timers.size ? 'saving' : 'saved');
   }
 
@@ -131,6 +131,9 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
     user = u; uid = u?.uid || null;
     if (!uid) { status('signedout'); return; }
     try {
+      // The local cache belongs to whoever signed in last; another account must not inherit it.
+      if (store.data.ownerUid && store.data.ownerUid !== uid) store.reset();
+      store.data.ownerUid = uid; store.persist();
       await pull();
       unsub = backend.subscribe(uid, onChange);
     } catch (e) { status('error', e?.message || String(e)); }

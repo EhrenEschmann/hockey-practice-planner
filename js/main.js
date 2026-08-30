@@ -559,7 +559,10 @@ function zoomAt(p, f) {
 function setView(v) { drill().view = { ...v }; store.save(); renderCanvas(); }
 
 // ---------- keyboard ----------
+let gated = false; // sign-in required (Firebase configured, nobody signed in): the app is read-only behind the gate
+
 document.addEventListener('keydown', e => {
+  if (gated) return;
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
@@ -586,6 +589,7 @@ document.addEventListener('keydown', e => {
   if (t) setTool(t);
 });
 document.addEventListener('keyup', e => {
+  if (gated) return;
   if (e.key === ' ') {
     if (spaceDown && !isEditing() && !drag) togglePlay();
     spaceDown = false;
@@ -1238,21 +1242,42 @@ function renderCloudStatus(sync, state, detail) {
   $('#btn-signin').hidden = !!u;
   $('#btn-signout').hidden = !u;
 }
+/** Show (state = 'checking' | 'signedout' | 'error') or hide (null) the sign-in gate that covers the app. */
+function setGate(state, detail = '') {
+  gated = !!state;
+  $('#gate').hidden = !state;
+  document.body.classList.toggle('gated', gated);
+  if (!state) return;
+  finishActive(); pickTarget = null; if (anim.playing) togglePlay();
+  $('#gate-msg').textContent = state === 'checking' ? 'Checking your sign-in…' : 'Sign in to plan practices. Your practices are saved to your account and follow you between devices.';
+  $('#gate-signin').hidden = state === 'checking';
+  $('#gate-detail').textContent = state === 'error' ? `Sign-in failed: ${detail}` : '';
+}
+
 (async () => {
   // `globalThis.__hppBackend` lets tests plug in a fake backend; otherwise use Firebase when configured.
   let backend = globalThis.__hppBackend || null;
-  if (!backend) { const cfg = await loadConfig(); if (cfg) backend = await firebaseBackend(cfg); }
-  if (!backend) return; // no config: local-only, the cloud controls stay hidden
+  let cfg = null;
+  if (!backend) { cfg = await loadConfig(); if (cfg) { setGate('checking'); backend = await firebaseBackend(cfg); } }
+  if (!backend) return; // no config: local-only, no sign-in possible, the cloud controls stay hidden
+  setGate('checking');
   $('#cloud').hidden = false;
   const sync = createSync({
     store, backend,
-    onStatus: (state, detail) => renderCloudStatus(sync, state, detail),
-    onRemote: ids => {
+    onStatus: (state, detail) => {
+      renderCloudStatus(sync, state, detail);
+      // The app is only usable while signed in.
+      if (state === 'signedout') setGate('signedout');
+      else if (state === 'error' && !sync.user) setGate('error', detail);
+      else if (sync.user) setGate(null);
+    },
+    onRemote: (ids, { full } = {}) => {
       // Practices changed from another device (or first sync): refresh what is on screen.
-      if (ids.includes(store.data.currentId) || !store.practice) { finishActive(); sel = null; stopAnim(); renderAll(); }
+      if (full || ids.includes(store.data.currentId) || !store.practice) { finishActive(); sel = null; stopAnim(); renderAll(); }
       else renderPracticeSelect();
     },
   });
+  $('#gate-signin').addEventListener('click', () => sync.signIn().catch(e => setGate('error', e?.message || String(e))));
   $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   $('#btn-signout').addEventListener('click', () => sync.signOut().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   renderCloudStatus(sync, 'signedout');

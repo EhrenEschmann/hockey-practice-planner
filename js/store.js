@@ -90,6 +90,14 @@ export class Store {
   migrate() { for (const p of this.data.practices) for (const d of p.drills || []) migrateDrill(d); }
   blankPractice() { return newPractice(); }
 
+  /** Forget everything local (a different account signed in on this browser). */
+  reset() {
+    const p = newPractice();
+    this.data = { practices: [p], currentId: p.id };
+    this.drillIndex = 0; this.undoStack.length = 0; this.redoStack.length = 0; this.pending = null;
+    this.persist();
+  }
+
   snapshot() { return JSON.stringify(this.practice); }
 
   pushUndo(snap = this.snapshot()) {

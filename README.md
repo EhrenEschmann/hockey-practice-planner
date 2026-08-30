@@ -22,7 +22,7 @@ Practices auto-save to Firebase so they follow you between devices. Without a co
 4. `cp js/firebase-config.example.js js/firebase-config.js` and paste the config in. (The file is git-ignored; putting it at the project root as `firebase-config.js` works too.)
 5. Reload: a **Sign in** button appears in the top bar.
 
-Once signed in, every edit is written about a second after you stop making changes (status shows *Saving… / Saved to cloud ✓*), deletes propagate, and edits from another device appear live. On sign-in, local and cloud practices are merged — the newer copy of each practice wins and practices that exist only on one side are copied to the other. Data lives at `users/{uid}/practices/{practiceId}`, one document per practice. The SDK is loaded from Google's CDN, so there is still no build step.
+With a config in place the app is **gated**: a sign-in screen covers the planner until you sign in with Google (and comes back when you sign out), so nothing can be created or edited anonymously. If a different Google account signs in on the same browser, the previous account's locally cached practices are cleared first, so accounts never mix. Once signed in, every edit is written about a second after you stop making changes (status shows *Saving… / Saved to cloud ✓*), deletes propagate, and edits from another device appear live. On sign-in, local and cloud practices are merged — the newer copy of each practice wins and practices that exist only on one side are copied to the other. Data lives at `users/{uid}/practices/{practiceId}`, one document per practice. The SDK is loaded from Google's CDN, so there is still no build step.
 
 ## Features
 

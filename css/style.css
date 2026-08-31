@@ -37,21 +37,17 @@ textarea{resize:vertical}
 #toolbar .tool-sep{height:1px;background:var(--border);margin:4px 6px}
 
 #stage{display:flex;flex-direction:column;min-width:0;min-height:0}
-#contextbar{display:flex;align-items:center;gap:18px;padding:6px 10px;background:var(--panel-2);border-bottom:1px solid var(--border);flex:none;flex-wrap:wrap}
-.ctx-group{display:flex;align-items:center;gap:5px}
-.ctx-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:2px}
-#contextbar input{width:auto;padding:4px 7px}
-#contextbar .ctx-name{width:200px;font-weight:600}
-#contextbar .ctx-team{width:110px}
-#contextbar .ctx-date{width:140px}
-#contextbar .ctx-min{width:60px}
+.pin-row{display:flex;align-items:center;gap:5px}
+.ctx-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);width:56px;flex:none}
 .ctx-unit{color:var(--muted);font-size:12px}
-.ctx-pos{font-variant-numeric:tabular-nums;color:var(--muted);min-width:34px;text-align:center}
-#contextbar button{padding:3px 8px}
-#btn-notes.has-notes{border-color:var(--accent);color:var(--accent-2)}
-#btn-notes.open{background:var(--accent);border-color:var(--accent);color:#fff}
-#notesrow{padding:6px 10px;background:var(--panel-2);border-bottom:1px solid var(--border);flex:none}
-#notesrow textarea{width:100%}
+.ctx-pos{font-variant-numeric:tabular-nums;color:var(--muted);min-width:32px;text-align:center}
+#practice-wrap,#drill-wrap{position:relative}
+#practice-pop,#drill-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:250px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+#practice-pop h3,#drill-pop h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+#practice-pop .field input,#drill-pop .field input,#drill-pop .field textarea{width:100%}
+#drill-pop .pin-row{margin-bottom:8px}
+#btn-create-practice,#btn-add-drill-pop{width:100%;margin-top:2px}
+#btn-drill.has-notes{border-color:var(--accent);color:var(--accent-2)}
 #props{background:var(--panel);flex:1 1 0;min-height:0;overflow-y:auto}
 #viewbar,#animbar{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none;flex-wrap:wrap}
 #animbar{border-bottom:none;border-top:1px solid var(--border)}

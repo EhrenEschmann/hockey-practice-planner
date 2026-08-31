@@ -2,7 +2,7 @@ import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
-import { Store, uid, newDrill, newPractice, cloneObjects, migrateDrill } from './store.js';
+import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 
 const $ = s => document.querySelector(s);
@@ -770,19 +770,19 @@ $('#btn-redo').addEventListener('click', doRedo);
 // ---------- practice / plan sidebar ----------
 function renderPracticeSelect() {
   const s = $('#practice-select');
-  s.innerHTML = store.data.practices.map(p => `<option value="${p.id}">${escHtml(p.name || 'Untitled')}${p.date ? ' — ' + p.date : ''}</option>`).join('');
+  s.innerHTML = store.data.practices.map(p => `<option value="${p.id}">${escHtml(practiceLabel(p))}</option>`).join('');
   s.value = store.data.currentId;
 }
 const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function renderPracticeProps() {
   const p = store.practice;
-  for (const [id, key] of [['#practice-name', 'name'], ['#practice-team', 'team'], ['#practice-date', 'date']]) {
+  for (const [id, key] of [['#practice-team', 'team'], ['#practice-date', 'date']]) {
     const el = $(id);
     if (document.activeElement !== el) el.value = p[key] || '';
   }
 }
-for (const [id, key] of [['#practice-name', 'name'], ['#practice-team', 'team'], ['#practice-date', 'date']]) {
+for (const [id, key] of [['#practice-team', 'team'], ['#practice-date', 'date']]) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
   el.addEventListener('input', () => { store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
@@ -838,19 +838,19 @@ function libraryCards(filter) {
   const practices = [...store.data.practices].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const cards = [];
   for (const p of practices) for (const d of p.drills || []) {
-    if (q && !`${d.name} ${p.name} ${p.team || ''}`.toLowerCase().includes(q)) continue;
+    if (q && !`${d.name} ${p.team || ''} ${p.date || ''}`.toLowerCase().includes(q)) continue;
     const v = d.view || VIEWS.full;
     cards.push(`<div class="lib-card">
       <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG()}${renderObjects(d, null)}</svg>
       <div class="lib-name" title="${escHtml(d.name)}">${escHtml(d.name)}</div>
-      <div class="lib-meta" title="${escHtml(p.name)}">${escHtml(p.name)}${p.date ? ' · ' + escHtml(p.date) : ''} · ${+d.duration || 0} min</div>
+      <div class="lib-meta" title="${escHtml(practiceLabel(p))}">${escHtml(practiceLabel(p))} · ${+d.duration || 0} min</div>
       <button data-lib-add="${p.id}:${d.id}">+ Add to this practice</button>
     </div>`);
   }
   return cards.length ? cards.join('') : `<div class="lib-empty">${q ? 'No drills match that search.' : 'No drills yet — drills you create in any practice appear here.'}</div>`;
 }
 function renderLibrary() {
-  $('#lib-target').textContent = store.practice.name;
+  $('#lib-target').textContent = practiceLabel(store.practice);
   $('#lib-grid').innerHTML = `<style>${SVG_STYLE}</style>` + libraryCards($('#lib-search').value);
 }
 function openLibrary() { finishActive(); $('#library').hidden = false; renderLibrary(); $('#lib-search').select(); }
@@ -869,7 +869,7 @@ $('#library').addEventListener('click', e => {
   copy.objects = cloneObjects(migrateDrill(copy).objects);
   const p = store.practice;
   commit(() => { p.drills.push(copy); store.drillIndex = p.drills.length - 1; });
-  $('#lib-target').textContent = store.practice.name;
+  $('#lib-target').textContent = practiceLabel(store.practice);
   btn.textContent = 'Added ✓'; btn.disabled = true;
   setTimeout(() => { btn.textContent = '+ Add to this practice'; btn.disabled = false; }, 1200);
 });
@@ -891,7 +891,7 @@ function renderDrillProps() {
   $('#drill-pos').textContent = `${store.drillIndex + 1}/${n}`;
   $('#btn-prev-drill').disabled = store.drillIndex === 0;
   $('#btn-next-drill').disabled = store.drillIndex >= n - 1;
-  $('#btn-notes').classList.toggle('has-notes', !!(d.notes || '').trim());
+  $('#btn-drill').classList.toggle('has-notes', !!(d.notes || '').trim());
 }
 function stepDrill(delta) {
   const i = store.drillIndex + delta;
@@ -900,13 +900,7 @@ function stepDrill(delta) {
 }
 $('#btn-prev-drill').addEventListener('click', () => stepDrill(-1));
 $('#btn-next-drill').addEventListener('click', () => stepDrill(1));
-$('#btn-notes').addEventListener('click', () => {
-  const row = $('#notesrow');
-  row.hidden = !row.hidden;
-  $('#btn-notes').classList.toggle('open', !row.hidden);
-  if (!row.hidden) $('#drill-notes').focus();
-  drawSelection();
-});
+
 for (const [id, key] of [['#drill-name', 'name'], ['#drill-duration', 'duration'], ['#drill-notes', 'notes']]) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
@@ -1221,18 +1215,47 @@ function focusProp(key) {
 
 // ---------- practice library / import / export ----------
 $('#practice-select').addEventListener('change', e => { finishActive(); store.switchPractice(e.target.value); sel = null; stopAnim(); renderAll(); });
-$('#btn-new-practice').addEventListener('click', () => {
-  const name = prompt('Practice name:', 'New practice'); if (name === null) return;
-  finishActive(); store.addPractice(newPractice(name)); sel = null; stopAnim(); renderAll();
+// Details tucked behind buttons: "+ Practice" (topbar) and "+ Drill" (viewbar) each open a popover.
+const popovers = [];
+function closePopovers() { for (const pop of popovers) pop.hidden = true; }
+document.addEventListener('click', closePopovers);
+function wirePopover(btnSel, popSel, focusSel) {
+  const btn = $(btnSel), pop = $(popSel);
+  popovers.push(pop);
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const show = pop.hidden;
+    closePopovers();
+    if (show) { pop.hidden = false; renderUI(); const el = $(focusSel); el.focus(); el.select?.(); }
+  });
+  pop.addEventListener('click', e => e.stopPropagation());
+  pop.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.stopPropagation(); pop.hidden = true; btn.focus(); }
+  });
+}
+wirePopover('#btn-new-practice', '#practice-pop', '#practice-team');
+wirePopover('#btn-drill', '#drill-pop', '#drill-name');
+$('#btn-add-drill-pop').addEventListener('click', () => {
+  finishActive();
+  const p = store.practice;
+  commit(() => { p.drills.push(newDrill(p.drills.length + 1)); store.drillIndex = p.drills.length - 1; });
+  sel = null; stopAnim(); renderAll();
+  const el = $('#drill-name'); el.focus(); el.select(); // popover stays open on the fresh drill
+});
+$('#btn-create-practice').addEventListener('click', () => {
+  finishActive();
+  store.addPractice(newPractice(store.practice.team || ''));
+  sel = null; stopAnim(); renderAll();
+  $('#practice-team').focus(); $('#practice-team').select(); // popover stays open on the fresh practice
 });
 $('#btn-dup-practice').addEventListener('click', () => {
   const copy = JSON.parse(JSON.stringify(store.practice));
-  copy.id = uid(); copy.name += ' (copy)';
+  copy.id = uid(); copy.date = new Date().toISOString().slice(0, 10);
   copy.drills.forEach(d => { d.id = uid(); d.objects = cloneObjects(d.objects); });
   finishActive(); store.addPractice(copy); sel = null; stopAnim(); renderAll();
 });
 $('#btn-del-practice').addEventListener('click', () => {
-  if (!confirm(`Delete practice "${store.practice.name}"? This cannot be undone.`)) return;
+  if (!confirm(`Delete practice "${practiceLabel(store.practice)}"? This cannot be undone.`)) return;
   store.deletePractice(store.data.currentId); sel = null; stopAnim(); renderAll();
 });
 
@@ -1245,7 +1268,7 @@ const safeName = s => (s || 'practice').replace(/[^\w\-]+/g, '_');
 
 $('#btn-export').addEventListener('click', () => {
   const p = store.practice;
-  download(`${safeName(p.name)}.hpp.json`, new Blob([JSON.stringify({ format: 'hockey-practice-planner', version: 1, practice: p }, null, 2)], { type: 'application/json' }));
+  download(`${safeName(practiceLabel(p))}.hpp.json`, new Blob([JSON.stringify({ format: 'hockey-practice-planner', version: 1, practice: p }, null, 2)], { type: 'application/json' }));
 });
 $('#btn-import').addEventListener('click', () => $('#file-import').click());
 $('#file-import').addEventListener('change', async e => {
@@ -1275,7 +1298,7 @@ $('#btn-png').addEventListener('click', async () => {
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0, c.width, c.height);
     URL.revokeObjectURL(url);
-    c.toBlob(b => download(`${safeName(store.practice.name)}_${safeName(d.name)}.png`, b), 'image/png');
+    c.toBlob(b => download(`${safeName(practiceLabel(store.practice))}_${safeName(d.name)}.png`, b), 'image/png');
   };
   img.onerror = () => alert('PNG export failed');
   img.src = url;
@@ -1286,8 +1309,8 @@ $('#btn-print').addEventListener('click', () => {
   const rink = rinkSVG();
   const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
   $('#print-area').innerHTML = `
-    <h1>${escHtml(p.name)}</h1>
-    <div class="p-meta">${escHtml(p.team)}${p.team ? ' · ' : ''}${escHtml(p.date)} · ${p.drills.length} drills · ${total} min</div>
+    <h1>${escHtml(p.team || 'Practice')} — ${escHtml(p.date || '')}</h1>
+    <div class="p-meta">${p.drills.length} drills · ${total} min</div>
     ${p.drills.map((d, i) => `
       <div class="p-drill">
         <h2>${i + 1}. ${escHtml(d.name)} <span class="p-meta">(${+d.duration || 0} min)</span></h2>

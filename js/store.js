@@ -17,9 +17,12 @@ export function newDrill(n = 1) {
   return { id: uid(), name: `Drill ${n}`, duration: 10, notes: '', view: { ...VIEWS.full }, objects: defaultNets() };
 }
 
-export function newPractice(name = 'New practice') {
-  return { id: uid(), name, team: '', date: new Date().toISOString().slice(0, 10), drills: [newDrill(1)] };
+export function newPractice(team = '') {
+  return { id: uid(), team, date: new Date().toISOString().slice(0, 10), drills: [newDrill(1)] };
 }
+
+/** How a practice is shown anywhere it needs a label. */
+export function practiceLabel(p) { return `${p.team || 'No team'} — ${p.date || 'no date'}`; }
 
 /** Normalise older saved drills (e.g. skater.hasPuck → a puck object carried by that skater). */
 export function migrateDrill(d) {
@@ -59,7 +62,7 @@ export class Store {
     this.data = data && Array.isArray(data.practices) ? data : { practices: [], currentId: null };
     if (!this.data.practices.length) this.data.practices.push(newPractice());
     if (!this.practice) this.data.currentId = this.data.practices[0].id;
-    for (const p of this.data.practices) for (const d of p.drills) migrateDrill(d);
+    this.migrate();
     this.drillIndex = 0;
     this.undoStack = [];
     this.redoStack = [];
@@ -86,8 +89,13 @@ export class Store {
     catch (e) { console.warn('Save failed', e); }
   }
 
-  /** Normalise every practice (used after practices arrive from the cloud). */
-  migrate() { for (const p of this.data.practices) for (const d of p.drills || []) migrateDrill(d); }
+  /** Normalise every practice — local or freshly arrived from the cloud. */
+  migrate() {
+    for (const p of this.data.practices) {
+      if (p.name) { if (!p.team) p.team = p.name; delete p.name; } // practices are now identified by team + date
+      for (const d of p.drills || []) migrateDrill(d);
+    }
+  }
   blankPractice() { return newPractice(); }
 
   /** Forget everything local (a different account signed in on this browser). */

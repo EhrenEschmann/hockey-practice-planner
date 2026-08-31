@@ -75,31 +75,31 @@
 
 <div id="layout">
   <nav id="toolbar">
-    <button class="tool" data-tool="select"    title="Select / move (V)"><span class="ico">↖</span><span>Select</span></button>
-    <button class="tool" data-tool="pan"       title="Pan (H) — or hold Space / middle mouse"><span class="ico">✋</span><span>Pan</span></button>
+    <button class="tool" data-tool="select"    title="Select / move (V)&#10;Drag objects; drag waypoint handles to reshape a path (double-click a handle to remove it).&#10;Arrow keys nudge (Shift = 5 ft) · Delete removes."><span class="ico">↖</span><span>Select</span></button>
+    <button class="tool" data-tool="pan"       title="Pan (H) — or hold Space / middle mouse&#10;Mouse wheel zooms around the cursor."><span class="ico">✋</span><span>Pan</span></button>
     <div class="tool-sep"></div>
-    <button class="tool" data-tool="skater"    title="Skater + path (S) — or drag onto the ice"><span class="ico">⛸</span><span>Skater</span></button>
-    <div class="side-switch" title="New skaters: O = offense (blue), D = defense (red)">
+    <button class="tool" data-tool="skater"    title="Skater + path (S) — or drag onto the ice&#10;Click to place, keep clicking to add waypoints (or drag to draw freehand). Enter/Esc finishes. Click an existing skater to extend their path.&#10;Delay a start in their panel: &quot;starts when #1 reaches…&quot; a waypoint."><span class="ico">⛸</span><span>Skater</span></button>
+    <div class="side-switch" title="New skaters: O = offense (blue), D = defense (red), numbered per side.&#10;Change a skater's side (and colour) later in its Selection panel.">
       <button data-side="O" class="active" title="New skaters are offensive players (blue)"><span class="dot" style="background:#1e56d6"></span>O</button>
       <button data-side="D" title="New skaters are defensive players (red)"><span class="dot" style="background:#d62828"></span>D</button>
     </div>
-    <button class="tool" data-tool="coach"     title="Coach (K) — click to place, or drag onto the ice"><span class="ico">📋</span><span>Coach</span></button>
-    <button class="tool" data-tool="goalie"    title="Goalie (G) — click or drop near a net to put a goalie in its crease"><span class="ico">🧤</span><span>Goalie</span></button>
-    <button class="tool" data-tool="contact"   title="Contact point (I) — click where two skaters should collide; their timing syncs to meet there"><span class="ico">💥</span><span>Contact</span></button>
-    <button class="tool" data-tool="arrow"     title="Arrow annotation (A)"><span class="ico">➚</span><span>Arrow</span></button>
+    <button class="tool" data-tool="coach"     title="Coach (K) — click to place, or drag onto the ice&#10;A diamond marker with a label. Coaches can receive passes and pass or shoot: use the Puck tool on a coach (or drop a puck on them) and set their Facing.&#10;They can move too — use the Skater tool on a coach to give them a path."><span class="ico">📋</span><span>Coach</span></button>
+    <button class="tool" data-tool="goalie"    title="Goalie (G) — click or drop near a net to put a goalie in its crease, facing out&#10;Or select a net and press Add goalie."><span class="ico">🧤</span><span>Goalie</span></button>
+    <button class="tool" data-tool="contact"   title="Contact point (I) — click where two skaters should collide; their timing syncs so they meet there&#10;Pick who gets the worse of it on the animation bar: they stagger, slow down and lose the puck to the winner."><span class="ico">💥</span><span>Contact</span></button>
+    <button class="tool" data-tool="arrow"     title="Arrow annotation (A) — click points, double-click or Enter to finish&#10;Style it (skate / pass / shot / backward) in the Selection panel."><span class="ico">➚</span><span>Arrow</span></button>
     <div class="tool-sep"></div>
     <button class="tool" data-tool="cone"      title="Cone (C) — or drag onto the ice"><span class="ico">🔺</span><span>Cone</span></button>
     <button class="tool" data-tool="minicone"  title="Small cone (M) — click for one, drag to lay a row; skaters stickhandle the puck through them"><span class="ico">🔸</span><span>Small cone</span></button>
     <button class="tool" data-tool="tire"      title="Tire (T) — or drag onto the ice"><span class="ico">⭕</span><span>Tire</span></button>
-    <button class="tool" data-tool="puck"      title="Puck (P) — or drag onto the ice"><span class="ico">⚫</span><span>Puck</span></button>
-    <button class="tool" data-tool="pile"      title="Puck pile (L) — a heap of pucks skaters take from; click to place or drag onto the ice"><span class="ico">🪣</span><span>Puck pile</span></button>
+    <button class="tool" data-tool="puck"      title="Puck (P) — click a skater or coach to give them a puck, a pile to take one, or open ice for a loose puck&#10;Select a puck to add passes &amp; shots: Mark on path sets where it happens (drag the P/S marker); a pass can be timed by the receiver, or banked off the boards (drag the B marker)."><span class="ico">⚫</span><span>Puck</span></button>
+    <button class="tool" data-tool="pile"      title="Puck pile (L) — a heap of pucks skaters take from; click to place or drag onto the ice&#10;In a skater's panel press Take puck from pile — they pick one up where their path passes the pile (or use Give a puck to… on the pile)."><span class="ico">🪣</span><span>Puck pile</span></button>
     <button class="tool" data-tool="net"       title="Net (N) — or drag onto the ice"><span class="ico">🥅</span><span>Net</span></button>
     <button class="tool" data-tool="obstacle"  title="Obstacle / pad — drag a box (O)"><span class="ico">▬</span><span>Obstacle</span></button>
     <button class="tool" data-tool="raisedpad" title="Raised pad on tires (R) — skaters slide under it; click to place or drag onto the ice"><span class="ico">🛝</span><span>Raised pad</span></button>
     <button class="tool" data-tool="jumppad"   title="Jump pad (J) — a low pad skaters jump over; click to place or drag onto the ice"><span class="ico">🤸</span><span>Jump pad</span></button>
     <div class="tool-sep"></div>
     <button class="tool" data-tool="barricade" title="Barricade / divider — click points, Enter to finish (B)"><span class="ico">🚧</span><span>Barricade</span></button>
-    <button class="tool" data-tool="zone"      title="Zone / station — drag a box (Z)"><span class="ico">▭</span><span>Zone</span></button>
+    <button class="tool" data-tool="zone"      title="Zone / station — drag a box (Z)&#10;Use Focus in its panel to plan a drill in just that section of ice."><span class="ico">▭</span><span>Zone</span></button>
     <button class="tool" data-tool="text"      title="Text label (X)"><span class="ico">T</span><span>Text</span></button>
     <div class="tool-sep"></div>
     <button class="tool" data-tool="erase"     title="Erase (E)"><span class="ico">✖</span><span>Erase</span></button>
@@ -144,25 +144,6 @@
       <div class="row"><button id="btn-add-drill">+ Add drill</button><button id="btn-library" title="Browse every drill from all of your practices and add copies to this one">📚 From library…</button></div>
     </section>
 
-    <section class="panel help">
-      <h2>Tips</h2>
-      <ul>
-        <li><b>Drag &amp; drop:</b> drag the Coach (or Skater, Cone, Tire, Puck, Net) button straight onto the ice to drop one there.</li>
-        <li><b>Small cones:</b> drag to lay a row of them. A puck carrier whose path runs along the row stickhandles the puck through them during animation.</li>
-        <li><b>Goalie:</b> click (or drag the Goalie button) near a net and the goalie is placed in the crease facing out; or select a net and press <b>Add goalie</b>.</li>
-        <li><b>Coach:</b> a diamond marker with a label. Coaches can receive passes and pass or shoot — use the Puck tool on a coach (or drop a puck on them) and set their Facing. They can move too: use the Skater tool on a coach to give them a path.</li>
-        <li><b>Starts moving:</b> in a skater's or coach's panel, choose "when #1 reaches…" and a waypoint — they wait until that player gets there (plus their start delay).</li>
-        <li><b>Offense / Defense:</b> the O / D switch under the Skater tool colours new skaters blue (offense) or red (defense), numbered per side. Change a skater's side (and colour) in its Selection panel.</li>
-        <li><b>Skater:</b> click to place, keep clicking to add waypoints (or drag to draw freehand). Enter/Esc finishes. Click an existing skater to extend its path.</li>
-        <li><b>Puck pile:</b> place a pile, then in a skater's panel press <b>Take puck from pile</b> — they pick one up where their path passes the pile (or use <b>Give a puck to…</b> on the pile). Then add passes and shots as usual.</li>
-        <li><b>Passes &amp; shots:</b> select a puck, add a Pass/Shoot, then <b>Mark on path</b> and click where on the skater's path it happens — or drag the P / S marker along the path. A pass to a moving player can instead be timed by the receiver ("arriving as #2 reaches …") — the R marker shows where they get it. Tick <b>off the boards</b> for a bank pass (drag the B marker along the boards) — a player can bank it to themselves.</li>
-        <li><b>Barricade / Arrow:</b> click points, double-click or Enter to finish.</li>
-        <li><b>Raised pad / Jump pad:</b> run a skater's path through a raised pad and they slide under it; across a low jump pad and they jump over it — pushing the puck ahead either way.</li>
-        <li><b>Zone / Obstacle:</b> drag a box. Use "Focus" on a zone to plan a drill in just that section.</li>
-        <li><b>Select:</b> drag objects, drag waypoint handles, double-click a handle to remove it. Arrow keys nudge. Delete removes.</li>
-        <li>Wheel to zoom, Space/middle-mouse to pan.</li>
-      </ul>
-    </section>
   </aside>
 </div>
 

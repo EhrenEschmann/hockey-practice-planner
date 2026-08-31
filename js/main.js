@@ -127,20 +127,25 @@ function setTool(t) {
   renderCanvas();
 }
 
-/** Finish any in-progress skater path or polyline. */
+/** Finish any in-progress skater path or polyline, then hand off to the Select tool. */
 function finishActive() {
-  let changed = false;
+  let changed = false, doneId = null;
   if (activePoly) {
     const o = getObj(activePoly);
     if (o) {
       o.points.pop(); // drop the preview point
       while (o.points.length > 1 && G.dist(o.points.at(-1), o.points.at(-2)) < 0.2) o.points.pop();
       if (o.points.length < 2) drill().objects = drill().objects.filter(x => x.id !== o.id);
+      else doneId = o.id;
     }
     activePoly = null; changed = true;
   }
-  if (activeSkater) { activeSkater = null; changed = true; }
+  if (activeSkater) {
+    if (getObj(activeSkater)) doneId = activeSkater;
+    activeSkater = null; changed = true;
+  }
   if (changed) { store.save(); renderAll(); }
+  if (doneId && tool !== 'select') placed(doneId); // setTool→finishActive recursion is a no-op by now
 }
 
 function addObject(o) {
@@ -256,6 +261,12 @@ function deleteObject(id) {
 
 function select(id) { sel = id; renderCanvas(); renderProps(); }
 
+/** A placement is done: hand control back to the Select tool with the new object selected. */
+function placed(id) {
+  select(id);
+  if (tool !== 'select') setTool('select');
+}
+
 // ---------- pointer handling ----------
 svg.addEventListener('pointerdown', onPointerDown);
 svg.addEventListener('pointermove', onPointerMove);
@@ -331,32 +342,32 @@ function onPointerDown(e) {
       }
       break;
     }
-    case 'coach': select(addObject(makePlaceable('coach', p)).id); break;
-    case 'goalie': select(addObject(makePlaceable('goalie', p)).id); break;
-    case 'cone': addObject(makePlaceable('cone', p)); break;
+    case 'coach': placed(addObject(makePlaceable('coach', p)).id); break;
+    case 'goalie': placed(addObject(makePlaceable('goalie', p)).id); break;
+    case 'cone': placed(addObject(makePlaceable('cone', p)).id); break;
     case 'minicone': drag = { type: 'row', start: p }; break; // click = one cone, drag = a row (decided on pointerup)
-    case 'tire': addObject(makePlaceable('tire', p)); break;
-    case 'pile': select(addObject(makePlaceable('pile', p)).id); break;
-    case 'raisedpad': select(addObject(makePlaceable('raisedpad', p)).id); break;
-    case 'jumppad': select(addObject(makePlaceable('jumppad', p)).id); break;
+    case 'tire': placed(addObject(makePlaceable('tire', p)).id); break;
+    case 'pile': placed(addObject(makePlaceable('pile', p)).id); break;
+    case 'raisedpad': placed(addObject(makePlaceable('raisedpad', p)).id); break;
+    case 'jumppad': placed(addObject(makePlaceable('jumppad', p)).id); break;
     case 'puck': {
       const s = id && getObj(id);
       if (isPlayer(s)) {
         const existing = drill().objects.find(o => o.type === 'puck' && o.carrier === s.id);
-        if (existing) select(existing.id);
-        else select(addObject(newPuck(p, s.id)).id);
+        if (existing) placed(existing.id);
+        else placed(addObject(newPuck(p, s.id)).id);
       } else if (s?.type === 'pile') {
         const pk = puckFromPile(s, null);
-        commit(() => drill().objects.push(pk)); select(pk.id);
+        commit(() => drill().objects.push(pk)); placed(pk.id);
       } else if (s?.type === 'puck') {
-        select(s.id);
+        placed(s.id);
       } else {
-        select(addObject(newPuck(p, null)).id);
+        placed(addObject(newPuck(p, null)).id);
       }
       break;
     }
-    case 'net': addObject(makePlaceable('net', p)); break;
-    case 'text': { const t = addObject({ type: 'text', x: p.x, y: p.y, text: 'Label', size: 3, color: '#111' }); select(t.id); focusProp('text'); break; }
+    case 'net': placed(addObject(makePlaceable('net', p)).id); break;
+    case 'text': { const t = addObject({ type: 'text', x: p.x, y: p.y, text: 'Label', size: 3, color: '#111' }); placed(t.id); focusProp('text'); break; }
     case 'obstacle':
     case 'zone': {
       const o = tool === 'zone'
@@ -500,12 +511,15 @@ function onPointerUp(e) {
       store.save();
       sel = getObj(dg.id) ? dg.id : null;
       renderAll();
+      if (sel) placed(sel);
       break;
     }
     case 'row': {
       const p = snapPt(toRink(e));
       const pts = G.dist(dg.start, p) < 1.5 ? [dg.start] : rowPoints(dg.start, p);
-      commit(() => { for (const q of pts) drill().objects.push({ id: uid(), ...makePlaceable('minicone', q) }); });
+      const made = [];
+      commit(() => { for (const q of pts) { const o = { id: uid(), ...makePlaceable('minicone', q) }; made.push(o); drill().objects.push(o); } });
+      if (made.length) placed(made.at(-1).id);
       break;
     }
     case 'freehand': {
@@ -733,7 +747,7 @@ function endPaletteDrag(e) {
   if (e.type !== 'pointerup' || !overRink(e)) return;
   finishActive();
   const o = addObject(makePlaceable(pd.type, snapPt(toRink(e))));
-  select(o.id);
+  placed(o.id);
   if (pd.type === 'coach') focusProp('label');
 }
 

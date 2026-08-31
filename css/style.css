@@ -27,14 +27,14 @@ textarea{resize:vertical}
 #cloud{display:flex;align-items:center;gap:6px;min-width:0}
 #cloud-status{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-#layout{display:grid;grid-template-columns:76px 1fr 340px;flex:1;min-height:0}
+#layout{display:grid;grid-template-columns:112px 1fr 340px;flex:1;min-height:0}
 
-#toolbar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;gap:2px;padding:6px 4px;overflow-y:auto}
+#toolbar{background:var(--panel);border-right:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:2px;align-content:start;padding:6px 4px;overflow-y:auto}
 #toolbar .tool{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 2px;background:transparent;border-color:transparent;font-size:10.5px;color:var(--muted);touch-action:none}
 #toolbar .tool .ico{font-size:18px;line-height:1;color:var(--text)}
 #toolbar .tool:hover{background:var(--panel-2)}
 #toolbar .tool.active{background:var(--accent);border-color:var(--accent);color:#fff}
-#toolbar .tool-sep{height:1px;background:var(--border);margin:4px 6px}
+#toolbar .tool-sep{grid-column:1/-1;height:1px;background:var(--border);margin:4px 6px}
 
 #stage{display:flex;flex-direction:column;min-width:0;min-height:0}
 .pin-row{display:flex;align-items:center;gap:5px}
@@ -53,7 +53,7 @@ textarea{resize:vertical}
 #animbar{border-bottom:none;border-top:1px solid var(--border)}
 #viewbar .label{color:var(--muted)}
 #viewbar button.active{background:var(--accent);border-color:var(--accent)}
-#toolbar .side-switch{display:flex;margin:0 4px 2px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+#toolbar .side-switch{grid-column:1/-1;display:flex;margin:0 4px 2px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
 #toolbar .side-switch button{flex:1;display:flex;align-items:center;justify-content:center;gap:3px;padding:3px 0;border:none;border-radius:0;background:transparent;font-size:11px;color:var(--muted)}
 #toolbar .side-switch button+button{border-left:1px solid var(--border)}
 #toolbar .side-switch button.active{background:var(--panel-2);color:var(--text)}

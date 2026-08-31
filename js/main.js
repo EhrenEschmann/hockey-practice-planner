@@ -89,7 +89,33 @@ function renderUI() {
   $('#btn-redo').disabled = !store.redoStack.length;
 }
 
-function renderAll() { renderCanvas(); renderUI(); }
+function renderAll() { renderCanvas(); renderUI(); updateRoute(); }
+
+// ---------- routing: the URL tracks the open practice & drill so refresh restores them ----------
+function updateRoute() {
+  const p = store.practice, d = store.drill;
+  if (!p || !d) return;
+  if ((store.data.lastDrill ||= {})[p.id] !== d.id) { store.data.lastDrill[p.id] = d.id; store.persist(); }
+  const hash = `#p=${p.id}&d=${d.id}`;
+  if (location.hash !== hash) history.replaceState(null, '', hash); // replaceState: no history spam, no hashchange loop
+}
+
+/** Open the practice/drill named in the URL hash; fall back to the last drill viewed in that practice. */
+function applyRoute() {
+  const pid = location.hash.match(/p=(\w+)/)?.[1];
+  const did = location.hash.match(/d=(\w+)/)?.[1];
+  if (pid && pid !== store.data.currentId && store.data.practices.some(x => x.id === pid)) store.switchPractice(pid);
+  const p = store.practice;
+  const want = did || store.data.lastDrill?.[p.id];
+  const i = p.drills.findIndex(x => x.id === want);
+  if (i >= 0) store.drillIndex = i;
+}
+
+window.addEventListener('hashchange', () => {
+  finishActive();
+  applyRoute();
+  sel = null; stopAnim(); renderAll();
+});
 
 /** Push an undo snapshot, apply a mutation, save and re-render. */
 function commit(fn) {
@@ -1519,6 +1545,7 @@ function setGate(state, detail = '') {
 })();
 
 // ---------- boot ----------
+applyRoute();
 setTool('select');
 renderAll();
 window.addEventListener('resize', drawSelection);

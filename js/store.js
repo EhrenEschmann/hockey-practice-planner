@@ -143,7 +143,9 @@ export class Store {
   switchPractice(id) {
     if (!this.data.practices.some(p => p.id === id)) return;
     this.data.currentId = id;
-    this.drillIndex = 0;
+    // come back to the drill that was open the last time this practice was viewed
+    const last = this.data.lastDrill?.[id];
+    this.drillIndex = Math.max(0, this.practice.drills.findIndex(d => d.id === last));
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.pending = null;

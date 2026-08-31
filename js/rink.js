@@ -11,6 +11,20 @@ export const VIEWS = {
   rightZone: { x: 121,  y: -3, w: 82,  h: 91 },
 };
 
+/** Nearest point on the boards (the rounded-rectangle rink edge) to p. */
+export function nearestBoardPoint(p) {
+  const { W, H, R } = RINK;
+  const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  // The boards are everywhere exactly R from the inner rectangle [R, W-R] x [R, H-R].
+  const qx = cl(p.x, R, W - R), qy = cl(p.y, R, H - R);
+  const dx = p.x - qx, dy = p.y - qy, d = Math.hypot(dx, dy);
+  if (d > 1e-9) return { x: qx + dx / d * R, y: qy + dy / d * R };
+  // Inside the inner rectangle: head straight for the nearest board.
+  const sides = [[p.x - R, -1, 0], [W - R - p.x, 1, 0], [p.y - R, 0, -1], [H - R - p.y, 0, 1]];
+  const [dd, nx, ny] = sides.sort((a, b) => a[0] - b[0])[0];
+  return { x: p.x + nx * (dd + R), y: p.y + ny * (dd + R) };
+}
+
 export const SVG_STYLE = `
   .ice{fill:#f7fbff}
   .boards{fill:none;stroke:#1d2430;stroke-width:1.2}
@@ -27,17 +41,32 @@ export const SVG_STYLE = `
   .path-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .arrow-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .skater-body .body{stroke:#fff;stroke-width:.3}
+  .skater-body.sliding .body{stroke-dasharray:.6 .4}
   .skater-body text{font-family:system-ui,sans-serif;pointer-events:none}
+  .coach-body .body{stroke:#fff;stroke-width:.35}
+  .coach-body text{font-family:system-ui,sans-serif;pointer-events:none}
+  .drop-preview{opacity:.65;pointer-events:none}
   .puck{fill:#111}
+  .pile-count{font-family:system-ui,sans-serif;pointer-events:none}
   .handle{fill:#fff;stroke:#3b82f6;stroke-width:.35;cursor:move}
   .handle:hover{fill:#bfdbfe}
   .obj{cursor:pointer}
   .selection{fill:none;stroke:#3b82f6;stroke-width:.4;stroke-dasharray:1 .8;pointer-events:none}
   .zone text,.obstacle text,.txt{font-family:system-ui,sans-serif}
   .barricade .core{fill:none;stroke:#222;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-  .pass-line{stroke:#333;stroke-width:.35;stroke-dasharray:1.2 .9}
+  .pass-line{fill:none;stroke:#333;stroke-width:.35;stroke-dasharray:1.2 .9}
+  .bank-mark circle{fill:#fff;stroke:#f07f13;stroke-width:.35}
+  .bank-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
+  .bank-mark.draggable{cursor:move}
+  .bank-mark.draggable circle{stroke:#3b82f6;stroke-width:.45}
   .shot-line{stroke:#333;stroke-width:.6}
   .puck-ring{fill:none;stroke:#3b82f6;stroke-width:.3}
+  .ev-mark circle{fill:#fff;stroke:#333;stroke-width:.3}
+  .ev-mark.shoot circle{stroke:#d7263d}
+  .ev-mark.receive circle{stroke:#1f9d55}
+  .ev-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
+  .ev-mark.draggable{cursor:move}
+  .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
   .wp-label circle{fill:#fff;stroke:#555;stroke-width:.2}
   .wp-label text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .barricade .stripe{fill:none;stroke:#f5a623;stroke-width:.7;stroke-dasharray:2 2;stroke-linecap:butt}

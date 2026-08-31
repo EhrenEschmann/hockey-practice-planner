@@ -22,12 +22,15 @@ textarea{resize:vertical}
 
 #topbar{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
 #topbar .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
-#topbar select{width:220px}
+#topbar select{width:200px}
+#topbar button{white-space:nowrap}
+#cloud{display:flex;align-items:center;gap:6px;min-width:0}
+#cloud-status{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 #layout{display:grid;grid-template-columns:76px 1fr 340px;flex:1;min-height:0}
 
 #toolbar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;gap:2px;padding:6px 4px;overflow-y:auto}
-#toolbar .tool{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 2px;background:transparent;border-color:transparent;font-size:10.5px;color:var(--muted)}
+#toolbar .tool{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 2px;background:transparent;border-color:transparent;font-size:10.5px;color:var(--muted);touch-action:none}
 #toolbar .tool .ico{font-size:18px;line-height:1;color:var(--text)}
 #toolbar .tool:hover{background:var(--panel-2)}
 #toolbar .tool.active{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -54,7 +57,13 @@ textarea{resize:vertical}
 #animbar{border-bottom:none;border-top:1px solid var(--border)}
 #viewbar .label{color:var(--muted)}
 #viewbar button.active{background:var(--accent);border-color:var(--accent)}
-#hint{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+#toolbar .side-switch{display:flex;margin:0 4px 2px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+#toolbar .side-switch button{flex:1;display:flex;align-items:center;justify-content:center;gap:3px;padding:3px 0;border:none;border-radius:0;background:transparent;font-size:11px;color:var(--muted)}
+#toolbar .side-switch button+button{border-left:1px solid var(--border)}
+#toolbar .side-switch button.active{background:var(--panel-2);color:var(--text)}
+#toolbar .side-switch .dot{width:8px;height:8px;border-radius:50%;border:1px solid #fff;display:inline-block}
+#viewbar{flex-wrap:nowrap}
+#hint{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:0;text-align:right}
 label.check{display:flex;align-items:center;gap:5px;white-space:nowrap}
 #animbar label{display:flex;align-items:center;gap:5px;white-space:nowrap}
 #animbar select{width:auto}
@@ -69,10 +78,18 @@ label.check{display:flex;align-items:center;gap:5px;white-space:nowrap}
 body[data-tool=select] #rink{cursor:default}
 body[data-tool=pan] #rink{cursor:grab}
 body[data-tool=erase] #rink{cursor:not-allowed}
-body[data-tool=cone] #rink,body[data-tool=tire] #rink,body[data-tool=puck] #rink,body[data-tool=net] #rink,
-body[data-tool=skater] #rink,body[data-tool=arrow] #rink,body[data-tool=barricade] #rink,body[data-tool=text] #rink,
-body[data-tool=zone] #rink,body[data-tool=obstacle] #rink{cursor:crosshair}
+body[data-tool=cone] #rink,body[data-tool=minicone] #rink,body[data-tool=tire] #rink,body[data-tool=pile] #rink,body[data-tool=puck] #rink,body[data-tool=net] #rink,
+body[data-tool=skater] #rink,body[data-tool=coach] #rink,body[data-tool=goalie] #rink,body[data-tool=arrow] #rink,body[data-tool=barricade] #rink,body[data-tool=text] #rink,
+body[data-tool=zone] #rink,body[data-tool=obstacle] #rink,body[data-tool=raisedpad] #rink,body[data-tool=jumppad] #rink{cursor:crosshair}
 body.panning #rink{cursor:grabbing}
+
+/* dragging a tool from the toolbar onto the ice */
+#drag-ghost{position:fixed;z-index:1000;pointer-events:none;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 8px;background:var(--panel-2);border:1px solid var(--accent);border-radius:6px;font-size:10.5px;color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.45)}
+#drag-ghost[hidden]{display:none}
+#drag-ghost .ico{font-size:18px;line-height:1}
+#drag-ghost.over{opacity:0} /* on the ice the SVG preview takes over */
+#canvas-wrap.drop-target{box-shadow:inset 0 0 0 2px var(--accent)}
+body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 
 #sidebar{background:var(--panel);border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
 .panel{padding:10px 12px;border-bottom:1px solid var(--border)}
@@ -98,6 +115,26 @@ body.panning #rink{cursor:grabbing}
 .swatch{width:22px;height:22px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
 .swatch.active{border-color:#fff}
 
+#library{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.7)}
+#library[hidden]{display:none}
+.lib-panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;width:min(1060px,94vw);height:min(720px,90vh);display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.lib-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);flex:none}
+.lib-head input{width:220px}
+#lib-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;padding:12px}
+.lib-card{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.lib-card svg{width:100%;height:auto;border-radius:4px;background:#fff}
+.lib-card .lib-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-card .lib-meta{color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-card button{align-self:stretch}
+.lib-empty{grid-column:1/-1;color:var(--muted);text-align:center;padding:40px 0}
+#gate{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.82);backdrop-filter:blur(3px)}
+#gate[hidden]{display:none}
+.gate-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:28px 32px;width:min(380px,90vw);text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.gate-brand{font-weight:700;font-size:20px;margin-bottom:8px}
+.gate-card p{margin:6px 0 14px;color:var(--text)}
+.gate-card button.primary{font-size:15px;padding:8px 18px}
+.gate-card #gate-detail{margin:12px 0 0;min-height:1em}
+body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 #print-area{display:none}
 @media print{
   body>*:not(#print-area){display:none!important}

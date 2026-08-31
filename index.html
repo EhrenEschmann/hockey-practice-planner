@@ -19,6 +19,12 @@
   <button id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button>
   <button id="btn-redo" title="Redo (Ctrl+Y)">↷ Redo</button>
   <span class="sep"></span>
+  <span id="cloud" hidden>
+    <span id="cloud-status" class="muted small" title="Practices are auto-saved to your Firebase account"></span>
+    <button id="btn-signin" title="Sign in with Google to save practices to the cloud">Sign in</button>
+    <button id="btn-signout" title="Sign out" hidden>Sign out</button>
+  </span>
+  <span class="sep"></span>
   <button id="btn-import" title="Import a practice JSON file">Import</button>
   <button id="btn-export" title="Export this practice as JSON">Export JSON</button>
   <button id="btn-png" title="Export current drill as PNG">Export PNG</button>
@@ -31,14 +37,24 @@
     <button class="tool" data-tool="select"    title="Select / move (V)"><span class="ico">↖</span><span>Select</span></button>
     <button class="tool" data-tool="pan"       title="Pan (H) — or hold Space / middle mouse"><span class="ico">✋</span><span>Pan</span></button>
     <div class="tool-sep"></div>
-    <button class="tool" data-tool="skater"    title="Skater + path (S)"><span class="ico">⛸</span><span>Skater</span></button>
+    <button class="tool" data-tool="skater"    title="Skater + path (S) — or drag onto the ice"><span class="ico">⛸</span><span>Skater</span></button>
+    <div class="side-switch" title="New skaters: O = offense (blue), D = defense (red)">
+      <button data-side="O" class="active" title="New skaters are offensive players (blue)"><span class="dot" style="background:#1e56d6"></span>O</button>
+      <button data-side="D" title="New skaters are defensive players (red)"><span class="dot" style="background:#d62828"></span>D</button>
+    </div>
+    <button class="tool" data-tool="coach"     title="Coach (K) — click to place, or drag onto the ice"><span class="ico">📋</span><span>Coach</span></button>
+    <button class="tool" data-tool="goalie"    title="Goalie (G) — click or drop near a net to put a goalie in its crease"><span class="ico">🧤</span><span>Goalie</span></button>
     <button class="tool" data-tool="arrow"     title="Arrow annotation (A)"><span class="ico">➚</span><span>Arrow</span></button>
     <div class="tool-sep"></div>
-    <button class="tool" data-tool="cone"      title="Cone (C)"><span class="ico">🔺</span><span>Cone</span></button>
-    <button class="tool" data-tool="tire"      title="Tire (T)"><span class="ico">⭕</span><span>Tire</span></button>
-    <button class="tool" data-tool="puck"      title="Puck (P)"><span class="ico">⚫</span><span>Puck</span></button>
-    <button class="tool" data-tool="net"       title="Net (N)"><span class="ico">🥅</span><span>Net</span></button>
+    <button class="tool" data-tool="cone"      title="Cone (C) — or drag onto the ice"><span class="ico">🔺</span><span>Cone</span></button>
+    <button class="tool" data-tool="minicone"  title="Small cone (M) — click for one, drag to lay a row; skaters stickhandle the puck through them"><span class="ico">🔸</span><span>Small cone</span></button>
+    <button class="tool" data-tool="tire"      title="Tire (T) — or drag onto the ice"><span class="ico">⭕</span><span>Tire</span></button>
+    <button class="tool" data-tool="puck"      title="Puck (P) — or drag onto the ice"><span class="ico">⚫</span><span>Puck</span></button>
+    <button class="tool" data-tool="pile"      title="Puck pile (L) — a heap of pucks skaters take from; click to place or drag onto the ice"><span class="ico">🪣</span><span>Puck pile</span></button>
+    <button class="tool" data-tool="net"       title="Net (N) — or drag onto the ice"><span class="ico">🥅</span><span>Net</span></button>
     <button class="tool" data-tool="obstacle"  title="Obstacle / pad — drag a box (O)"><span class="ico">▬</span><span>Obstacle</span></button>
+    <button class="tool" data-tool="raisedpad" title="Raised pad on tires (R) — skaters slide under it; click to place or drag onto the ice"><span class="ico">🛝</span><span>Raised pad</span></button>
+    <button class="tool" data-tool="jumppad"   title="Jump pad (J) — a low pad skaters jump over; click to place or drag onto the ice"><span class="ico">🤸</span><span>Jump pad</span></button>
     <div class="tool-sep"></div>
     <button class="tool" data-tool="barricade" title="Barricade / divider — click points, Enter to finish (B)"><span class="ico">🚧</span><span>Barricade</span></button>
     <button class="tool" data-tool="zone"      title="Zone / station — drag a box (Z)"><span class="ico">▭</span><span>Zone</span></button>
@@ -82,7 +98,7 @@
       <button id="btn-zoom-in" title="Zoom in">+</button>
       <span class="sep"></span>
       <label class="check"><input type="checkbox" id="snap-toggle"> Snap to 1 ft</label>
-      <div class="spacer"></div>
+
       <span id="hint"></span>
     </div>
 
@@ -103,7 +119,7 @@
           <option value="2">2×</option>
         </select>
       </label>
-      <label class="check"><input type="checkbox" id="anim-loop" checked> Loop</label>
+      <label class="check"><input type="checkbox" id="anim-loop"> Loop</label>
       <label class="check"><input type="checkbox" id="anim-trails" checked> Show paths</label>
     </div>
   </main>
@@ -117,14 +133,23 @@
     <section id="plan" class="panel">
       <h2>Drills <span id="plan-total"></span></h2>
       <ol id="drill-list"></ol>
-      <button id="btn-add-drill">+ Add drill</button>
+      <div class="row"><button id="btn-add-drill">+ Add drill</button><button id="btn-library" title="Browse every drill from all of your practices and add copies to this one">📚 From library…</button></div>
     </section>
 
     <section class="panel help">
       <h2>Tips</h2>
       <ul>
+        <li><b>Drag &amp; drop:</b> drag the Coach (or Skater, Cone, Tire, Puck, Net) button straight onto the ice to drop one there.</li>
+        <li><b>Small cones:</b> drag to lay a row of them. A puck carrier whose path runs along the row stickhandles the puck through them during animation.</li>
+        <li><b>Goalie:</b> click (or drag the Goalie button) near a net and the goalie is placed in the crease facing out; or select a net and press <b>Add goalie</b>.</li>
+        <li><b>Coach:</b> a diamond marker with a label. Coaches can receive passes and pass or shoot — use the Puck tool on a coach (or drop a puck on them) and set their Facing. They can move too: use the Skater tool on a coach to give them a path.</li>
+        <li><b>Starts moving:</b> in a skater's or coach's panel, choose "when #1 reaches…" and a waypoint — they wait until that player gets there (plus their start delay).</li>
+        <li><b>Offense / Defense:</b> the O / D switch under the Skater tool colours new skaters blue (offense) or red (defense), numbered per side. Change a skater's side (and colour) in its Selection panel.</li>
         <li><b>Skater:</b> click to place, keep clicking to add waypoints (or drag to draw freehand). Enter/Esc finishes. Click an existing skater to extend its path.</li>
+        <li><b>Puck pile:</b> place a pile, then in a skater's panel press <b>Take puck from pile</b> — they pick one up where their path passes the pile (or use <b>Give a puck to…</b> on the pile). Then add passes and shots as usual.</li>
+        <li><b>Passes &amp; shots:</b> select a puck, add a Pass/Shoot, then <b>Mark on path</b> and click where on the skater's path it happens — or drag the P / S marker along the path. A pass to a moving player can instead be timed by the receiver ("arriving as #2 reaches …") — the R marker shows where they get it. Tick <b>off the boards</b> for a bank pass (drag the B marker along the boards) — a player can bank it to themselves.</li>
         <li><b>Barricade / Arrow:</b> click points, double-click or Enter to finish.</li>
+        <li><b>Raised pad / Jump pad:</b> run a skater's path through a raised pad and they slide under it; across a low jump pad and they jump over it — pushing the puck ahead either way.</li>
         <li><b>Zone / Obstacle:</b> drag a box. Use "Focus" on a zone to plan a drill in just that section.</li>
         <li><b>Select:</b> drag objects, drag waypoint handles, double-click a handle to remove it. Arrow keys nudge. Delete removes.</li>
         <li>Wheel to zoom, Space/middle-mouse to pan.</li>
@@ -133,6 +158,27 @@
   </aside>
 </div>
 
+<div id="library" hidden>
+  <div class="lib-panel">
+    <div class="lib-head">
+      <b>Drill library</b>
+      <span class="muted small">every drill from all of your practices</span>
+      <input id="lib-search" type="search" placeholder="Search drills…">
+      <span class="spacer"></span>
+      <span class="muted small">Adding to: <b id="lib-target"></b></span>
+      <button id="lib-close" title="Close (Esc)">✕ Done</button>
+    </div>
+    <div id="lib-grid"></div>
+  </div>
+</div>
+<div id="gate" hidden>
+  <div class="gate-card">
+    <div class="gate-brand">🏒 Practice Planner</div>
+    <p id="gate-msg">Sign in to plan practices.</p>
+    <button id="gate-signin" class="primary">Sign in with Google</button>
+    <p id="gate-detail" class="muted small"></p>
+  </div>
+</div>
 <div id="print-area"></div>
 <script type="module" src="js/main.js"></script>
 </body>

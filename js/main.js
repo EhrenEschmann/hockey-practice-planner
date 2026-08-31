@@ -1,8 +1,9 @@
-import { RINK, VIEWS, rinkSVG, SVG_STYLE } from './rink.js';
+import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
-import { makeSim, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
+import { makeSim, facingOf, isPlayer, underPad, jumpHeight, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
 import { Store, uid, newDrill, newPractice, cloneObjects, migrateDrill } from './store.js';
+import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -24,11 +25,13 @@ let spaceDown = false;
 let snap = false;
 let showPaths = true;
 let lastSkaterColor = 'blue';
+const SIDES = { O: { color: 'blue', name: 'Offense' }, D: { color: 'red', name: 'Defense' } };
+let newSide = 'O';            // side (and colour) given to newly placed skaters
 let lastZoneColor = 0;
 
-const anim = { playing: false, t: 0, speed: 1, loop: true, raf: null, last: 0 };
+const anim = { playing: false, t: 0, speed: 1, loop: false, raf: null, last: 0 };
 let sim = null;          // simulation of the current drill (rebuilt on every canvas render)
-let pickTarget = null;   // { puckId, ev } while waiting for a click to set a shot target
+let pickTarget = null;   // { puckId, ev, kind: 'target' | 'dist' | 'bank' } while waiting for a click to set a shot target / path mark / board bounce
 
 const drill = () => store.drill;
 const getObj = id => drill().objects.find(o => o.id === id);
@@ -44,7 +47,8 @@ function renderCanvas() {
   const d = drill();
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
-  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: getObj(sel)?.type === 'puck' });
+  const selObj = getObj(sel);
+  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger });
   drawSelection();
   if (anim.t > 0) applyAnimation(anim.t);
   $$('#viewbar [data-view]').forEach(b => b.classList.toggle('active', sameView(VIEWS[b.dataset.view], d.view)));
@@ -57,7 +61,7 @@ function drawSelection() {
   if (!sel) return;
   const el = objLayer.querySelector(`[data-id="${sel}"]`);
   if (!el) { sel = null; return; }
-  const target = el.querySelector('.skater-body, .puck-disc') || el;
+  const target = el.querySelector('.skater-body, .coach-body, .puck-disc') || el;
   const handlesToHide = Array.from(el.querySelectorAll('.handle'));
   handlesToHide.forEach(h => h.style.display = 'none');
   const bb = target.getBBox();
@@ -97,10 +101,16 @@ function commit(fn) {
 const HINTS = {
   select: 'Click to select · drag to move · drag handles to reshape · double-click a waypoint to delete it · Delete removes',
   pan: 'Drag to pan · wheel to zoom',
-  skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater to extend',
+  skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater or coach to extend their path',
+  coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
+  goalie: 'Click near a net to put a goalie in its crease (facing out) · click open ice for a goalie anywhere',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
-  cone: 'Click to place a cone', tire: 'Click to place a tire', puck: 'Click a skater to give them a puck · click open ice for a loose puck · select a puck to add passes & shots', net: 'Click to place a net (rotate in Selection panel)',
+  cone: 'Click to place a cone', tire: 'Click to place a tire',
+  minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click a pile to take a puck from it · click open ice for a loose puck',
+  pile: 'Click to place a pile of pucks · skaters take pucks from it ("Take puck from pile" in their panel)', net: 'Click to place a net (rotate in Selection panel)',
   obstacle: 'Drag a box to add an obstacle / pad',
+  raisedpad: 'Click to place a raised pad on tires · skaters whose path runs through it slide under',
+  jumppad: 'Click to place a low pad · skaters whose path runs over it jump it',
   barricade: 'Click points to lay a barricade · double-click or Enter to finish',
   zone: 'Drag a box to mark a section / station',
   text: 'Click to place a text label',
@@ -143,13 +153,98 @@ function newPuck(p, carrier) {
   return { type: 'puck', x: p.x, y: p.y, carrier, events: [], passSpeed: DEFAULT_PASS_SPEED, shotSpeed: DEFAULT_SHOT_SPEED };
 }
 
+/** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
+const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'pile', 'net', 'raisedpad', 'jumppad']);
+const CREASE_DEPTH = 3.5;  // ft in front of the goal line where a goalie stands
+const NET_SNAP = 8;        // ft: a goalie placed this close to a net goes into its crease
+const MINICONE_SPACING = 3; // ft between small cones when laying a row
+
+/** A fresh object of the given placeable type at point p (no id yet). */
+function makePlaceable(type, p) {
+  const count = t => drill().objects.filter(x => x.type === t).length;
+  switch (type) {
+    case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black', speed: 10, delay: 0, path: [] }; }
+    case 'skater': {
+      // Offense (blue) or defense (red), numbered per side; a custom last colour is used when no side is set.
+      const side = SIDES[newSide] ? newSide : null;
+      const n = drill().objects.filter(x => x.type === 'skater' && x.role !== 'G' && (side ? x.side === side : !x.side)).length + 1;
+      return { type: 'skater', x: p.x, y: p.y, label: String(n), color: side ? SIDES[side].color : lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [], ...(side ? { side } : {}) };
+    }
+    case 'goalie': {
+      const net = drill().objects.filter(o => o.type === 'net' && G.dist(o, p) < NET_SNAP).sort((a, b) => G.dist(a, p) - G.dist(b, p))[0];
+      return makeGoalie(net, p);
+    }
+    case 'cone': return { type: 'cone', x: p.x, y: p.y, color: '#ff6a00' };
+    case 'minicone': return { type: 'minicone', x: p.x, y: p.y, color: '#ffb300' };
+    case 'tire': return { type: 'tire', x: p.x, y: p.y };
+    case 'pile': return { type: 'pile', x: p.x, y: p.y, count: 12 };
+    case 'raisedpad': return { type: 'raisedpad', x: p.x, y: p.y, w: 6, h: 2, rot: 0, label: '' };
+    case 'jumppad': return { type: 'jumppad', x: p.x, y: p.y, w: 6, h: 1.5, rot: 0, label: '' };
+    case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
+    case 'puck': {
+      // Dropped onto a skater or coach without a puck → they carry it.
+      const s = drill().objects.find(o => isPlayer(o) && G.dist(o, p) < 3);
+      const taken = s && drill().objects.some(o => o.type === 'puck' && o.carrier === s.id);
+      return newPuck(p, s && !taken ? s.id : null);
+    }
+  }
+  return null;
+}
+
+/** A puck that starts in `pile`, picked up by `player` where their path passes closest to the pile. */
+function puckFromPile(pile, player) {
+  const pk = { id: uid(), type: 'puck', x: pile.x, y: pile.y, carrier: null, pile: pile.id, events: [], passSpeed: DEFAULT_PASS_SPEED, shotSpeed: DEFAULT_SHOT_SPEED };
+  if (player) {
+    const tm = sim.skater(player.id);
+    const ev = { type: 'pickup', skater: player.id, wp: 0 };
+    if (player.path?.length) ev.dist = G.round1(G.projectOnPolyline(tm.dense, tm.cum, pile).d);
+    pk.events.push(ev);
+  }
+  return pk;
+}
+/** The pile closest to a player's path (or to the player), if there is one. */
+function nearestPile(player) {
+  const piles = drill().objects.filter(o => o.type === 'pile');
+  if (!piles.length) return null;
+  const tm = sim.skater(player.id);
+  return piles.sort((a, b) => G.projectOnPolyline(tm.dense, tm.cum, a).dist - G.projectOnPolyline(tm.dense, tm.cum, b).dist)[0];
+}
+
+/** Where a goalie stands for a net: just in front of the goal line, on the side the net opens to. */
+function creaseSpot(net) {
+  const a = (net.rot || 0) * Math.PI / 180;
+  return { x: G.round1(net.x + CREASE_DEPTH * Math.cos(a)), y: G.round1(net.y + CREASE_DEPTH * Math.sin(a)) };
+}
+/** A goalie in the crease of `net` (facing out of it), or at point p if no net is given. */
+function makeGoalie(net, p) {
+  const n = drill().objects.filter(o => o.type === 'skater' && o.role === 'G').length;
+  const pos = net ? creaseSpot(net) : p;
+  const g = { type: 'skater', x: pos.x, y: pos.y, label: n ? `G${n + 1}` : 'G', color: 'black', role: 'G', speed: 20, delay: 0, backward: false, path: [] };
+  if (net) g.facing = ((net.rot || 0) % 360 + 360) % 360;
+  return g;
+}
+/** The goalie already standing in a net's crease, if any. */
+function goalieOf(net) {
+  const spot = creaseSpot(net);
+  return drill().objects.find(o => o.type === 'skater' && o.role === 'G' && G.dist(o, spot) < 4) || null;
+}
+
+/** Evenly spaced points from a to b, about MINICONE_SPACING ft apart (at least two). */
+function rowPoints(a, b) {
+  const len = G.dist(a, b);
+  const count = Math.max(2, Math.round(len / MINICONE_SPACING) + 1);
+  return Array.from({ length: count }, (_, i) => ({ x: G.round1(a.x + (b.x - a.x) * i / (count - 1)), y: G.round1(a.y + (b.y - a.y) * i / (count - 1)) }));
+}
+
 function deleteObject(id) {
   if (!id) return;
   const victim = getObj(id);
   commit(() => {
     const d = drill();
     d.objects = d.objects.filter(o => o.id !== id);
-    if (victim?.type === 'skater') for (const pk of d.objects) if (pk.type === 'puck') {
+    if (isPlayer(victim)) for (const x of d.objects) if (x.trigger?.player === id) delete x.trigger;
+    if (victim?.type === 'pile') for (const pk of d.objects) if (pk.type === 'puck' && pk.pile === id) { pk.x = victim.x; pk.y = victim.y; delete pk.pile; }
+    if (isPlayer(victim)) for (const pk of d.objects) if (pk.type === 'puck') {
       if (pk.carrier === id) { pk.carrier = null; pk.x = victim.x; pk.y = victim.y; }
       pk.events = (pk.events || []).filter(ev => ev.to !== id && ev.skater !== id);
     }
@@ -180,10 +275,15 @@ function onPointerDown(e) {
   const handleEl = e.target.closest('[data-handle]');
 
   if (pickTarget) {
-    const ev = getObj(pickTarget.puckId)?.events?.[pickTarget.ev];
-    pickTarget = null;
+    const pt = pickTarget; pickTarget = null;
     $('#hint').textContent = HINTS[tool] || '';
-    if (ev) commit(() => ev.target = { x: p.x, y: p.y });
+    const pk = getObj(pt.puckId); const ev = pk?.events?.[pt.ev];
+    if (!ev) return;
+    if (pt.kind === 'dist') {
+      const who = eventSkater(pk, pt.ev);
+      if (who) commit(() => ev.dist = pathDistanceAt(who, raw));
+    } else if (pt.kind === 'bank') commit(() => ev.bank = boardPt(raw));
+    else commit(() => ev.target = { x: p.x, y: p.y });
     return;
   }
 
@@ -195,13 +295,22 @@ function onPointerDown(e) {
 
   switch (tool) {
     case 'select': {
-      if (handleEl && id) {
+      const markEl = e.target.closest('[data-evmark]');
+      const markWho = markEl && id ? eventSkater(getObj(id), +markEl.dataset.evmark) : null;
+      const bankEl = e.target.closest('[data-bank]');
+      if (bankEl && id && getObj(id)?.events?.[+bankEl.dataset.bank]) {
+        drag = { type: 'bank', id, ev: +bankEl.dataset.bank, pushed: false };
+        select(id);
+      } else if (markWho) {
+        drag = { type: 'evmark', id, ev: +markEl.dataset.evmark, who: markWho, pushed: false };
+        select(id);
+      } else if (handleEl && id) {
         const o = getObj(id);
-        drag = { type: 'handle', id, index: +handleEl.dataset.handle, key: o.type === 'skater' ? 'path' : 'points', pushed: false };
+        drag = { type: 'handle', id, index: +handleEl.dataset.handle, key: isPlayer(o) ? 'path' : 'points', pushed: false };
         select(id);
       } else if (id) {
         const o = getObj(id);
-        if (o.type === 'puck' && o.carrier) { const q = sim.puckPos(o.id, 0); o.x = G.round1(q.x); o.y = G.round1(q.y); }
+        if (o.type === 'puck' && (o.carrier || o.pile)) { const q = sim.puckPos(o.id, 0); o.x = G.round1(q.x); o.y = G.round1(q.y); }
         drag = { type: 'move', id, start: raw, orig: JSON.parse(JSON.stringify(o)), pushed: false };
         select(id);
       } else {
@@ -211,25 +320,34 @@ function onPointerDown(e) {
     }
     case 'skater': {
       const o = id && getObj(id);
-      if (o?.type === 'skater' && o.id !== activeSkater) {
+      if (isPlayer(o) && o.id !== activeSkater) {
+        o.path ||= [];
         activeSkater = o.id; select(o.id);
       } else if (activeSkater && getObj(activeSkater)) {
         drag = { type: 'freehand', id: activeSkater, pts: [raw], start: p };
       } else {
-        const count = drill().objects.filter(x => x.type === 'skater').length;
-        const s = addObject({ type: 'skater', x: p.x, y: p.y, label: String(count + 1), color: lastSkaterColor, role: 'F', speed: 20, delay: 0, backward: false, path: [] });
+        const s = addObject(makePlaceable('skater', p));
         activeSkater = s.id; select(s.id);
       }
       break;
     }
-    case 'cone': addObject({ type: 'cone', x: p.x, y: p.y, color: '#ff6a00' }); break;
-    case 'tire': addObject({ type: 'tire', x: p.x, y: p.y }); break;
+    case 'coach': select(addObject(makePlaceable('coach', p)).id); break;
+    case 'goalie': select(addObject(makePlaceable('goalie', p)).id); break;
+    case 'cone': addObject(makePlaceable('cone', p)); break;
+    case 'minicone': drag = { type: 'row', start: p }; break; // click = one cone, drag = a row (decided on pointerup)
+    case 'tire': addObject(makePlaceable('tire', p)); break;
+    case 'pile': select(addObject(makePlaceable('pile', p)).id); break;
+    case 'raisedpad': select(addObject(makePlaceable('raisedpad', p)).id); break;
+    case 'jumppad': select(addObject(makePlaceable('jumppad', p)).id); break;
     case 'puck': {
       const s = id && getObj(id);
-      if (s?.type === 'skater') {
+      if (isPlayer(s)) {
         const existing = drill().objects.find(o => o.type === 'puck' && o.carrier === s.id);
         if (existing) select(existing.id);
         else select(addObject(newPuck(p, s.id)).id);
+      } else if (s?.type === 'pile') {
+        const pk = puckFromPile(s, null);
+        commit(() => drill().objects.push(pk)); select(pk.id);
       } else if (s?.type === 'puck') {
         select(s.id);
       } else {
@@ -237,7 +355,7 @@ function onPointerDown(e) {
       }
       break;
     }
-    case 'net': addObject({ type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 }); break;
+    case 'net': addObject(makePlaceable('net', p)); break;
     case 'text': { const t = addObject({ type: 'text', x: p.x, y: p.y, text: 'Label', size: 3, color: '#111' }); select(t.id); focusProp('text'); break; }
     case 'obstacle':
     case 'zone': {
@@ -299,7 +417,7 @@ function onPointerMove(e) {
       const tr = q => ({ x: G.round1(q.x + dx), y: G.round1(q.y + dy) });
       if (o.points) o.points = drag.orig.points.map(tr);
       else { Object.assign(o, tr(drag.orig)); if (o.path) o.path = drag.orig.path.map(tr); }
-      if (o.type === 'puck') o.carrier = null; // dragging detaches; dropping on a skater re-attaches (see onPointerUp)
+      if (o.type === 'puck') { o.carrier = null; delete o.pile; } // dragging detaches; dropping on a skater re-attaches (see onPointerUp)
       renderCanvas();
       break;
     }
@@ -310,12 +428,31 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'evmark': {
+      const ev = getObj(drag.id)?.events?.[drag.ev]; if (!ev) return;
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      ev.dist = pathDistanceAt(drag.who, raw);
+      renderCanvas();
+      break;
+    }
+    case 'bank': {
+      const ev = getObj(drag.id)?.events?.[drag.ev]; if (!ev) return;
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      ev.bank = boardPt(raw);
+      renderCanvas();
+      break;
+    }
     case 'rect': {
       const o = getObj(drag.id); if (!o) return;
       const r = G.rectFromPoints(drag.start, p);
       if (o.type === 'zone') Object.assign(o, r);
       else Object.assign(o, { x: G.round1(r.x + r.w / 2), y: G.round1(r.y + r.h / 2), w: G.round1(r.w), h: G.round1(r.h) });
       renderCanvas();
+      break;
+    }
+    case 'row': {
+      const pts = G.dist(drag.start, p) < 1.5 ? [drag.start] : rowPoints(drag.start, p);
+      overlay.innerHTML = `<g class="drop-preview">${renderObjects({ objects: pts.map((q, i) => ({ id: `row${i}`, ...makePlaceable('minicone', q) })) }, null, {})}</g>`;
       break;
     }
     case 'freehand': {
@@ -348,12 +485,12 @@ function onPointerUp(e) {
     case 'move': {
       const o = getObj(dg.id);
       if (o?.type === 'puck' && dg.pushed) {
-        const target = d.objects.find(s => s.type === 'skater' && G.dist(s, o) < 3);
+        const target = d.objects.find(s => isPlayer(s) && G.dist(s, o) < 3);
         o.carrier = target ? target.id : null;
       }
       store.save(); renderAll(); break;
     }
-    case 'handle': store.save(); renderAll(); break;
+    case 'handle': case 'evmark': case 'bank': store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
@@ -363,6 +500,12 @@ function onPointerUp(e) {
       store.save();
       sel = getObj(dg.id) ? dg.id : null;
       renderAll();
+      break;
+    }
+    case 'row': {
+      const p = snapPt(toRink(e));
+      const pts = G.dist(dg.start, p) < 1.5 ? [dg.start] : rowPoints(dg.start, p);
+      commit(() => { for (const q of pts) drill().objects.push({ id: uid(), ...makePlaceable('minicone', q) }); });
       break;
     }
     case 'freehand': {
@@ -387,7 +530,7 @@ function onDblClick(e) {
   const idEl = e.target.closest('[data-id]');
   if (tool === 'select' && handleEl && idEl) {
     const o = getObj(idEl.dataset.id);
-    const key = o.type === 'skater' ? 'path' : 'points';
+    const key = isPlayer(o) ? 'path' : 'points';
     if (key === 'points' && o.points.length <= 2) return;
     commit(() => o[key].splice(+handleEl.dataset.handle, 1));
     return;
@@ -416,7 +559,11 @@ function zoomAt(p, f) {
 function setView(v) { drill().view = { ...v }; store.save(); renderCanvas(); }
 
 // ---------- keyboard ----------
+let gated = false; // sign-in required (Firebase configured, nobody signed in): the app is read-only behind the gate
+
 document.addEventListener('keydown', e => {
+  if (gated) return;
+  if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
@@ -440,11 +587,12 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', a: 'arrow', c: 'cone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
 document.addEventListener('keyup', e => {
+  if (gated) return;
   if (e.key === ' ') {
     if (spaceDown && !isEditing() && !drag) togglePlay();
     spaceDown = false;
@@ -465,10 +613,32 @@ function doRedo() { if (store.redo()) { sel = null; renderAll(); } }
 function totalDuration() { return sim ? sim.duration() : 0; }
 
 function applyAnimation(t) {
+  const raised = drill().objects.filter(o => o.type === 'raisedpad');
+  const jumps = drill().objects.filter(o => o.type === 'jumppad');
   for (const o of drill().objects) {
     let el, p;
-    if (o.type === 'skater' && o.path?.length) { p = sim.skaterPos(o.id, t); el = objLayer.querySelector(`.skater-body[data-skater="${o.id}"]`); }
+    if (isPlayer(o) && o.path?.length) {
+      p = sim.skaterPose(o.id, t); el = objLayer.querySelector(`[data-skater="${o.id}"]`);
+      if (el && o.type === 'skater') {
+        // Under a raised pad the skater slides: body stretched along their heading and flattened.
+        const sliding = raised.some(pd => underPad(p, pd, 1));
+        el.classList.toggle('sliding', sliding);
+        el.querySelector('.body')?.setAttribute('transform', sliding ? `rotate(${(p.heading * 180 / Math.PI).toFixed(1)}) scale(1.7 .55)` : '');
+        // Over a low pad the skater jumps: the figure grows toward the peak and a shadow falls away beneath.
+        const jump = jumps.reduce((m, pd) => Math.max(m, jumpHeight(p, pd)), 0);
+        el.classList.toggle('jumping', jump > 0);
+        el.querySelector('.figure')?.setAttribute('transform', jump > 0 ? `scale(${(1 + 0.45 * jump).toFixed(3)})` : '');
+        const sh = el.querySelector('.shadow');
+        if (sh) { sh.style.display = jump > 0 ? '' : 'none'; sh.setAttribute('transform', `translate(${(1.4 * jump).toFixed(2)} ${(2.6 * jump).toFixed(2)})`); }
+      }
+    }
     else if (o.type === 'puck') { p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`); }
+    else if (o.type === 'pile') {
+      // Count down as pucks are taken; before the drill starts the badge shows what the pile holds.
+      const taken = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id && (t > 0 ? (sim.puck(pk.id).info[0]?.t ?? Infinity) <= t : false)).length;
+      const badge = objLayer.querySelector(`[data-id="${o.id}"] .pile-count`);
+      if (badge) badge.textContent = Math.max(0, Math.round(+o.count || 0) - (t > 0 ? taken : drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id).length));
+    }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
   }
 }
@@ -492,6 +662,10 @@ function togglePlay() {
   if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); }
   else {
     if (totalDuration() <= 0) return;
+    // Playing is for watching, not editing: drop the selection and finish anything being drawn.
+    finishActive();
+    if (pickTarget) { pickTarget = null; $('#hint').textContent = HINTS[tool] || ''; }
+    if (sel) select(null);
     if (anim.t >= totalDuration()) anim.t = 0;
     anim.playing = true; anim.last = performance.now();
     anim.raf = requestAnimationFrame(tick);
@@ -525,7 +699,71 @@ $$('#viewbar [data-view]').forEach(b => b.addEventListener('click', () => setVie
 $('#btn-zoom-in').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1 / 1.25); });
 $('#btn-zoom-out').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1.25); });
 $('#snap-toggle').addEventListener('change', e => snap = e.target.checked);
-$$('#toolbar .tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+$$('#toolbar [data-side]').forEach(b => b.addEventListener('click', () => {
+  newSide = b.dataset.side;
+  $$('#toolbar [data-side]').forEach(x => x.classList.toggle('active', x === b));
+}));
+$$('#toolbar .tool').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.dragged) { delete b.dataset.dragged; return; } // the click that follows a drag-and-drop
+  setTool(b.dataset.tool);
+}));
+
+// ---------- drag a tool from the toolbar onto the ice ----------
+const canvasWrap = $('#canvas-wrap');
+const ghost = document.createElement('div');
+ghost.id = 'drag-ghost'; ghost.hidden = true;
+document.body.appendChild(ghost);
+let paletteDrag = null; // { type, btn, sx, sy, active }
+
+function overRink(e) {
+  const r = canvasWrap.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}
+
+function endPaletteDrag(e) {
+  const pd = paletteDrag; paletteDrag = null;
+  if (!pd?.active) return; // a plain click — the button's click handler picks the tool
+  ghost.hidden = true; ghost.classList.remove('over');
+  canvasWrap.classList.remove('drop-target');
+  document.body.classList.remove('palette-dragging');
+  pd.btn.dataset.dragged = '1';
+  setTimeout(() => delete pd.btn.dataset.dragged, 0);
+  drawSelection(); // clears the drop preview
+  if (e.type !== 'pointerup' || !overRink(e)) return;
+  finishActive();
+  const o = addObject(makePlaceable(pd.type, snapPt(toRink(e))));
+  select(o.id);
+  if (pd.type === 'coach') focusProp('label');
+}
+
+$$('#toolbar .tool').forEach(btn => {
+  const type = btn.dataset.tool;
+  if (!PLACEABLE.has(type)) return;
+  btn.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    paletteDrag = { type, btn, sx: e.clientX, sy: e.clientY, active: false };
+    btn.setPointerCapture(e.pointerId);
+  });
+  btn.addEventListener('pointermove', e => {
+    if (!paletteDrag || paletteDrag.btn !== btn) return;
+    if (!paletteDrag.active) {
+      if (Math.hypot(e.clientX - paletteDrag.sx, e.clientY - paletteDrag.sy) < 6) return;
+      paletteDrag.active = true;
+      ghost.innerHTML = btn.innerHTML; ghost.hidden = false;
+      document.body.classList.add('palette-dragging');
+    }
+    ghost.style.left = `${e.clientX}px`; ghost.style.top = `${e.clientY}px`;
+    const over = overRink(e);
+    ghost.classList.toggle('over', over);
+    canvasWrap.classList.toggle('drop-target', over);
+    if (over) {
+      const o = { id: 'drop-preview', ...makePlaceable(type, snapPt(toRink(e))) };
+      overlay.innerHTML = `<g class="drop-preview">${renderObjects({ objects: [o] }, null, {})}</g>`;
+    } else drawSelection();
+  });
+  btn.addEventListener('pointerup', endPaletteDrag);
+  btn.addEventListener('pointercancel', endPaletteDrag);
+});
 $('#btn-undo').addEventListener('click', doUndo);
 $('#btn-redo').addEventListener('click', doRedo);
 
@@ -594,6 +832,48 @@ function switchDrill(i) {
   store.drillIndex = i; sel = null; stopAnim(); renderAll();
 }
 
+// ---------- drill library (every drill across all practices) ----------
+function libraryCards(filter) {
+  const q = filter.trim().toLowerCase();
+  const practices = [...store.data.practices].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const cards = [];
+  for (const p of practices) for (const d of p.drills || []) {
+    if (q && !`${d.name} ${p.name} ${p.team || ''}`.toLowerCase().includes(q)) continue;
+    const v = d.view || VIEWS.full;
+    cards.push(`<div class="lib-card">
+      <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG()}${renderObjects(d, null)}</svg>
+      <div class="lib-name" title="${escHtml(d.name)}">${escHtml(d.name)}</div>
+      <div class="lib-meta" title="${escHtml(p.name)}">${escHtml(p.name)}${p.date ? ' · ' + escHtml(p.date) : ''} · ${+d.duration || 0} min</div>
+      <button data-lib-add="${p.id}:${d.id}">+ Add to this practice</button>
+    </div>`);
+  }
+  return cards.length ? cards.join('') : `<div class="lib-empty">${q ? 'No drills match that search.' : 'No drills yet — drills you create in any practice appear here.'}</div>`;
+}
+function renderLibrary() {
+  $('#lib-target').textContent = store.practice.name;
+  $('#lib-grid').innerHTML = `<style>${SVG_STYLE}</style>` + libraryCards($('#lib-search').value);
+}
+function openLibrary() { finishActive(); $('#library').hidden = false; renderLibrary(); $('#lib-search').select(); }
+function closeLibrary() { $('#library').hidden = true; }
+$('#btn-library').addEventListener('click', openLibrary);
+$('#lib-close').addEventListener('click', closeLibrary);
+$('#lib-search').addEventListener('input', renderLibrary);
+$('#library').addEventListener('click', e => {
+  if (e.target === $('#library')) return closeLibrary(); // click on the backdrop
+  const btn = e.target.closest('[data-lib-add]'); if (!btn) return;
+  const [pid, did] = btn.dataset.libAdd.split(':');
+  const src = store.data.practices.find(p => p.id === pid)?.drills.find(d => d.id === did);
+  if (!src) return;
+  const copy = JSON.parse(JSON.stringify(src));
+  copy.id = uid();
+  copy.objects = cloneObjects(migrateDrill(copy).objects);
+  const p = store.practice;
+  commit(() => { p.drills.push(copy); store.drillIndex = p.drills.length - 1; });
+  $('#lib-target').textContent = store.practice.name;
+  btn.textContent = 'Added ✓'; btn.disabled = true;
+  setTimeout(() => { btn.textContent = '+ Add to this practice'; btn.disabled = false; }, 1200);
+});
+
 $('#btn-add-drill').addEventListener('click', () => {
   finishActive();
   const p = store.practice;
@@ -637,28 +917,35 @@ for (const [id, key] of [['#drill-name', 'name'], ['#drill-duration', 'duration'
 // ---------- selection properties ----------
 const PROPS = {
   skater: [
-    ['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['role', 'select:F=Forward,D=Defense,G=Goalie', 'Role'],
+    ['label', 'text', 'Label'], ['side', 'select:=— none —,O=Offense (blue),D=Defense (red)', 'Side'], ['color', 'swatch', 'Color'], ['role', 'select:F=Forward,D=Defense,G=Goalie', 'Role'],
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
-    ['backward', 'checkbox', 'Skating backward'],
+    ['backward', 'checkbox', 'Skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
+  minicone: [['color', 'color', 'Color']],
   tire: [],
+  pile: [['count', 'number', 'Pucks in pile']],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
   net: [['rot', 'number', 'Rotation (°)']],
   obstacle: [['label', 'text', 'Label'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
+  raisedpad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
+  jumppad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   zone: [['label', 'text', 'Label'], ['color', 'zoneswatch', 'Color'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)']],
   barricade: [],
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { skater: 'Skater', cone: 'Cone', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');
   if (body.contains(document.activeElement)) return; // don't clobber an input being edited
   const o = sel && getObj(sel);
   if (!o) { body.innerHTML = '<p class="muted">Nothing selected. Click an object with the Select tool.</p>'; return; }
-  const fields = (PROPS[o.type] || []).map(([key, kind, label]) => {
+  const fields = (PROPS[o.type] || [])
+    .filter(([key]) => !(key === 'facing' && o.path?.length)) // a moving skater faces along its path; facing only places a stationary skater's puck
+    .map(([key, kind, label]) => {
     let input;
     const v = o[key] ?? '';
     if (kind === 'text') input = `<input data-prop="${key}" value="${escHtml(v)}">`;
@@ -678,19 +965,35 @@ function renderProps() {
     return `<label class="field inline"><span>${label}</span>${input}</label>`;
   }).join('');
 
-  const custom = o.type === 'puck' ? puckProps(o) : '';
+  const custom = o.type === 'puck' ? puckProps(o) : isPlayer(o) ? triggerProps(o) : '';
   const extra = [];
-  if (o.type === 'skater') {
+  if (isPlayer(o)) {
     const tm = sim.skater(o.id);
-    extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${o.path?.length ? '' : ' (no path yet — use the Skater tool to add waypoints)'}</p>`);
+    const hasPath = !!o.path?.length;
+    const start = tm.delay > 0 || o.trigger ? ` · starts at ${tm.delay.toFixed(1)} s` : '';
+    extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${start}${hasPath ? '' : ` (no path yet — use the Skater tool on this ${o.type} to add waypoints)`}</p>`);
     const myPuck = drill().objects.find(pk => pk.type === 'puck' && pk.carrier === o.id);
     extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
-    extra.push(`<button data-act="extend">Extend path</button>`);
-    extra.push(`<button data-act="clearpath" ${o.path?.length ? '' : 'disabled'}>Clear path</button>`);
+    extra.push(`<button data-act="extend">${hasPath ? 'Extend path' : 'Add path'}</button>`);
+    extra.push(`<button data-act="clearpath" ${hasPath ? '' : 'disabled'}>Clear path</button>`);
+    if (drill().objects.some(x => x.type === 'pile')) extra.push(`<button data-act="takepuck" title="Add a puck they pick up from the nearest pile where their path passes it">Take puck from pile</button>`);
+    if (o.type === 'coach') extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.</p>`);
+  }
+  if (o.type === 'pile') {
+    const taken = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id);
+    extra.push(`<p class="muted">${taken.length} taken so far · ${Math.max(0, Math.round(+o.count || 0) - taken.length)} left</p>`);
+    extra.push(`<label class="field inline"><span>Give a puck to</span><select data-prop="pilegive">${skaterOptions('', '— choose a player —')}</select></label>`);
   }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
-  if (o.type === 'net') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
-  if (o.type === 'obstacle') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  if (o.type === 'net') {
+    const g = goalieOf(o);
+    extra.push(g ? `<button data-act="selgoalie">Goalie ${escHtml(g.label)}…</button>` : `<button data-act="addgoalie">Add goalie</button>`);
+    extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  }
+  if (isPlayer(o) && !o.path?.length) extra.push(`<button data-act="face45">Turn 45°</button>`);
+  if (o.type === 'obstacle' || o.type === 'raisedpad' || o.type === 'jumppad') extra.push(`<button data-act="rot90">Rotate 90°</button>`);
+  if (o.type === 'raisedpad') extra.push(`<p class="muted small">Skaters whose path runs under the pad slide under it, pushing the puck ahead.</p>`);
+  if (o.type === 'jumppad') extra.push(`<p class="muted small">Skaters whose path crosses the pad jump over it, pushing the puck ahead.</p>`);
   extra.push(`<button data-act="dup">Duplicate</button>`);
   extra.push(`<button data-act="del" class="danger">Delete</button>`);
 
@@ -699,10 +1002,35 @@ function renderProps() {
 
 const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
 
-function skaterOptions(val, noneLabel) {
-  const skaters = drill().objects.filter(s => s.type === 'skater');
+/** "Starts moving" controls for a skater or coach: at t = 0, or when another player reaches a waypoint. */
+function triggerProps(o) {
+  const tr = o.trigger;
+  const others = drill().objects.filter(s => isPlayer(s) && s.id !== o.id);
+  const opts = `<option value="" ${!tr ? 'selected' : ''}>at the start (t = 0)</option>`
+    + others.map(s => `<option value="${s.id}" ${tr?.player === s.id ? 'selected' : ''}>when ${playerName(s)} reaches…</option>`).join('');
+  const wp = tr ? `<label class="field inline"><span>…their waypoint</span><input data-prop="triggerWp" type="number" min="0" step="1" value="${tr.wp ?? 0}" title="0 = their start position, 1… = their path waypoints (numbered on the ice while this player is selected)"></label>` : '';
+  const bad = tr && !others.some(s => s.id === tr.player) ? `<p class="warn">⚠ That player no longer exists — pick another.</p>` : '';
+  return `<label class="field inline"><span>Starts moving</span><select data-prop="triggerPlayer">${opts}</select></label>${wp}${bad}${tr ? '<p class="muted small">Start delay is added after the trigger.</p>' : ''}`;
+}
+
+/** Short name for a skater or coach, e.g. "#3" or "Coach C". */
+function playerName(o) { return !o ? '?' : o.type === 'coach' ? `Coach ${escHtml(o.label)}` : `#${escHtml(o.label)}`; }
+
+function skaterOptions(val, noneLabel, exclude = null, selfId = null) {
+  const players = drill().objects.filter(s => isPlayer(s) && s.id !== exclude);
   return `<option value="" ${!val ? 'selected' : ''}>${noneLabel}</option>` +
-    skaters.map(s => `<option value="${s.id}" ${s.id === val ? 'selected' : ''}>#${escHtml(s.label)} (${s.color}${s.role === 'G' ? ', G' : ''})</option>`).join('');
+    players.map(s => `<option value="${s.id}" ${s.id === val ? 'selected' : ''}>${playerName(s)}${s.id === selfId ? ' (themselves)' : ''} (${s.color}${s.role === 'G' ? ', G' : ''})</option>`).join('');
+}
+
+/** Snap a point to the boards (rounded to 0.1 ft). */
+const boardPt = p => { const q = nearestBoardPoint(p); return { x: G.round1(q.x), y: G.round1(q.y) }; };
+
+/** A sensible first bounce point for pass event `i`: the boards nearest the middle of the pass. */
+function defaultBank(pk, i) {
+  const rec = sim.puck(pk.id).info[i];
+  const a = rec?.from || (rec?.carrier ? sim.puckAt(rec.carrier, rec.t ?? 0) : { x: pk.x, y: pk.y });
+  const b = rec?.to || a;
+  return boardPt({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 }
 
 function puckProps(o) {
@@ -710,19 +1038,41 @@ function puckProps(o) {
   const evs = o.events || [];
   const rows = evs.map((ev, i) => {
     const rec = ps.info[i];
-    const who = rec?.carrier ? '#' + escHtml(getObj(rec.carrier)?.label ?? '?') : 'loose puck';
+    const who = rec?.carrier ? playerName(getObj(rec.carrier)) : 'loose puck';
     let problem = '';
     if (!rec?.ok) {
-      if (ev.type === 'pickup') problem = rec?.carrier ? 'puck is already carried here' : 'pick a skater';
+      if (ev.type === 'pickup') problem = rec?.carrier ? 'puck is already carried here' : 'pick a player';
       else if (!rec?.carrier) problem = 'nobody has the puck here';
+      else if (ev.type === 'pass' && ev.to === rec.carrier && !ev.bank) problem = `${playerName(getObj(rec.carrier))} can't pass to themselves — pick another receiver, or bank it off the boards`;
       else problem = 'pick a receiver';
     }
-    const status = problem ? `<span class="warn">⚠ ${problem}</span>` : `<span class="muted">t = ${rec.t.toFixed(1)} s</span>`;
-    const wp = `<input class="wp" type="number" min="0" step="1" data-ev="${i}" data-evprop="wp" value="${ev.wp ?? 0}" title="0 = skater's start, 1… = path waypoints">`;
+    const status = problem ? `<span class="warn">⚠ ${problem}</span>`
+      : `<span class="muted">${ev.type === 'pass' && ev.by === 'receiver' ? `arrives t = ${rec.arrive.toFixed(1)} s` : `t = ${rec.t.toFixed(1)} s`}</span>${rec.late ? ` <span class="warn" title="The skater passes the marked spot before the puck reaches them, so this happens where they are when it arrives">⚠ puck arrives after the mark</span>` : ''}`;
+    const onPath = ev.dist != null;
+    const where = (prefix = 'at ') => onPath
+      ? `<span>${prefix.trim()}</span><input class="wp" type="number" min="0" step="0.5" data-ev="${i}" data-evprop="dist" value="${ev.dist}" title="Feet along the skater's path"><span>ft on path</span>`
+      : `<span>${prefix}waypoint</span><input class="wp" type="number" min="0" step="1" data-ev="${i}" data-evprop="wp" value="${ev.wp ?? 0}" title="0 = skater's start, 1… = path waypoints">`;
+    const canMark = !!getObj(eventSkater(o, i))?.path?.length; // only a moving skater has a path to mark
+    const mark = `<button data-act="mark" data-ev="${i}" ${canMark ? '' : 'disabled'} title="Click a spot on the skater's path to mark where this happens (you can also drag the marker on the ice)">📍 ${onPath ? 'Move mark' : 'Mark on path'}</button>`
+      + (onPath ? `<button data-act="unmark" data-ev="${i}" title="Time this by waypoint instead">✕</button>` : '');
     let body;
-    if (ev.type === 'pass') body = `<span>${who} at waypoint</span>${wp}<span>passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —')}</select>`;
-    else if (ev.type === 'shoot') body = `<span>${who} at waypoint</span>${wp}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>`;
-    else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— skater —')}</select><span>picks it up at waypoint</span>${wp}`;
+    if (ev.type === 'pass') {
+      const rcv = getObj(ev.to);
+      const byReceiver = ev.by === 'receiver';
+      // Timing choice only matters when the receiver moves (or is already in use).
+      const bySel = rcv && (rcv.path?.length || byReceiver)
+        ? `<select data-ev="${i}" data-evprop="by" title="Time the pass by where the passer is when it leaves, or by where the receiver should get it">
+             <option value="carrier" ${byReceiver ? '' : 'selected'}>released when ${who} is at</option>
+             <option value="receiver" ${byReceiver ? 'selected' : ''}>arriving as ${playerName(rcv)} reaches</option></select>`
+        : `<span>released when ${who} is at</span>`;
+      const arrive = rec?.ok && byReceiver ? `<span class="muted">(leaves at t = ${rec.t.toFixed(1)} s, arrives ${rec.arrive.toFixed(1)} s)</span>` : '';
+      // Off the boards: the receiver may then be the passer themselves.
+      const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
+      body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', ev.bank ? null : rec?.carrier, rec?.carrier)}</select>${bankUI}${bySel}${where('')}${arrive}${mark}`;
+    }
+    else if (ev.type === 'shoot') body = `<span>${who}</span>${where()}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${mark}`;
+    else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where()}${mark}`;
     return `<div class="event">
       <div class="event-head">
         <select data-ev="${i}" data-evprop="type">${Object.entries(EV_TYPES).map(([k, v]) => `<option value="${k}" ${ev.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
@@ -734,16 +1084,31 @@ function puckProps(o) {
       <div class="event-body">${body}</div>
     </div>`;
   }).join('');
-  return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, 'Loose on the ice')}</select></label>
+  return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, o.pile ? 'In the puck pile' : 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
     <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
-    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). Drag the puck onto a skater to hand it over.</p>`;
+    <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives, B = a board bounce) — drag them to move them. Drag the puck onto a skater to hand it over.</p>`;
+}
+
+/**
+ * The player (skater or coach) event `i` of puck `pk` is timed against: the carrier at that point, the pickup
+ * player, or — for a pass timed by its receiver — the receiver.
+ */
+function eventSkater(pk, i) {
+  const ev = pk?.events?.[i]; if (!ev) return null;
+  const who = ev.type === 'pickup' ? ev.skater : (ev.type === 'pass' && ev.by === 'receiver') ? ev.to : sim.puck(pk.id).info[i]?.carrier;
+  return who && isPlayer(getObj(who)) ? who : null;
+}
+/** Distance (ft) along a skater's path of the point nearest to p. */
+function pathDistanceAt(skaterId, p) {
+  const tm = sim.skater(skaterId);
+  return G.round1(G.projectOnPolyline(tm.dense, tm.cum, p).d);
 }
 
 /** Who holds the puck after all of its events. */
 function finalCarrier(o) { const last = sim.puck(o.id).segs.at(-1); return last.kind === 'carried' ? last.carrier : null; }
 function nearestSkater(p, exclude) {
-  return drill().objects.filter(s => s.type === 'skater' && s.id !== exclude).sort((a, b) => G.dist(a, p) - G.dist(b, p))[0] || null;
+  return drill().objects.filter(s => isPlayer(s) && s.id !== exclude).sort((a, b) => G.dist(a, p) - G.dist(b, p))[0] || null;
 }
 
 const propsBody = $('#props-body');
@@ -755,6 +1120,15 @@ propsBody.addEventListener('input', e => {
     const ev = o.events?.[+el.dataset.ev]; const k = el.dataset.evprop;
     if (!ev || !k) return;
     if (k === 'wp') ev.wp = Math.max(0, Math.round(+el.value || 0));
+    else if (k === 'dist') ev.dist = el.value === '' ? null : Math.max(0, +el.value || 0);
+    else if (k === 'bank') { if (el.checked) ev.bank = defaultBank(o, +el.dataset.ev); else delete ev.bank; }
+    else if (k === 'by') {
+      // wp/dist now refer to a different player's path: reset to a sensible default on it.
+      if (el.value === 'receiver') ev.by = 'receiver'; else delete ev.by;
+      delete ev.dist;
+      const path = getObj(ev.by === 'receiver' ? ev.to : sim.puck(o.id).info[+el.dataset.ev]?.carrier)?.path?.length || 0;
+      ev.wp = ev.by === 'receiver' ? Math.min(1, path) : path;
+    }
     else if (k === 'type') { ev.type = el.value; if (ev.type === 'pickup' && !ev.skater) ev.skater = null; }
     else ev[k] = el.value || null;
     if (el.tagName === 'SELECT') el.blur(); // let the following 'change' re-render the row
@@ -762,9 +1136,22 @@ propsBody.addEventListener('input', e => {
     return;
   }
   if (!key) return;
+  if (key === 'pilegive') {
+    const player = getObj(el.value); el.value = '';
+    if (player) { const pk = puckFromPile(o, player); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); }
+    return;
+  }
+  if (key === 'triggerPlayer' || key === 'triggerWp') {
+    if (key === 'triggerPlayer') { if (el.value) o.trigger = { player: el.value, wp: o.trigger?.wp ?? 1 }; else delete o.trigger; el.blur(); }
+    else if (o.trigger) o.trigger.wp = Math.max(0, Math.round(+el.value || 0));
+    store.save(); renderCanvas(); renderAnimBar();
+    return;
+  }
   o[key] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? +el.value : el.value;
-  if (key === 'carrier') { o.carrier = el.value || null; el.blur(); }
+  if (key === 'facing') o.facing = el.value === '' ? null : +el.value;
+  if (key === 'carrier') { o.carrier = el.value || null; if (o.carrier) delete o.pile; el.blur(); }
   if (o.type === 'skater' && key === 'color') lastSkaterColor = o.color;
+  if (key === 'side') { if (SIDES[o.side]) o.color = SIDES[o.side].color; else delete o.side; el.blur(); }
   store.save(); renderCanvas(); renderAnimBar();
 });
 propsBody.addEventListener('change', () => { store.commitPending(); renderUI(); });
@@ -787,6 +1174,10 @@ propsBody.addEventListener('click', e => {
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
     case 'rot90': commit(() => o.rot = ((o.rot || 0) + 90) % 360); break;
+    case 'addgoalie': { const g = { id: uid(), ...makeGoalie(o) }; commit(() => drill().objects.push(g)); select(g.id); renderProps(); break; }
+    case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
+    case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
+    case 'takepuck': { const pile = nearestPile(o); if (!pile) break; const pk = puckFromPile(pile, o); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'givepuck': { const pk = { id: uid(), ...newPuck(o, o.id) }; commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }
     case 'addpass': case 'addshoot': case 'addpickup': {
@@ -795,7 +1186,10 @@ propsBody.addEventListener('click', e => {
       let ev;
       if (btn.dataset.act === 'addpass') {
         const from = carrier ? sim.skaterPos(carrier, sim.wpTime(carrier, wp)) : o;
-        ev = { type: 'pass', wp, to: nearestSkater(from, carrier)?.id || null };
+        const to = nearestSkater(from, carrier);
+        ev = { type: 'pass', wp, to: to?.id || null };
+        // A stationary passer (coach, waiting skater) feeding a moving receiver: time it by the receiver.
+        if (carrier && !getObj(carrier).path?.length && to?.path?.length) { ev.by = 'receiver'; ev.wp = 1; }
       } else if (btn.dataset.act === 'addshoot') {
         ev = { type: 'shoot', wp, target: null };
       } else {
@@ -809,7 +1203,10 @@ propsBody.addEventListener('click', e => {
     case 'evdel': commit(() => o.events.splice(evIndex, 1)); renderProps(); break;
     case 'evup': commit(() => { [o.events[evIndex - 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex - 1]]; }); renderProps(); break;
     case 'evdown': commit(() => { [o.events[evIndex + 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex + 1]]; }); renderProps(); break;
-    case 'pick': pickTarget = { puckId: o.id, ev: evIndex }; $('#hint').textContent = 'Click on the ice to set the shot target (Esc to cancel)'; break;
+    case 'pick': pickTarget = { puckId: o.id, ev: evIndex, kind: 'target' }; $('#hint').textContent = 'Click on the ice to set the shot target (Esc to cancel)'; break;
+    case 'bounce': pickTarget = { puckId: o.id, ev: evIndex, kind: 'bank' }; $('#hint').textContent = 'Click near the boards to set where the puck bounces (Esc to cancel)'; break;
+    case 'mark': pickTarget = { puckId: o.id, ev: evIndex, kind: 'dist' }; $('#hint').textContent = "Click a spot on the skater's path to mark where the pass / shot happens (Esc to cancel)"; break;
+    case 'unmark': commit(() => { delete o.events[evIndex].dist; }); renderProps(); break;
   }
 });
 
@@ -856,13 +1253,12 @@ $('#file-import').addEventListener('change', async e => {
   try {
     const data = JSON.parse(await f.text());
     const list = data.practice ? [data.practice] : data.practices ? data.practices : Array.isArray(data) ? data : [data];
-    let last = null;
     for (const p of list) {
       if (!p || !Array.isArray(p.drills)) throw new Error('Not a practice file');
       p.id = uid(); p.drills.forEach(d => { d.id = uid(); d.view = d.view || { ...VIEWS.full }; d.objects = cloneObjects(migrateDrill(d).objects); });
-      store.data.practices.push(p); last = p.id;
+      finishActive(); store.addPractice(p); // each import is an edit, so it is auto-saved to the cloud too
     }
-    finishActive(); store.switchPractice(last); sel = null; stopAnim(); renderAll();
+    sel = null; stopAnim(); renderAll();
   } catch (err) { alert('Import failed: ' + err.message); }
 });
 
@@ -900,6 +1296,56 @@ $('#btn-print').addEventListener('click', () => {
       </div>`).join('')}`;
   window.print();
 });
+
+// ---------- cloud sync (Firebase) ----------
+const CLOUD_LABELS = { signedout: 'Not signed in (local only)', syncing: 'Syncing…', saving: 'Saving…', saved: 'Saved ✓', error: 'Cloud error' };
+function renderCloudStatus(sync, state, detail) {
+  const u = sync.user;
+  $('#cloud-status').textContent = (u && state !== 'signedout' ? `${u.name} · ` : '') + (CLOUD_LABELS[state] || '') + (state === 'error' && detail ? ` (${detail})` : '');
+  $('#cloud-status').classList.toggle('warn', state === 'error');
+  $('#btn-signin').hidden = !!u;
+  $('#btn-signout').hidden = !u;
+}
+/** Show (state = 'checking' | 'signedout' | 'error') or hide (null) the sign-in gate that covers the app. */
+function setGate(state, detail = '') {
+  gated = !!state;
+  $('#gate').hidden = !state;
+  document.body.classList.toggle('gated', gated);
+  if (!state) return;
+  finishActive(); pickTarget = null; if (anim.playing) togglePlay();
+  $('#gate-msg').textContent = state === 'checking' ? 'Checking your sign-in…' : 'Sign in to plan practices. Your practices are saved to your account and follow you between devices.';
+  $('#gate-signin').hidden = state === 'checking';
+  $('#gate-detail').textContent = state === 'error' ? `Sign-in failed: ${detail}` : '';
+}
+
+(async () => {
+  // `globalThis.__hppBackend` lets tests plug in a fake backend; otherwise use Firebase when configured.
+  let backend = globalThis.__hppBackend || null;
+  let cfg = null;
+  if (!backend) { cfg = await loadConfig(); if (cfg) { setGate('checking'); backend = await firebaseBackend(cfg); } }
+  if (!backend) return; // no config: local-only, no sign-in possible, the cloud controls stay hidden
+  setGate('checking');
+  $('#cloud').hidden = false;
+  const sync = createSync({
+    store, backend,
+    onStatus: (state, detail) => {
+      renderCloudStatus(sync, state, detail);
+      // The app is only usable while signed in.
+      if (state === 'signedout') setGate('signedout');
+      else if (state === 'error' && !sync.user) setGate('error', detail);
+      else if (sync.user) setGate(null);
+    },
+    onRemote: (ids, { full } = {}) => {
+      // Practices changed from another device (or first sync): refresh what is on screen.
+      if (full || ids.includes(store.data.currentId) || !store.practice) { finishActive(); sel = null; stopAnim(); renderAll(); }
+      else renderPracticeSelect();
+    },
+  });
+  $('#gate-signin').addEventListener('click', () => sync.signIn().catch(e => setGate('error', e?.message || String(e))));
+  $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
+  $('#btn-signout').addEventListener('click', () => sync.signOut().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
+  renderCloudStatus(sync, 'signedout');
+})();
 
 // ---------- boot ----------
 setTool('select');

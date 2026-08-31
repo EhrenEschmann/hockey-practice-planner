@@ -702,6 +702,7 @@ $('#snap-toggle').addEventListener('change', e => snap = e.target.checked);
 $$('#toolbar [data-side]').forEach(b => b.addEventListener('click', () => {
   newSide = b.dataset.side;
   $$('#toolbar [data-side]').forEach(x => x.classList.toggle('active', x === b));
+  setTool('skater'); // picking a side implies you're about to place skaters
 }));
 $$('#toolbar .tool').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.dragged) { delete b.dataset.dragged; return; } // the click that follows a drag-and-drop

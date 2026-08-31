@@ -563,6 +563,7 @@ let gated = false; // sign-in required (Firebase configured, nobody signed in): 
 
 document.addEventListener('keydown', e => {
   if (gated) return;
+  if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
@@ -828,6 +829,48 @@ $('#drill-list').addEventListener('click', e => {
 function switchDrill(i) {
   store.drillIndex = i; sel = null; stopAnim(); renderAll();
 }
+
+// ---------- drill library (every drill across all practices) ----------
+function libraryCards(filter) {
+  const q = filter.trim().toLowerCase();
+  const practices = [...store.data.practices].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const cards = [];
+  for (const p of practices) for (const d of p.drills || []) {
+    if (q && !`${d.name} ${p.name} ${p.team || ''}`.toLowerCase().includes(q)) continue;
+    const v = d.view || VIEWS.full;
+    cards.push(`<div class="lib-card">
+      <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG()}${renderObjects(d, null)}</svg>
+      <div class="lib-name" title="${escHtml(d.name)}">${escHtml(d.name)}</div>
+      <div class="lib-meta" title="${escHtml(p.name)}">${escHtml(p.name)}${p.date ? ' · ' + escHtml(p.date) : ''} · ${+d.duration || 0} min</div>
+      <button data-lib-add="${p.id}:${d.id}">+ Add to this practice</button>
+    </div>`);
+  }
+  return cards.length ? cards.join('') : `<div class="lib-empty">${q ? 'No drills match that search.' : 'No drills yet — drills you create in any practice appear here.'}</div>`;
+}
+function renderLibrary() {
+  $('#lib-target').textContent = store.practice.name;
+  $('#lib-grid').innerHTML = `<style>${SVG_STYLE}</style>` + libraryCards($('#lib-search').value);
+}
+function openLibrary() { finishActive(); $('#library').hidden = false; renderLibrary(); $('#lib-search').select(); }
+function closeLibrary() { $('#library').hidden = true; }
+$('#btn-library').addEventListener('click', openLibrary);
+$('#lib-close').addEventListener('click', closeLibrary);
+$('#lib-search').addEventListener('input', renderLibrary);
+$('#library').addEventListener('click', e => {
+  if (e.target === $('#library')) return closeLibrary(); // click on the backdrop
+  const btn = e.target.closest('[data-lib-add]'); if (!btn) return;
+  const [pid, did] = btn.dataset.libAdd.split(':');
+  const src = store.data.practices.find(p => p.id === pid)?.drills.find(d => d.id === did);
+  if (!src) return;
+  const copy = JSON.parse(JSON.stringify(src));
+  copy.id = uid();
+  copy.objects = cloneObjects(migrateDrill(copy).objects);
+  const p = store.practice;
+  commit(() => { p.drills.push(copy); store.drillIndex = p.drills.length - 1; });
+  $('#lib-target').textContent = store.practice.name;
+  btn.textContent = 'Added ✓'; btn.disabled = true;
+  setTimeout(() => { btn.textContent = '+ Add to this practice'; btn.disabled = false; }, 1200);
+});
 
 $('#btn-add-drill').addEventListener('click', () => {
   finishActive();

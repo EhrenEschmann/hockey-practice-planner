@@ -114,7 +114,7 @@
     <section id="plan" class="panel">
       <h2>Drills <span id="plan-total"></span></h2>
       <ol id="drill-list"></ol>
-      <button id="btn-add-drill">+ Add drill</button>
+      <div class="row"><button id="btn-add-drill">+ Add drill</button><button id="btn-library" title="Browse every drill from all of your practices and add copies to this one">📚 From library…</button></div>
     </section>
 
     <section id="drill-props" class="panel">
@@ -151,6 +151,19 @@
   </aside>
 </div>
 
+<div id="library" hidden>
+  <div class="lib-panel">
+    <div class="lib-head">
+      <b>Drill library</b>
+      <span class="muted small">every drill from all of your practices</span>
+      <input id="lib-search" type="search" placeholder="Search drills…">
+      <span class="spacer"></span>
+      <span class="muted small">Adding to: <b id="lib-target"></b></span>
+      <button id="lib-close" title="Close (Esc)">✕ Done</button>
+    </div>
+    <div id="lib-grid"></div>
+  </div>
+</div>
 <div id="gate" hidden>
   <div class="gate-card">
     <div class="gate-brand">🏒 Practice Planner</div>

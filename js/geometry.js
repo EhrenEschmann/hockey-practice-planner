@@ -84,6 +84,23 @@ export function projectOnPolyline(pts, cum, p) {
   return best;
 }
 
+/** Closest point on a polyline to p: arc-length along it and the offset distance. */
+export function closestOnPolyline(pts, p) {
+  if (!pts.length) return { along: 0, dist: Infinity };
+  if (pts.length === 1) return { along: 0, dist: dist(p, pts[0]) };
+  let along = 0, best = Infinity, run = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy, len = Math.sqrt(len2);
+    const u = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+    const d = dist(p, { x: a.x + u * dx, y: a.y + u * dy });
+    if (d < best) { best = d; along = run + u * len; }
+    run += len;
+  }
+  return { along, dist: best };
+}
+
 export function rectFromPoints(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
 }

@@ -69,6 +69,14 @@ export const SVG_STYLE = `
   .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
   .wp-label circle{fill:#fff;stroke:#555;stroke-width:.2}
   .wp-label text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
+  .contact-zone{fill:#f59e0b;fill-opacity:.12;stroke:#b45309;stroke-width:.28;stroke-dasharray:.9 .7}
+  .contact-t{font-family:system-ui,sans-serif;font-size:1.5px;font-weight:700;fill:#b45309}
+  .warn-t{fill:#dc2626}
+  .contact-star{fill:#f59e0b;fill-opacity:.9;stroke:#b45309;stroke-width:.25}
+  .fx-burst{pointer-events:none}
+  .skater-body.hit .body{stroke:#dc2626;stroke-width:.5}
+  .fx-burst polygon{fill:#fbbf24;stroke:#b45309;stroke-width:.2}
+  .fx-burst circle{fill:none;stroke:#f59e0b;stroke-width:.4}
   .barricade .stripe{fill:none;stroke:#f5a623;stroke-width:.7;stroke-dasharray:2 2;stroke-linecap:butt}
 `;
 

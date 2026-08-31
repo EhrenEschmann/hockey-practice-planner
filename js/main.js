@@ -1,7 +1,7 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
-import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES } from './render.js';
-import { makeSim, facingOf, isPlayer, underPad, jumpHeight, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
+import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
+import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 
@@ -11,8 +11,9 @@ const isEditing = () => /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?
 
 // ---------- setup ----------
 const svg = $('#rink');
-svg.innerHTML = `<style>${SVG_STYLE}</style><g id="rink-layer">${rinkSVG()}</g><g id="obj-layer"></g><g id="overlay-layer"></g>`;
+svg.innerHTML = `<style>${SVG_STYLE}</style><g id="rink-layer">${rinkSVG()}</g><g id="obj-layer"></g><g id="fx-layer"></g><g id="overlay-layer"></g>`;
 const objLayer = svg.querySelector('#obj-layer');
+const fxLayer = svg.querySelector('#fx-layer');
 const overlay = svg.querySelector('#overlay-layer');
 
 const store = new Store();
@@ -47,6 +48,7 @@ function renderCanvas() {
   const d = drill();
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
+  fxLayer.innerHTML = '';
   const selObj = getObj(sel);
   objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger });
   drawSelection();
@@ -105,6 +107,7 @@ const HINTS = {
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
   goalie: 'Click near a net to put a goalie in its crease (facing out) · click open ice for a goalie anywhere',
   arrow: 'Click points · double-click or Enter to finish · Esc cancels',
+  contact: 'Click where two skaters should collide — the two nearest paths are linked and their timing syncs to meet there',
   cone: 'Click to place a cone', tire: 'Click to place a tire',
   minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click a pile to take a puck from it · click open ice for a loose puck',
   pile: 'Click to place a pile of pucks · skaters take pucks from it ("Take puck from pile" in their panel)', net: 'Click to place a net (rotate in Selection panel)',
@@ -159,7 +162,7 @@ function newPuck(p, carrier) {
 }
 
 /** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
-const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'pile', 'net', 'raisedpad', 'jumppad']);
+const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'pile', 'net', 'raisedpad', 'jumppad', 'contact']);
 const CREASE_DEPTH = 3.5;  // ft in front of the goal line where a goalie stands
 const NET_SNAP = 8;        // ft: a goalie placed this close to a net goes into its crease
 const MINICONE_SPACING = 3; // ft between small cones when laying a row
@@ -186,6 +189,14 @@ function makePlaceable(type, p) {
     case 'raisedpad': return { type: 'raisedpad', x: p.x, y: p.y, w: 6, h: 2, rot: 0, label: '' };
     case 'jumppad': return { type: 'jumppad', x: p.x, y: p.y, w: 6, h: 1.5, rot: 0, label: '' };
     case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
+    case 'contact': {
+      // Link the two skaters whose paths pass closest to the marker.
+      const near = drill().objects
+        .filter(o => o.type === 'skater' && o.path?.length)
+        .map(o => ({ id: o.id, d: G.closestOnPolyline(G.smoothPath(skaterPoints(o), 4), p).dist }))
+        .sort((a, b) => a.d - b.d);
+      return { type: 'contact', x: p.x, y: p.y, a: near[0]?.id ?? null, b: near[1]?.id ?? null };
+    }
     case 'puck': {
       // Dropped onto a skater or coach without a puck → they carry it.
       const s = drill().objects.find(o => isPlayer(o) && G.dist(o, p) < 3);
@@ -249,6 +260,8 @@ function deleteObject(id) {
     d.objects = d.objects.filter(o => o.id !== id);
     if (isPlayer(victim)) for (const x of d.objects) if (x.trigger?.player === id) delete x.trigger;
     if (victim?.type === 'pile') for (const pk of d.objects) if (pk.type === 'puck' && pk.pile === id) { pk.x = victim.x; pk.y = victim.y; delete pk.pile; }
+    if (isPlayer(victim)) for (const x of d.objects) if (x.type === 'contact') { if (x.a === id) x.a = null; if (x.b === id) x.b = null; }
+    if (d.impactLoser === id) d.impactLoser = null;
     if (isPlayer(victim)) for (const pk of d.objects) if (pk.type === 'puck') {
       if (pk.carrier === id) { pk.carrier = null; pk.x = victim.x; pk.y = victim.y; }
       pk.events = (pk.events || []).filter(ev => ev.to !== id && ev.skater !== id);
@@ -343,6 +356,7 @@ function onPointerDown(e) {
       break;
     }
     case 'coach': placed(addObject(makePlaceable('coach', p)).id); break;
+    case 'contact': placed(addObject(makePlaceable('contact', p)).id); break;
     case 'goalie': placed(addObject(makePlaceable('goalie', p)).id); break;
     case 'cone': placed(addObject(makePlaceable('cone', p)).id); break;
     case 'minicone': drag = { type: 'row', start: p }; break; // click = one cone, drag = a row (decided on pointerup)
@@ -601,7 +615,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', i: 'contact', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
@@ -626,13 +640,78 @@ function doRedo() { if (store.redo()) { sel = null; renderAll(); } }
 // ---------- animation ----------
 function totalDuration() { return sim ? sim.duration() : 0; }
 
+/**
+ * Body-contact resolution — only for pairs explicitly linked by a contact marker: those skaters
+ * shoulder each other apart instead of overlapping. Unlinked crossing paths pass freely.
+ */
+function contactOffsets(t) {
+  const off = new Map();
+  if (t <= 0) return off;
+  const mover = id => { const o = getObj(id); return o?.type === 'skater' && o.path?.length ? o : null; };
+  const pairs = [...new Set(drill().objects
+    .filter(o => o.type === 'contact' && o.a && o.b && o.a !== o.b && mover(o.a) && mover(o.b))
+    .map(c => [c.a, c.b].sort().join('|')))].map(k => k.split('|'));
+  if (!pairs.length) return off;
+  const ids = [...new Set(pairs.flat())];
+  const pos = new Map(ids.map(id => [id, sim.skaterPos(id, t)]));
+  for (let pass = 0; pass < 2; pass++) {
+    for (const [A, B] of pairs) {
+      const oa = off.get(A) || { x: 0, y: 0 }, ob = off.get(B) || { x: 0, y: 0 };
+      const dx = (pos.get(A).x + oa.x) - (pos.get(B).x + ob.x), dy = (pos.get(A).y + oa.y) - (pos.get(B).y + ob.y);
+      const d = Math.hypot(dx, dy);
+      if (d >= CONTACT_DIST || d < 1e-6) continue;
+      const loser = drill().impactLoser;
+      const [shA, shB] = loser === A ? [0.9, 0.1] : loser === B ? [0.1, 0.9] : [0.5, 0.5]; // the loser absorbs the hit
+      const push = CONTACT_DIST - d, ux = dx / d, uy = dy / d;
+      off.set(A, { x: oa.x + ux * push * shA, y: oa.y + uy * push * shA });
+      off.set(B, { x: ob.x - ux * push * shB, y: ob.y - uy * push * shB });
+    }
+  }
+  return off;
+}
+
+const FX_DUR = 0.6;    // seconds an impact burst stays on screen
+const KNOCK_DUR = 0.9;  // seconds the losing skater staggers after a hit
+const KNOCK_DIST = 3.5; // ft they are shoved off their line at the peak
+
+/** If the selected "worse for" skater is mid-stagger at time t: their shove offset and body wobble. */
+function knockState(t) {
+  const loser = drill().impactLoser;
+  if (!loser || t <= 0) return null;
+  for (const c of sim.contacts()) {
+    if (c.a !== loser && c.b !== loser) continue;
+    const u = (t - c.t) / KNOCK_DUR;
+    if (u < 0 || u > 1) continue;
+    const winner = c.a === loser ? c.b : c.a;
+    const wp = sim.skaterPos(winner, c.t), lp = sim.skaterPos(loser, c.t);
+    let dx = lp.x - wp.x, dy = lp.y - wp.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 1e-6) { dx = 0; dy = 1; } else { dx /= d; dy /= d; }
+    const shove = KNOCK_DIST * Math.sin(Math.PI * u); // knocked off the line, then recovers
+    return { id: loser, x: dx * shove, y: dy * shove, angle: 28 * Math.sin(u * Math.PI * 3) * (1 - u) };
+  }
+  return null;
+}
+
 function applyAnimation(t) {
+  const bump = contactOffsets(t);
+  const knock = knockState(t);
+  // impact bursts flash during playback only — a parked timeline shows just the marker
+  fxLayer.innerHTML = (anim.playing && t > 0 ? sim.contacts() : []).filter(c => t >= c.t && t - c.t <= FX_DUR).map(c => {
+    const u = (t - c.t) / FX_DUR;
+    return `<g class="fx-burst" transform="translate(${c.x.toFixed(2)} ${c.y.toFixed(2)})" opacity="${(1 - u).toFixed(2)}">` +
+      `<polygon points="${starPoints(2 + 3 * u)}"/><circle r="${(1 + 5 * u).toFixed(2)}"/></g>`;
+  }).join('');
   const raised = drill().objects.filter(o => o.type === 'raisedpad');
   const jumps = drill().objects.filter(o => o.type === 'jumppad');
   for (const o of drill().objects) {
     let el, p;
     if (isPlayer(o) && o.path?.length) {
       p = sim.skaterPose(o.id, t); el = objLayer.querySelector(`[data-skater="${o.id}"]`);
+      const b = bump.get(o.id);
+      if (b) p = { ...p, x: p.x + b.x, y: p.y + b.y };
+      if (knock?.id === o.id) p = { ...p, x: p.x + knock.x, y: p.y + knock.y };
+      if (el && o.type === 'skater') el.classList.toggle('hit', knock?.id === o.id);
       if (el && o.type === 'skater') {
         // Under a raised pad the skater slides: body stretched along their heading and flattened.
         const sliding = raised.some(pd => underPad(p, pd, 1));
@@ -641,12 +720,20 @@ function applyAnimation(t) {
         // Over a low pad the skater jumps: the figure grows toward the peak and a shadow falls away beneath.
         const jump = jumps.reduce((m, pd) => Math.max(m, jumpHeight(p, pd)), 0);
         el.classList.toggle('jumping', jump > 0);
-        el.querySelector('.figure')?.setAttribute('transform', jump > 0 ? `scale(${(1 + 0.45 * jump).toFixed(3)})` : '');
+        el.querySelector('.figure')?.setAttribute('transform',
+          jump > 0 ? `scale(${(1 + 0.45 * jump).toFixed(3)})`
+          : knock?.id === o.id ? `rotate(${knock.angle.toFixed(1)})` : '');
         const sh = el.querySelector('.shadow');
         if (sh) { sh.style.display = jump > 0 ? '' : 'none'; sh.setAttribute('transform', `translate(${(1.4 * jump).toFixed(2)} ${(2.6 * jump).toFixed(2)})`); }
       }
     }
-    else if (o.type === 'puck') { p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`); }
+    else if (o.type === 'puck') {
+      p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`);
+      const carrier = sim.puckCarrierAt(o.id, t);
+      const b = bump.get(carrier); // a carried puck rides the body-contact bump too
+      if (b) p = { x: p.x + b.x, y: p.y + b.y };
+      if (knock?.id === carrier) p = { x: p.x + knock.x, y: p.y + knock.y };
+    }
     else if (o.type === 'pile') {
       // Count down as pucks are taken; before the drill starts the badge shows what the pile holds.
       const taken = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id && (t > 0 ? (sim.puck(pk.id).info[0]?.t ?? Infinity) <= t : false)).length;
@@ -673,7 +760,7 @@ function tick(now) {
 }
 
 function togglePlay() {
-  if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); }
+  if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); fxLayer.innerHTML = ''; }
   else {
     if (totalDuration() <= 0) return;
     // Playing is for watching, not editing: drop the selection and finish anything being drawn.
@@ -699,11 +786,31 @@ function renderAnimBar() {
   const tl = $('#timeline');
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
   $('#time-display').textContent = `${anim.t.toFixed(1)} / ${T.toFixed(1)} s`;
+  // "worse for" selector: skaters linked by contact markers
+  const linked = [...new Set(drill().objects.filter(o => o.type === 'contact').flatMap(c => [c.a, c.b]))]
+    .filter(id => getObj(id)?.type === 'skater');
+  const el = $('#impact-loser');
+  $('#impact-loser-wrap').hidden = !linked.length;
+  const sig = linked.map(id => id + ':' + getObj(id).label).join(',');
+  if (el.dataset.sig !== sig) {
+    el.dataset.sig = sig;
+    el.innerHTML = `<option value="">— even —</option>` + linked.map(id => `<option value="${id}">${playerName(getObj(id))}</option>`).join('');
+  }
+  if (document.activeElement !== el) el.value = linked.includes(drill().impactLoser) ? drill().impactLoser : '';
 }
+
+$('#impact-loser').addEventListener('change', e => {
+  drill().impactLoser = e.target.value || null;
+  store.save();
+  e.target.blur();
+  renderCanvas();
+  renderAnimBar(); // the loser's slowdown changes the drill's total time
+});
 
 $('#btn-play').addEventListener('click', togglePlay);
 $('#btn-stop').addEventListener('click', stopAnim);
 $('#timeline').addEventListener('input', e => { anim.t = +e.target.value; if (anim.t === 0) renderCanvas(); else applyAnimation(anim.t); renderAnimBar(); });
+$('#timeline').addEventListener('change', e => e.target.blur()); // scrub done → hotkeys work again
 $('#anim-speed').addEventListener('change', e => anim.speed = +e.target.value);
 $('#anim-loop').addEventListener('change', e => anim.loop = e.target.checked);
 $('#anim-trails').addEventListener('change', e => { showPaths = e.target.checked; renderCanvas(); });
@@ -936,6 +1043,7 @@ const PROPS = {
   tire: [],
   pile: [['count', 'number', 'Pucks in pile']],
   puck: [['passSpeed', 'number', 'Pass speed (ft/s)'], ['shotSpeed', 'number', 'Shot speed (ft/s)']],
+  contact: [],
   net: [['rot', 'number', 'Rotation (°)']],
   obstacle: [['label', 'text', 'Label'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   raisedpad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
@@ -945,7 +1053,7 @@ const PROPS = {
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { contact: 'Contact', skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');
@@ -974,7 +1082,7 @@ function renderProps() {
     return `<label class="field inline"><span>${label}</span>${input}</label>`;
   }).join('');
 
-  const custom = o.type === 'puck' ? puckProps(o) : isPlayer(o) ? triggerProps(o) : '';
+  const custom = o.type === 'puck' ? puckProps(o) : o.type === 'contact' ? contactProps(o) : isPlayer(o) ? triggerProps(o) : '';
   const extra = [];
   if (isPlayer(o)) {
     const tm = sim.skater(o.id);
@@ -1024,6 +1132,28 @@ function triggerProps(o) {
 
 /** Short name for a skater or coach, e.g. "#3" or "Coach C". */
 function playerName(o) { return !o ? '?' : o.type === 'coach' ? `Coach ${escHtml(o.label)}` : `#${escHtml(o.label)}`; }
+
+function contactProps(o) {
+  const movers = drill().objects.filter(x => x.type === 'skater' && x.path?.length);
+  const opt = val => `<option value="" ${!val ? 'selected' : ''}>— pick a skater —</option>` +
+    movers.map(x => `<option value="${x.id}" ${x.id === val ? 'selected' : ''}>${playerName(x)} (${x.color})</option>`).join('');
+  const info = sim.contactSync(o.id);
+  const name = id => playerName(getObj(id) || {});
+  let status;
+  if (!o.a || !o.b || o.a === o.b) status = `<p class="warn">⚠ pick two different skaters (each needs a path)</p>`;
+  else if (!info.ok) status = `<p class="warn">⚠ both skaters need a skating path</p>`;
+  else {
+    const waits = [[o.a, info.aWait], [o.b, info.bWait]].filter(([, w]) => w > 0.05)
+      .map(([id, w]) => `${name(id)} waits ${w.toFixed(1)} s`).join(' · ');
+    const off = Math.max(info.aOff, info.bOff);
+    status = `<p class="muted">Contact at t = ${info.t.toFixed(1)} s${waits ? ' · ' + waits : ''}</p>` +
+      (off > 3 ? `<p class="warn">⚠ marker is ${off.toFixed(0)} ft off a path — drag it onto the spot where the paths converge</p>` : '');
+  }
+  return `<label class="field inline"><span>Skater A</span><select data-prop="a">${opt(o.a)}</select></label>
+    <label class="field inline"><span>Skater B</span><select data-prop="b">${opt(o.b)}</select></label>
+    ${status}
+    <p class="muted small">Whoever would arrive first waits at their start so both hit this spot together. Drag the marker to move the contact. Pick who gets the worse of it on the animation bar — they slow to ${Math.round(100 * 0.55)}% and lose the puck to the winner.</p>`;
+}
 
 function skaterOptions(val, noneLabel, exclude = null, selfId = null) {
   const players = drill().objects.filter(s => isPlayer(s) && s.id !== exclude);
@@ -1093,7 +1223,9 @@ function puckProps(o) {
       <div class="event-body">${body}</div>
     </div>`;
   }).join('');
-  return `<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, o.pile ? 'In the puck pile' : 'Loose on the ice')}</select></label>
+  const steal = ps.info.steal;
+  const stealNote = steal ? `<p class="muted">💥 Stolen at t = ${steal.t.toFixed(1)} s: ${playerName(getObj(steal.from))} loses it to ${playerName(getObj(steal.to))} (impact loser).</p>` : '';
+  return `${stealNote}<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, o.pile ? 'In the puck pile' : 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
     <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
     <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives, B = a board bounce) — drag them to move them. Drag the puck onto a skater to hand it over.</p>`;
@@ -1159,6 +1291,7 @@ propsBody.addEventListener('input', e => {
   o[key] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? +el.value : el.value;
   if (key === 'facing') o.facing = el.value === '' ? null : +el.value;
   if (key === 'carrier') { o.carrier = el.value || null; if (o.carrier) delete o.pile; el.blur(); }
+  if (o.type === 'contact' && (key === 'a' || key === 'b')) { o[key] = el.value || null; el.blur(); }
   if (o.type === 'skater' && key === 'color') lastSkaterColor = o.color;
   if (key === 'side') { if (SIDES[o.side]) o.color = SIDES[o.side].color; else delete o.side; el.blur(); }
   store.save(); renderCanvas(); renderAnimBar();

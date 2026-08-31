@@ -33,7 +33,7 @@ function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
 
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck'];
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'contact'];
 
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
@@ -44,10 +44,30 @@ export function renderObjects(drill, selId, opts = {}) {
   // Raised pads are drawn in two parts: tires in normal order, and the slab on top of everything so
   // skaters visibly slide underneath it.
   return objs.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
-    + objs.filter(o => o.type === 'raisedpad').map(raisedPadTop).join('');
+    + objs.filter(o => o.type === 'raisedpad').map(raisedPadTop).join('')
 }
 
+/** An 8-point star as an SVG points string, centred on the origin. */
+export function starPoints(r, inner = 0.45) {
+  const pts = [];
+  for (let k = 0; k < 16; k++) {
+    const rr = k % 2 ? r * inner : r, a = k * Math.PI / 8;
+    pts.push(`${(rr * Math.cos(a)).toFixed(2)},${(rr * Math.sin(a)).toFixed(2)}`);
+  }
+  return pts.join(' ');
+}
+
+
 const draw = {
+  contact(o, sel, opts) {
+    const info = opts.sim.contactSync?.(o.id) || { ok: false };
+    return `<g class="obj contact" data-id="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
+      <circle r="2.7" class="contact-zone"/>
+      <polygon class="contact-star" points="${starPoints(1.9)}"/>
+      ${info.ok ? `<text class="contact-t" y="4.6" text-anchor="middle">${info.t.toFixed(1)}s</text>` : `<text class="contact-t warn-t" y="4.6" text-anchor="middle">?</text>`}
+    </g>`;
+  },
+
   zone(o, sel) {
     const c = o.color || ZONE_COLORS[0];
     return `<g class="obj zone" data-id="${o.id}">

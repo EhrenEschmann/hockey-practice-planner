@@ -85,6 +85,7 @@
     </div>
     <button class="tool" data-tool="coach"     title="Coach (K) — click to place, or drag onto the ice"><span class="ico">📋</span><span>Coach</span></button>
     <button class="tool" data-tool="goalie"    title="Goalie (G) — click or drop near a net to put a goalie in its crease"><span class="ico">🧤</span><span>Goalie</span></button>
+    <button class="tool" data-tool="contact"   title="Contact point (I) — click where two skaters should collide; their timing syncs to meet there"><span class="ico">💥</span><span>Contact</span></button>
     <button class="tool" data-tool="arrow"     title="Arrow annotation (A)"><span class="ico">➚</span><span>Arrow</span></button>
     <div class="tool-sep"></div>
     <button class="tool" data-tool="cone"      title="Cone (C) — or drag onto the ice"><span class="ico">🔺</span><span>Cone</span></button>
@@ -125,6 +126,9 @@
       </label>
       <label class="check"><input type="checkbox" id="anim-loop"> Loop</label>
       <label class="check"><input type="checkbox" id="anim-trails" checked> Show paths</label>
+      <label id="impact-loser-wrap" hidden>Impact: worse for
+        <select id="impact-loser" title="Which skater gets the worse of each impact during playback"></select>
+      </label>
     </div>
   </main>
 

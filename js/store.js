@@ -46,6 +46,7 @@ export function cloneObjects(objects) {
     const c = JSON.parse(JSON.stringify(o));
     c.id = map.get(o.id);
     if (c.trigger?.player) c.trigger.player = re(c.trigger.player);
+    if (c.type === 'contact') { c.a = re(c.a); c.b = re(c.b); }
     if (c.type === 'puck') {
       c.carrier = re(c.carrier);
       if (c.pile) c.pile = re(c.pile);

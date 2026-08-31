@@ -2,6 +2,8 @@
 import * as G from './geometry.js';
 
 export const SEG = 8;                              // spline subdivisions per waypoint segment
+export const CONTACT_DIST = 3.6;                   // ft: two skater bodies in contact
+export const SLOW_FACTOR = 0.55;                   // the contact loser skates at this fraction of their speed afterwards
 export const DEFAULT_PASS_SPEED = 45;              // ft/s
 export const DEFAULT_SHOT_SPEED = 90;              // ft/s
 
@@ -179,7 +181,12 @@ export function makeSim(drill) {
       const pts = skaterPoints(o);
       const dense = G.smoothPath(pts, SEG);
       const cum = G.cumulative(dense);
-      t = { dense, cum, len: cum[cum.length - 1], delay: startTime(o), speed: Math.max(1, +o.speed || 20), nPts: pts.length, frames: carryFrames(o, dense, cum, objs) };
+      t = { dense, cum, len: cum[cum.length - 1], delay: startTime(o) + syncExtra(o.id), speed: Math.max(1, +o.speed || 20), nPts: pts.length, frames: carryFrames(o, dense, cum, objs) };
+      const st = slowTime(o.id);
+      if (st != null) {
+        const d0 = G.clamp((st - t.delay) * t.speed, 0, t.len);
+        if (d0 < t.len) t.slow = { t0: st, d0 };
+      }
       timings.set(id, t);
     }
     return t;
@@ -187,13 +194,13 @@ export function makeSim(drill) {
 
   function skaterPos(id, t) {
     const tm = skater(id);
-    return G.pointAt(tm.dense, tm.cum, G.clamp((t - tm.delay) * tm.speed, 0, tm.len));
+    return G.pointAt(tm.dense, tm.cum, distAt(tm, t));
   }
 
   /** Position, body heading (radians) and lateral puck offset of a skater at time t. */
   function skaterPose(id, t) {
     const tm = skater(id);
-    const d = G.clamp((t - tm.delay) * tm.speed, 0, tm.len);
+    const d = distAt(tm, t);
     const p = G.pointAt(tm.dense, tm.cum, d);
     const { step, h, l, f } = tm.frames;
     if (h.length < 2) return { x: p.x, y: p.y, heading: h[0], lat: l[0], lead: f[0] };
@@ -205,14 +212,14 @@ export function makeSim(drill) {
   /** Where a puck carried by skater `id` is at time t (ahead of the skater). */
   function puckAt(id, t) { return carriedPuckPos(skaterPose(id, t)); }
 
-  function skaterEnd(id) { const tm = skater(id); return tm.delay + tm.len / tm.speed; }
+  function skaterEnd(id) { const tm = skater(id); return timeAt(tm, tm.len); }
 
   /** Time at which a skater reaches waypoint `wp` (0 = its start position, 1.. = path waypoints). */
   function wpTime(id, wp) {
     const tm = skater(id);
     const k = G.clamp(Math.round(+wp || 0), 0, tm.nPts - 1);
     const idx = tm.nPts < 3 ? k : k * SEG;
-    return tm.delay + tm.cum[Math.min(idx, tm.cum.length - 1)] / tm.speed;
+    return timeAt(tm, tm.cum[Math.min(idx, tm.cum.length - 1)]);
   }
 
   /**
@@ -222,7 +229,7 @@ export function makeSim(drill) {
   function evTime(id, ev) {
     if (ev.dist != null && ev.dist !== '') {
       const tm = skater(id);
-      return tm.delay + G.clamp(+ev.dist || 0, 0, tm.len) / tm.speed;
+      return timeAt(tm, +ev.dist || 0);
     }
     return wpTime(id, ev.wp);
   }
@@ -250,6 +257,26 @@ export function makeSim(drill) {
     let loose = pile?.type === 'pile' ? { x: pile.x, y: pile.y } : { x: p.x, y: p.y };
     const passSpeed = +p.passSpeed || DEFAULT_PASS_SPEED;
     const shotSpeed = +p.shotSpeed || DEFAULT_SHOT_SPEED;
+
+    // The contact loser is stripped: a puck they carry transfers to the winner at the hit.
+    const steals = [];
+    if (drill.impactLoser) for (const c of objs) {
+      if (c.type !== 'contact' || (c.a !== drill.impactLoser && c.b !== drill.impactLoser)) continue;
+      const ci = contactSync(c.id);
+      if (ci.ok) steals.push({ t: ci.t, from: drill.impactLoser, to: c.a === drill.impactLoser ? c.b : c.a, used: false });
+    }
+    steals.sort((x, y) => x.t - y.t);
+    /** Push a carried segment up to t1, splitting it wherever a steal strips the carrier. */
+    function pushCarried(t1) {
+      for (const st of steals) {
+        if (st.used || carrier !== st.from || st.t <= t || st.t >= t1) continue;
+        segs.push({ t0: t, t1: st.t, kind: 'carried', carrier });
+        t = st.t; carrier = st.to; st.used = true;
+        info.steal = { t: st.t, from: st.from, to: st.to }; // surfaced in the properties panel
+      }
+      segs.push({ t0: t, t1, kind: 'carried', carrier });
+      t = t1;
+    }
 
     for (const ev of p.events || []) {
       const rec = { type: ev.type, carrier, ok: false, t: null };
@@ -279,7 +306,7 @@ export function makeSim(drill) {
         } else want = evTime(carrier, ev);
         const tr = Math.max(t, want);
         rec.late = tr > want + 1e-6;
-        segs.push({ t0: t, t1: tr, kind: 'carried', carrier });
+        pushCarried(tr);
         const from = puckAt(carrier, tr);
         // Lead the receiver: iterate travel time against where they'll be on arrival.
         let travel = flight(from, puckAt(ev.to, tr));
@@ -295,7 +322,7 @@ export function makeSim(drill) {
       } else if (ev.type === 'shoot') {
         const want = evTime(carrier, ev), tr = Math.max(t, want);
         rec.late = tr > want + 1e-6;
-        segs.push({ t0: t, t1: tr, kind: 'carried', carrier });
+        pushCarried(tr);
         const from = puckAt(carrier, tr);
         const to = ev.target || nearestNet(from);
         const travel = G.dist(from, to) / shotSpeed;
@@ -304,8 +331,9 @@ export function makeSim(drill) {
         Object.assign(rec, { ok: true, t: tr, from, to, mark: markAt(rec.carrier, tr) });
       }
     }
-    segs.push(carrier ? { t0: t, t1: Infinity, kind: 'carried', carrier } : { t0: t, t1: Infinity, kind: 'loose', at: loose });
-    s = { segs, info, end: t };
+    if (carrier) pushCarried(Infinity);
+    else segs.push({ t0: t, t1: Infinity, kind: 'loose', at: loose });
+    s = { segs, info, end: segs.at(-1).t0 };
     pucks.set(id, s);
     return s;
   }
@@ -327,6 +355,98 @@ export function makeSim(drill) {
     return last.kind === 'carried' ? last.carrier : null;
   }
 
+  // ----- explicit contact markers: sync the two skaters so they meet at the marker -----
+  let syncCache = null;
+  const slowCache = new Map();  // loser skater id → time of the hit that slows them
+  const contactInfoCache = new Map();
+  const movingSkater = o => o?.type === 'skater' && o.path?.length;
+  let syncing = false;
+
+  /** Closest approach of a skater's path to a point: arc-length along the path and the offset distance. */
+  function closestAlong(o, p) {
+    return G.closestOnPolyline(G.smoothPath(skaterPoints(o), SEG), p);
+  }
+
+  function buildSync() {
+    syncing = true;
+    try {
+      syncCache = new Map();
+      slowCache.clear();
+      contactInfoCache.clear();
+      for (const c of objs) {
+        if (c.type !== 'contact') continue;
+        const A = byId(c.a), B = byId(c.b);
+        if (!movingSkater(A) || !movingSkater(B) || c.a === c.b) { contactInfoCache.set(c.id, { ok: false }); continue; }
+        const ga = closestAlong(A, c), gb = closestAlong(B, c);
+        const ta = startTime(A) + (syncCache.get(c.a) || 0) + ga.along / Math.max(1, +A.speed || 20);
+        const tb = startTime(B) + (syncCache.get(c.b) || 0) + gb.along / Math.max(1, +B.speed || 20);
+        const t = Math.max(ta, tb);
+        const aWait = t - ta, bWait = t - tb;
+        if (aWait > 0) syncCache.set(c.a, (syncCache.get(c.a) || 0) + aWait);
+        if (bWait > 0) syncCache.set(c.b, (syncCache.get(c.b) || 0) + bWait);
+        contactInfoCache.set(c.id, { ok: true, t, aWait, bWait, aOff: ga.dist, bOff: gb.dist });
+        const loser = drill.impactLoser;
+        if (loser === c.a || loser === c.b) slowCache.set(loser, Math.min(slowCache.get(loser) ?? Infinity, t));
+      }
+    } finally {
+      syncing = false;
+      timings.clear(); // anything cached mid-build lacks the sync delays
+    }
+  }
+
+  /** Extra wait a contact marker imposes on this skater so both parties arrive together. */
+  function syncExtra(id) {
+    if (syncing) return 0;
+    if (!syncCache) buildSync();
+    return syncCache.get(id) || 0;
+  }
+
+  /** When this skater gets the worse of a contact (null if never): they skate at SLOW_FACTOR afterwards. */
+  function slowTime(id) {
+    if (syncing) return null;
+    if (!syncCache) buildSync();
+    return slowCache.get(id) ?? null;
+  }
+
+  /** Distance along the path at time t, honouring the post-contact slowdown. */
+  function distAt(tm, t) {
+    const d = tm.slow && t > tm.slow.t0
+      ? tm.slow.d0 + (t - tm.slow.t0) * tm.speed * SLOW_FACTOR
+      : (t - tm.delay) * tm.speed;
+    return G.clamp(d, 0, tm.len);
+  }
+
+  /** Time at which the skater reaches a distance along their path (inverse of distAt). */
+  function timeAt(tm, dist) {
+    dist = G.clamp(dist, 0, tm.len);
+    if (tm.slow && dist > tm.slow.d0) return tm.slow.t0 + (dist - tm.slow.d0) / (tm.speed * SLOW_FACTOR);
+    return tm.delay + dist / tm.speed;
+  }
+
+  /** Resolved timing of an explicit contact marker (for the properties panel). */
+  function contactSync(id) {
+    if (!syncCache) buildSync();
+    return contactInfoCache.get(id) || { ok: false };
+  }
+
+  /**
+   * Contact moments {t, x, y, a, b}, ordered by time. Contacts are always explicit: only a placed
+   * contact marker produces one — converging paths alone never collide.
+   */
+  let contactCache = null;
+  function contacts() {
+    if (contactCache) return contactCache;
+    const out = [];
+    for (const c of objs) {
+      if (c.type !== 'contact') continue;
+      const info = contactSync(c.id);
+      if (!info.ok) continue;
+      const pa = skaterPos(c.a, info.t), pb = skaterPos(c.b, info.t);
+      out.push({ t: info.t, x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2, a: c.a, b: c.b });
+    }
+    return (contactCache = out.sort((p, q) => p.t - q.t));
+  }
+
   function duration() {
     let T = 0;
     for (const o of objs) {
@@ -336,5 +456,5 @@ export function makeSim(drill) {
     return Math.round(T * 100) / 100;
   }
 
-  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, evTime, puck, puckPos, puckCarrierAt, duration };
+  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, evTime, puck, puckPos, puckCarrierAt, contacts, contactSync, duration };
 }

@@ -40,6 +40,39 @@
   <input type="file" id="file-import" accept="application/json,.json" hidden>
 </header>
 
+<div id="viewbar">
+      <div id="drill-wrap">
+        <button id="btn-drill" title="Drill details / new drill">+ Drill</button>
+        <div id="drill-pop" hidden>
+          <h3>Current drill</h3>
+          <div class="pin-row">
+            <button id="btn-prev-drill" title="Previous drill (PageUp)">◀</button>
+            <span id="drill-pos" class="ctx-pos">1/1</span>
+            <button id="btn-next-drill" title="Next drill (PageDown)">▶</button>
+          </div>
+          <label class="field"><span>Name</span><input id="drill-name" placeholder="Drill name"></label>
+          <label class="field"><span>Minutes</span><input id="drill-duration" type="number" min="0" step="1"></label>
+          <label class="field"><span>Notes / coaching points</span><textarea id="drill-notes" rows="4"></textarea></label>
+          <button id="btn-add-drill-pop" class="primary">＋ Add new drill</button>
+        </div>
+      </div>
+      <span class="sep"></span>
+      <span class="label">View:</span>
+      <button data-view="full">Full ice</button>
+      <button data-view="leftHalf">Left half</button>
+      <button data-view="rightHalf">Right half</button>
+      <button data-view="leftZone">Left zone</button>
+      <button data-view="neutral">Neutral</button>
+      <button data-view="rightZone">Right zone</button>
+      <span class="sep"></span>
+      <button id="btn-zoom-out" title="Zoom out">−</button>
+      <button id="btn-zoom-in" title="Zoom in">+</button>
+      <span class="sep"></span>
+      <label class="check"><input type="checkbox" id="snap-toggle"> Snap to 1 ft</label>
+
+      <span id="hint"></span>
+    </div>
+
 <div id="layout">
   <nav id="toolbar">
     <button class="tool" data-tool="select"    title="Select / move (V)"><span class="ico">↖</span><span>Select</span></button>
@@ -72,38 +105,6 @@
   </nav>
 
   <main id="stage">
-    <div id="viewbar">
-      <div id="drill-wrap">
-        <button id="btn-drill" title="Drill details / new drill">+ Drill</button>
-        <div id="drill-pop" hidden>
-          <h3>Current drill</h3>
-          <div class="pin-row">
-            <button id="btn-prev-drill" title="Previous drill (PageUp)">◀</button>
-            <span id="drill-pos" class="ctx-pos">1/1</span>
-            <button id="btn-next-drill" title="Next drill (PageDown)">▶</button>
-          </div>
-          <label class="field"><span>Name</span><input id="drill-name" placeholder="Drill name"></label>
-          <label class="field"><span>Minutes</span><input id="drill-duration" type="number" min="0" step="1"></label>
-          <label class="field"><span>Notes / coaching points</span><textarea id="drill-notes" rows="4"></textarea></label>
-          <button id="btn-add-drill-pop" class="primary">＋ Add new drill</button>
-        </div>
-      </div>
-      <span class="sep"></span>
-      <span class="label">View:</span>
-      <button data-view="full">Full ice</button>
-      <button data-view="leftHalf">Left half</button>
-      <button data-view="rightHalf">Right half</button>
-      <button data-view="leftZone">Left zone</button>
-      <button data-view="neutral">Neutral</button>
-      <button data-view="rightZone">Right zone</button>
-      <span class="sep"></span>
-      <button id="btn-zoom-out" title="Zoom out">−</button>
-      <button id="btn-zoom-in" title="Zoom in">+</button>
-      <span class="sep"></span>
-      <label class="check"><input type="checkbox" id="snap-toggle"> Snap to 1 ft</label>
-
-      <span id="hint"></span>
-    </div>
 
     <div id="canvas-wrap">
       <svg id="rink" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>

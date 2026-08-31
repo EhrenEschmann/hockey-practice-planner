@@ -261,7 +261,7 @@ function creaseSpot(net) {
 function makeGoalie(net, p) {
   const n = drill().objects.filter(o => o.type === 'skater' && o.role === 'G').length;
   const pos = net ? creaseSpot(net) : p;
-  const g = { type: 'skater', x: pos.x, y: pos.y, label: n ? `G${n + 1}` : 'G', color: 'black', role: 'G', speed: 20, delay: 0, backward: false, path: [] };
+  const g = { type: 'skater', x: pos.x, y: pos.y, label: n ? `G${n + 1}` : 'G', color: 'green', role: 'G', speed: 20, delay: 0, backward: false, path: [] };
   if (net) g.facing = ((net.rot || 0) % 360 + 360) % 360;
   return g;
 }

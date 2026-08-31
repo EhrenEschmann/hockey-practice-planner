@@ -1,5 +1,5 @@
 // Pure SVG-string rendering of drill objects.
-import { smoothPath } from './geometry.js';
+import { smoothPath, closestOnPolyline } from './geometry.js';
 import { makeSim, skaterPoints } from './sim.js';
 export { skaterPoints };
 
@@ -33,18 +33,40 @@ function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
 
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'contact'];
+// Goalies draw as pseudo-type 'goalie': above pucks so shot lines pass under them.
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'goalie', 'contact'];
+const zType = o => (o.type === 'skater' && o.role === 'G' ? 'goalie' : o.type);
 
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
     .map((o, i) => ({ o, i }))
-    .sort((a, b) => (Z_ORDER.indexOf(a.o.type) - Z_ORDER.indexOf(b.o.type)) || (a.i - b.i))
+    .sort((a, b) => (Z_ORDER.indexOf(zType(a.o)) - Z_ORDER.indexOf(zType(b.o))) || (a.i - b.i))
     .map(x => x.o);
   const o2 = { ...opts, sim: opts.sim || makeSim(drill), objs: drill.objects };
   // Raised pads are drawn in two parts: tires in normal order, and the slab on top of everything so
   // skaters visibly slide underneath it.
   return objs.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
     + objs.filter(o => o.type === 'raisedpad').map(raisedPadTop).join('')
+    + shotOverlay(o2);
+}
+
+/**
+ * Goalies draw above shot lines; so a shot at a defended net stays fully readable, any shot line
+ * that passes through a goalie's body is echoed as a translucent copy on top of everything.
+ */
+function shotOverlay(opts) {
+  const goalies = opts.objs.filter(o => o.type === 'skater' && o.role === 'G');
+  if (!goalies.length) return '';
+  const lines = [];
+  for (const o of opts.objs) {
+    if (o.type !== 'puck') continue;
+    for (const r of opts.sim.puck(o.id).info) {
+      if (r.type !== 'shoot' || !r.ok || !r.from) continue;
+      if (!goalies.some(g => closestOnPolyline([r.from, r.to], g).dist < 2.8)) continue;
+      lines.push(`<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 2)}`);
+    }
+  }
+  return lines.length ? `<g class="shot-overlay">${lines.join('')}</g>` : '';
 }
 
 /** An 8-point star as an SVG points string, centred on the origin. */

@@ -35,6 +35,7 @@ export function migrateDrill(d) {
   }
   for (const o of d.objects) if (o.type === 'puck') { o.events ||= []; o.carrier ??= null; o.passSpeed ??= 45; o.shotSpeed ??= 90; }
   for (const o of d.objects) if (o.type === 'coach') { o.path ||= []; o.speed ??= 10; o.delay ??= 0; } // coaches learned to move
+  for (const o of d.objects) if (o.type === 'skater' && o.role === 'G' && o.color === 'black') o.color = 'green'; // goalies wear green now
   return d;
 }
 

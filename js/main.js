@@ -82,7 +82,6 @@ function renderUI() {
   renderPracticeSelect();
   renderPracticeProps();
   renderPlan();
-  renderDrillProps();
   renderProps();
   renderAnimBar();
   $('#btn-undo').disabled = !store.undoStack.length;
@@ -937,28 +936,79 @@ for (const [id, key] of [['#practice-team', 'team'], ['#practice-date', 'date']]
   el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
 
+let notesOpenFor = null; // drill id whose notes editor is expanded in the list
+
 function renderPlan() {
   const p = store.practice;
   const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
   $('#plan-total').textContent = `${total} min total`;
-  $('#drill-list').innerHTML = p.drills.map((d, i) => `
-    <li class="${i === store.drillIndex ? 'active' : ''}" data-index="${i}">
-      <span class="name">${i + 1}. ${escHtml(d.name)}</span>
-      <span class="dur">${+d.duration || 0} min</span>
+  const list = $('#drill-list');
+  if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
+  const btns = (d, i) => `
+      <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">🗒</button>
       <button data-act="up" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
       <button data-act="down" title="Move down" ${i === p.drills.length - 1 ? 'disabled' : ''}>↓</button>
       <button data-act="dup" title="Duplicate">⧉</button>
-      <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>✕</button>
-    </li>`).join('');
+      <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>✕</button>`;
+  list.innerHTML = p.drills.map((d, i) => {
+    const row = i === store.drillIndex
+      ? `<li class="active" data-index="${i}">
+          <span class="num">${i + 1}.</span>
+          <input class="dname" data-dprop="name" value="${escHtml(d.name)}" title="Drill name" spellcheck="false">
+          <input class="dmin" data-dprop="duration" type="number" min="0" step="1" value="${+d.duration || 0}" title="Minutes">
+          <span class="dur">min</span>${btns(d, i)}
+        </li>`
+      : `<li data-index="${i}">
+          <span class="num">${i + 1}.</span>
+          <span class="name">${escHtml(d.name)}</span>
+          <span class="dur">${+d.duration || 0} min</span>${btns(d, i)}
+        </li>`;
+    const notes = notesOpenFor === d.id
+      ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea></li>`
+      : '';
+    return row + notes;
+  }).join('');
 }
+
+// Inline edits in the list: name & minutes of the active drill, and any drill's notes.
+$('#drill-list').addEventListener('focusin', () => store.beginPending());
+$('#drill-list').addEventListener('input', e => {
+  const el = e.target;
+  if (el.dataset.dprop) {
+    drill()[el.dataset.dprop] = el.dataset.dprop === 'duration' ? +el.value : el.value;
+    store.save();
+    const total = store.practice.drills.reduce((a, d) => a + (+d.duration || 0), 0);
+    $('#plan-total').textContent = `${total} min total`;
+  } else if (el.dataset.notes != null) {
+    const d = store.practice.drills[+el.dataset.notes];
+    if (d) { d.notes = el.value; store.save(); }
+  }
+});
+$('#drill-list').addEventListener('change', e => {
+  if (e.target.matches('input,textarea')) { store.commitPending(); renderUI(); }
+});
 
 $('#drill-list').addEventListener('click', e => {
   const li = e.target.closest('li'); if (!li) return;
   const i = +li.dataset.index;
-  const act = e.target.closest('button')?.dataset.act;
+  const btn = e.target.closest('button');
+  const act = btn?.dataset.act;
+  btn?.blur(); // a focused list button must not trip the "typing in the list" rebuild guard
   const p = store.practice;
+  if (li.classList.contains('notes-editor')) return;
   finishActive();
-  if (!act) { switchDrill(i); return; }
+  if (act === 'notes') {
+    const d = p.drills[i];
+    notesOpenFor = notesOpenFor === d.id ? null : d.id;
+    if (store.drillIndex !== i) switchDrill(i); else renderPlan();
+    if (notesOpenFor) $('#drill-list .notes-editor textarea')?.focus();
+    return;
+  }
+  if (!act) {
+    if (e.target.closest('input,textarea')) return; // clicking into an inline field is not a switch
+    if (i !== store.drillIndex) switchDrill(i);
+    return;
+  }
   if (act === 'up' || act === 'down') {
     const j = act === 'up' ? i - 1 : i + 1;
     commit(() => { [p.drills[i], p.drills[j]] = [p.drills[j], p.drills[i]]; store.drillIndex = j; });
@@ -1022,38 +1072,12 @@ $('#library').addEventListener('click', e => {
   setTimeout(() => { btn.textContent = '+ Add to this practice'; btn.disabled = false; }, 1200);
 });
 
-$('#btn-add-drill').addEventListener('click', () => {
-  finishActive();
-  const p = store.practice;
-  commit(() => { p.drills.push(newDrill(p.drills.length + 1)); store.drillIndex = p.drills.length - 1; });
-  sel = null; stopAnim(); renderAll();
-});
+$('#btn-add-drill').addEventListener('click', e => { e.stopPropagation(); addDrillAndRename(); });
 
-function renderDrillProps() {
-  const d = drill();
-  for (const [id, key] of [['#drill-name', 'name'], ['#drill-duration', 'duration'], ['#drill-notes', 'notes']]) {
-    const el = $(id);
-    if (document.activeElement !== el) el.value = d[key] ?? '';
-  }
-  const n = store.practice.drills.length;
-  $('#drill-pos').textContent = `${store.drillIndex + 1}/${n}`;
-  $('#btn-prev-drill').disabled = store.drillIndex === 0;
-  $('#btn-next-drill').disabled = store.drillIndex >= n - 1;
-  $('#btn-drill').classList.toggle('has-notes', !!(d.notes || '').trim());
-}
 function stepDrill(delta) {
   const i = store.drillIndex + delta;
   if (i < 0 || i >= store.practice.drills.length) return;
   finishActive(); switchDrill(i);
-}
-$('#btn-prev-drill').addEventListener('click', () => stepDrill(-1));
-$('#btn-next-drill').addEventListener('click', () => stepDrill(1));
-
-for (const [id, key] of [['#drill-name', 'name'], ['#drill-duration', 'duration'], ['#drill-notes', 'notes']]) {
-  const el = $(id);
-  el.addEventListener('focus', () => store.beginPending());
-  el.addEventListener('input', () => { drill()[key] = key === 'duration' ? +el.value : el.value; store.save(); renderPlan(); renderDrillProps(); });
-  el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
 
 // ---------- selection properties ----------
@@ -1408,14 +1432,15 @@ function wirePopover(btnSel, popSel, focusSel) {
   });
 }
 wirePopover('#btn-new-practice', '#practice-pop', '#practice-team');
-wirePopover('#btn-drill', '#drill-pop', '#drill-name');
-$('#btn-add-drill-pop').addEventListener('click', () => {
+/** Add a drill and put the cursor straight into its name in the list, ready to type over. */
+function addDrillAndRename() {
   finishActive();
   const p = store.practice;
   commit(() => { p.drills.push(newDrill(p.drills.length + 1)); store.drillIndex = p.drills.length - 1; });
   sel = null; stopAnim(); renderAll();
-  const el = $('#drill-name'); el.focus(); el.select(); // popover stays open on the fresh drill
-});
+  const el = $('#drill-list li.active .dname');
+  if (el) { el.focus(); el.select(); }
+}
 $('#btn-create-practice').addEventListener('click', () => {
   finishActive();
   store.addPractice(newPractice(store.practice.team || ''));

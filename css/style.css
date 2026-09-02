@@ -139,13 +139,19 @@ body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 @media print{
   body>*:not(#print-area){display:none!important}
   body{overflow:visible;background:#fff;color:#000;display:block}
-  #print-area{display:block;padding:10mm}
-  #print-area .p-drill{page-break-inside:avoid;margin-bottom:12mm}
-  #print-area h1{font-size:20px;margin:0 0 2mm}
-  #print-area h2{font-size:15px;margin:4mm 0 2mm}
-  #print-area .p-meta{color:#555;font-size:12px}
-  #print-area pre{white-space:pre-wrap;font:12px/1.4 system-ui,sans-serif;margin:2mm 0 0}
-  #print-area svg{width:100%;height:auto;border:1px solid #ccc}
+  #print-area{display:block;padding:8mm;font:10px/1.35 system-ui,sans-serif}
+  #print-area .p-title{font-size:15px;font-weight:700}
+  #print-area .p-sub{margin:0.5mm 0}
+  #print-area .p-meta{color:#555;font-size:9.5px}
+  #print-area .p-overview{display:flex;flex-wrap:wrap;gap:2mm;margin:2.5mm 0}
+  #print-area .p-overview svg{height:20mm;width:auto;border:1px solid #ccc;border-radius:1.5mm}
+  #print-area .p-cols{columns:3;column-gap:5mm;margin-top:2mm}
+  #print-area .p-drill{break-inside:avoid;page-break-inside:avoid;margin-top:3mm;border-top:1px solid #999;padding-top:1.5mm}
+  #print-area .p-head{display:flex;align-items:baseline;gap:3mm;margin-bottom:1.5mm}
+  #print-area .p-head b{font-size:11px}
+  #print-area .p-time{margin-left:auto;font-variant-numeric:tabular-nums}
+  #print-area .p-drill svg{max-width:100%;max-height:45mm;width:auto;height:auto;display:block;border:1px solid #ccc;border-radius:1.5mm}
+  #print-area pre{white-space:pre-wrap;font:9.5px/1.35 system-ui,sans-serif;margin:1.5mm 0 0}
 }
 
 .event{border:1px solid var(--border);border-radius:6px;padding:6px;margin-bottom:6px;background:var(--panel-2)}

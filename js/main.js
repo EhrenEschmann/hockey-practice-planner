@@ -922,14 +922,15 @@ function renderPracticeSelect() {
 }
 const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+const PRACTICE_FIELDS = [['#practice-team', 'team'], ['#practice-date', 'date'], ['#practice-time', 'time'], ['#practice-coaches', 'coaches']];
 function renderPracticeProps() {
   const p = store.practice;
-  for (const [id, key] of [['#practice-team', 'team'], ['#practice-date', 'date']]) {
+  for (const [id, key] of PRACTICE_FIELDS) {
     const el = $(id);
     if (document.activeElement !== el) el.value = p[key] || '';
   }
 }
-for (const [id, key] of [['#practice-team', 'team'], ['#practice-date', 'date']]) {
+for (const [id, key] of PRACTICE_FIELDS) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
   el.addEventListener('input', () => { store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
@@ -1538,15 +1539,32 @@ $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
   const rink = rinkSVG();
   const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
-  $('#print-area').innerHTML = `
-    <h1>${escHtml(p.team || 'Practice')} — ${escHtml(p.date || '')}</h1>
-    <div class="p-meta">${p.drills.length} drills · ${total} min</div>
-    ${p.drills.map((d, i) => `
+  const startMin = /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null;
+  const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
+  const ampm = m => (Math.floor(m / 60) % 24) < 12 ? 'am' : 'pm';
+  const longDate = /^\d{4}-\d{2}-\d{2}$/.test(p.date || '')
+    ? new Date(p.date + 'T12:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+    : (p.date || '');
+  let t = startMin;
+  const drillRows = p.drills.map((d, i) => {
+    const at = t; if (t != null) t += (+d.duration || 0);
+    return `
       <div class="p-drill">
-        <h2>${i + 1}. ${escHtml(d.name)} <span class="p-meta">(${+d.duration || 0} min)</span></h2>
+        <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clock(at)}</span>` : ''}</div>
         ${standaloneSVG(d, rink, SVG_STYLE)}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
-      </div>`).join('')}`;
+      </div>`;
+  }).join('');
+  $('#print-area').innerHTML = `
+    <div class="p-title">${escHtml(p.team || 'Practice')}</div>
+    <div class="p-sub">${escHtml(longDate)}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
+    ${p.coaches ? `<div class="p-sub">Coaches: ${escHtml(p.coaches)}</div>` : ''}
+    <div class="p-overview">${p.drills.map(d => standaloneSVG(d, rink, SVG_STYLE)).join('')}</div>
+    <div class="p-sub">${startMin != null ? `Start @ ${clock(startMin)}` : ''} <span class="p-meta">${p.drills.length} drills · ${total} min</span></div>
+    <div class="p-cols">
+    ${drillRows}
+    <div class="p-drill"><div class="p-head"><b>* Dismissal</b>${startMin != null ? `<span class="p-time">${clock(startMin + total)}</span>` : ''}</div></div>
+    </div>`;
   window.print();
 });
 

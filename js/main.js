@@ -936,7 +936,8 @@ for (const [id, key] of [['#practice-team', 'team'], ['#practice-date', 'date']]
   el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
 
-let notesOpenFor = null; // drill id whose notes editor is expanded in the list
+let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
+let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
 
 function renderPlan() {
   const p = store.practice;
@@ -951,17 +952,20 @@ function renderPlan() {
       <button data-act="dup" title="Duplicate">⧉</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>✕</button>`;
   list.innerHTML = p.drills.map((d, i) => {
-    const row = i === store.drillIndex
-      ? `<li class="active" data-index="${i}">
+    const row = editingDrill === d.id
+      ? `<li class="${i === store.drillIndex ? 'active ' : ''}editing" data-index="${i}">
           <span class="num">${i + 1}.</span>
-          <input class="dname" data-dprop="name" value="${escHtml(d.name)}" title="Drill name" spellcheck="false">
-          <input class="dmin" data-dprop="duration" type="number" min="0" step="1" value="${+d.duration || 0}" title="Minutes">
-          <span class="dur">min</span>${btns(d, i)}
+          <input class="dname" value="${escHtml(d.name)}" title="Drill name" spellcheck="false">
+          <input class="dmin" type="number" min="0" step="1" value="${+d.duration || 0}" title="Minutes">
+          <span class="dur">min</span>
+          <button data-act="save" class="primary" title="Save (Enter)">✓</button>
+          <button data-act="cancel" title="Cancel (Esc)">✕</button>
         </li>`
-      : `<li data-index="${i}">
+      : `<li class="${i === store.drillIndex ? 'active' : ''}" data-index="${i}">
           <span class="num">${i + 1}.</span>
           <span class="name">${escHtml(d.name)}</span>
-          <span class="dur">${+d.duration || 0} min</span>${btns(d, i)}
+          <span class="dur">${+d.duration || 0} min</span>
+          <button data-act="edit" title="Rename / edit minutes">✎</button>${btns(d, i)}
         </li>`;
     const notes = notesOpenFor === d.id
       ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea></li>`
@@ -970,22 +974,23 @@ function renderPlan() {
   }).join('');
 }
 
-// Inline edits in the list: name & minutes of the active drill, and any drill's notes.
-$('#drill-list').addEventListener('focusin', () => store.beginPending());
+// Inline notes editing (live) — name/minutes only commit via the edit row's Save button.
+$('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea')) store.beginPending(); });
 $('#drill-list').addEventListener('input', e => {
   const el = e.target;
-  if (el.dataset.dprop) {
-    drill()[el.dataset.dprop] = el.dataset.dprop === 'duration' ? +el.value : el.value;
-    store.save();
-    const total = store.practice.drills.reduce((a, d) => a + (+d.duration || 0), 0);
-    $('#plan-total').textContent = `${total} min total`;
-  } else if (el.dataset.notes != null) {
+  if (el.dataset.notes != null) {
     const d = store.practice.drills[+el.dataset.notes];
     if (d) { d.notes = el.value; store.save(); }
   }
 });
 $('#drill-list').addEventListener('change', e => {
-  if (e.target.matches('input,textarea')) { store.commitPending(); renderUI(); }
+  if (e.target.matches('textarea')) { store.commitPending(); renderUI(); }
+});
+$('#drill-list').addEventListener('keydown', e => {
+  const row = e.target.closest('li.editing');
+  if (!row || !e.target.matches('input')) return;
+  if (e.key === 'Enter') { e.preventDefault(); row.querySelector('[data-act=save]')?.click(); }
+  else if (e.key === 'Escape') { e.stopPropagation(); row.querySelector('[data-act=cancel]')?.click(); }
 });
 
 $('#drill-list').addEventListener('click', e => {
@@ -997,6 +1002,28 @@ $('#drill-list').addEventListener('click', e => {
   const p = store.practice;
   if (li.classList.contains('notes-editor')) return;
   finishActive();
+  if (act === 'edit') {
+    editingDrill = p.drills[i].id;
+    if (store.drillIndex !== i) switchDrill(i); else renderPlan();
+    const el = $('#drill-list li.editing .dname');
+    if (el) { el.focus(); el.select(); }
+    return;
+  }
+  if (act === 'save' || act === 'cancel') {
+    const row = $('#drill-list li.editing');
+    if (row?.contains(document.activeElement)) document.activeElement.blur(); // let the list rebuild
+    if (act === 'save' && row && editingDrill) {
+      const name = row.querySelector('.dname').value.trim();
+      const dur = Math.max(0, +row.querySelector('.dmin').value || 0);
+      commit(() => {
+        const d = p.drills.find(x => x.id === editingDrill);
+        if (d) { if (name) d.name = name; d.duration = dur; }
+      });
+    }
+    editingDrill = null;
+    renderAll();
+    return;
+  }
   if (act === 'notes') {
     const d = p.drills[i];
     notesOpenFor = notesOpenFor === d.id ? null : d.id;
@@ -1005,7 +1032,7 @@ $('#drill-list').addEventListener('click', e => {
     return;
   }
   if (!act) {
-    if (e.target.closest('input,textarea')) return; // clicking into an inline field is not a switch
+    if (e.target.closest('input,textarea') || li.classList.contains('editing')) return;
     if (i !== store.drillIndex) switchDrill(i);
     return;
   }
@@ -1021,6 +1048,7 @@ $('#drill-list').addEventListener('click', e => {
     });
   } else if (act === 'del') {
     if (!confirm(`Delete "${p.drills[i].name}"?`)) return;
+    if (editingDrill === p.drills[i].id) editingDrill = null;
     commit(() => { p.drills.splice(i, 1); store.drillIndex = Math.min(i, p.drills.length - 1); });
   }
   sel = null; stopAnim(); renderAll();
@@ -1432,13 +1460,16 @@ function wirePopover(btnSel, popSel, focusSel) {
   });
 }
 wirePopover('#btn-new-practice', '#practice-pop', '#practice-team');
-/** Add a drill and put the cursor straight into its name in the list, ready to type over. */
+/** Add a drill and open its list row in edit mode, name selected and ready to type over. */
 function addDrillAndRename() {
   finishActive();
   const p = store.practice;
-  commit(() => { p.drills.push(newDrill(p.drills.length + 1)); store.drillIndex = p.drills.length - 1; });
-  sel = null; stopAnim(); renderAll();
-  const el = $('#drill-list li.active .dname');
+  const d = newDrill(p.drills.length + 1);
+  commit(() => { p.drills.push(d); store.drillIndex = p.drills.length - 1; });
+  sel = null; stopAnim();
+  editingDrill = d.id;
+  renderAll();
+  const el = $('#drill-list li.editing .dname');
   if (el) { el.focus(); el.select(); }
 }
 $('#btn-create-practice').addEventListener('click', () => {

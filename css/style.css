@@ -51,8 +51,8 @@ textarea{resize:vertical}
 #animbar{border-bottom:none;border-top:1px solid var(--border)}
 #viewbar .label{color:var(--muted)}
 #viewbar button.active{background:var(--accent);border-color:var(--accent)}
-#toolbar .side-switch{grid-column:1/-1;display:flex;margin:0 4px 2px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
-#toolbar .side-switch button{flex:1;display:flex;align-items:center;justify-content:center;gap:3px;padding:3px 0;border:none;border-radius:0;background:transparent;font-size:11px;color:var(--muted)}
+#toolbar .side-switch{grid-column:1/-1;display:flex;height:26px;min-height:26px;flex:none;margin:0 4px 2px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+#toolbar .side-switch button{flex:1;display:flex;align-items:center;justify-content:center;gap:3px;padding:0;border:none;border-radius:0;background:transparent;font-size:11px;color:var(--muted)}
 #toolbar .side-switch button+button{border-left:1px solid var(--border)}
 #toolbar .side-switch button.active{background:var(--panel-2);color:var(--text)}
 #toolbar .side-switch .dot{width:8px;height:8px;border-radius:50%;border:1px solid #fff;display:inline-block}

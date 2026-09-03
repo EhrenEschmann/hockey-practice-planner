@@ -819,10 +819,13 @@ function renderAnimBar() {
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
   $('#time-display').textContent = `${anim.t.toFixed(1)} / ${T.toFixed(1)} s`;
   // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
-  const linked = [...new Set((sim ? sim.contacts() : []).flatMap(c => [c.a, c.b]))]
+  const impacts = sim ? sim.contacts() : [];
+  const linked = [...new Set(impacts.flatMap(c => [c.a, c.b]))]
     .filter(id => getObj(id)?.type === 'skater');
   const el = $('#impact-loser');
   $('#impact-loser-wrap').hidden = !linked.length;
+  $('#impact-loser-wrap').title = impacts // hover explains where the impacts driving this selector are
+    .map(c => `${playerName(getObj(c.a))} × ${playerName(getObj(c.b))} at ${c.t.toFixed(1)}s (${Math.round(c.x)}, ${Math.round(c.y)} ft)`).join('\n');
   const sig = linked.map(id => id + ':' + getObj(id).label).join(',');
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
@@ -1235,7 +1238,9 @@ function contactProps(o) {
   const name = id => playerName(getObj(id) || {});
   let status;
   if (!o.a || !o.b || o.a === o.b) status = `<p class="warn">⚠ pick two different skaters (each needs a path)</p>`;
-  else if (!info.ok) status = `<p class="warn">⚠ both skaters need a skating path</p>`;
+  else if (!info.ok) status = info.far
+    ? `<p class="warn">⚠ marker is ${info.far.toFixed(0)} ft off the paths, so it is ignored — drag it onto the spot where the paths converge (or delete it)</p>`
+    : `<p class="warn">⚠ both skaters need a skating path</p>`;
   else {
     const waits = [[o.a, info.aWait], [o.b, info.bWait]].filter(([, w]) => w > 0.05)
       .map(([id, w]) => `${name(id)} waits ${w.toFixed(1)} s`).join(' · ');

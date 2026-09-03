@@ -27,6 +27,9 @@ export function practiceLabel(p) { return `${p.team || 'No team'} — ${p.date |
 /** Normalise older saved drills (e.g. skater.hasPuck → a puck object carried by that skater). */
 export function migrateDrill(d) {
   d.objects ||= [];
+  // A contact marker must sit on the ice where two paths converge. One dragged (or corrupted) off the
+  // rink is invisible in every view yet still syncs skaters and shows the "Impact: worse for" selector — drop it.
+  d.objects = d.objects.filter(o => o.type !== 'contact' || (o.x >= -5 && o.x <= 205 && o.y >= -5 && o.y <= 90));
   for (const o of [...d.objects]) {
     if (o.type === 'skater' && o.hasPuck) {
       d.objects.push({ id: uid(), type: 'puck', x: o.x, y: o.y, carrier: o.id, events: [], passSpeed: 45, shotSpeed: 90 });

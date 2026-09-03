@@ -378,6 +378,9 @@ export function makeSim(drill) {
         const A = byId(c.a), B = byId(c.b);
         if (!movingSkater(A) || !movingSkater(B) || c.a === c.b) { contactInfoCache.set(c.id, { ok: false }); continue; }
         const ga = closestAlong(A, c), gb = closestAlong(B, c);
+        // A marker nowhere near both paths is a stray (often left off-view): it must not
+        // fabricate an impact or distort the skaters' timing.
+        if (Math.max(ga.dist, gb.dist) > CONTACT_DIST * 2) { contactInfoCache.set(c.id, { ok: false, far: Math.max(ga.dist, gb.dist) }); continue; }
         const ta = startTime(A) + (syncCache.get(c.a) || 0) + ga.along / Math.max(1, +A.speed || 20);
         const tb = startTime(B) + (syncCache.get(c.b) || 0) + gb.along / Math.max(1, +B.speed || 20);
         const t = Math.max(ta, tb);

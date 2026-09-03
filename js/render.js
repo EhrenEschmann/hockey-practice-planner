@@ -281,9 +281,11 @@ const draw = {
       : `<circle class="body" r="1.75" fill="${color}"/>`;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
     const wps = opts.numberWaypoints ? wpLabels(o) : '';
+    const heading0 = opts.sim ? opts.sim.skaterPose(o.id, 0).heading * 180 / Math.PI : 0; // body facing: path tangent (flipped when backward), or facing when standing
     return `<g class="obj skater" data-id="${o.id}">${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         <ellipse class="shadow" rx="1.9" ry="1.2" fill="#000" fill-opacity=".22" style="display:none"/>
+        <g class="dir" transform="rotate(${n(heading0)})"><polygon points="1.2,-.8 2.75,0 1.2,.8" fill="${color}" stroke="#fff" stroke-width=".22"/></g>
         <g class="figure">${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text></g>
       </g>
     </g>`;

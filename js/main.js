@@ -786,6 +786,9 @@ function returnFrame(dr, sm, root, fx, tr) {
         el.querySelector('.body')?.setAttribute('transform', '');
         el.querySelector('.figure')?.setAttribute('transform', '');
         const sh = el.querySelector('.shadow'); if (sh) sh.style.display = 'none';
+        // face where they're going: home while returning, then their start-of-drill facing
+        const heading = kk < 1 && d > 0.01 ? Math.atan2(b.y - a.y, b.x - a.x) : sm.skaterPose(o.id, 0).heading;
+        el.querySelector('.dir')?.setAttribute('transform', `rotate(${(heading * 180 / Math.PI).toFixed(1)})`);
       }
     } else if (o.type === 'puck') {
       const a = sm.puckPos(o.id, T), b = sm.puckPos(o.id, 0);
@@ -817,6 +820,7 @@ function animateFrame(dr, sm, root, fx, t, playing) {
       if (b) p = { ...p, x: p.x + b.x, y: p.y + b.y };
       if (knock?.id === o.id) p = { ...p, x: p.x + knock.x, y: p.y + knock.y };
       if (el && o.type === 'skater') el.classList.toggle('hit', knock?.id === o.id);
+      if (el && o.type === 'skater') el.querySelector('.dir')?.setAttribute('transform', `rotate(${(p.heading * 180 / Math.PI).toFixed(1)})`);
       if (el && o.type === 'skater') {
         // Under a raised pad the skater slides: body stretched along their heading and flattened.
         const sliding = raised.some(pd => underPad(p, pd, 1));

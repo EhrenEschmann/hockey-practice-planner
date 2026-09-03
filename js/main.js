@@ -725,7 +725,50 @@ function knockState(dr, sm, t) {
 }
 
 /** Draw one animation frame of drill `dr` (simulated by `sm`) onto any rendered copy of it: `root` holds the objects, `fx` the impact bursts. */
+/** After the drill ends, players skate straight back to their spots at 2× speed; the phase lasts until the slowest returner is home. */
+function returnTime(dr, sm) {
+  const T = sm.duration();
+  let R = 0;
+  for (const o of dr.objects) {
+    if (!isPlayer(o) || !o.path?.length) continue;
+    const a = sm.skaterPose(o.id, T), b = sm.skaterPose(o.id, 0);
+    R = Math.max(R, Math.hypot(b.x - a.x, b.y - a.y) / (2 * sm.skater(o.id).speed));
+  }
+  return R;
+}
+
+/** One frame of the return phase, tr seconds after the drill ended: everyone glides home. */
+function returnFrame(dr, sm, root, fx, tr) {
+  fx.innerHTML = '';
+  const T = sm.duration();
+  const R = returnTime(dr, sm);
+  const k = R > 0 ? Math.min(1, tr / R) : 1; // pucks drift home over the whole phase
+  for (const o of dr.objects) {
+    let el, p;
+    if (isPlayer(o) && o.path?.length) {
+      const a = sm.skaterPose(o.id, T), b = sm.skaterPose(o.id, 0);
+      const d = Math.hypot(b.x - a.x, b.y - a.y);
+      const kk = d > 0.01 ? Math.min(1, tr * 2 * sm.skater(o.id).speed / d) : 1; // each at 2× their own speed
+      p = { x: a.x + (b.x - a.x) * kk, y: a.y + (b.y - a.y) * kk };
+      el = root.querySelector(`[data-skater="${o.id}"]`);
+      if (el && o.type === 'skater') { // shed any end-of-drill effects for the skate back
+        el.classList.remove('hit', 'sliding', 'jumping');
+        el.querySelector('.body')?.setAttribute('transform', '');
+        el.querySelector('.figure')?.setAttribute('transform', '');
+        const sh = el.querySelector('.shadow'); if (sh) sh.style.display = 'none';
+      }
+    } else if (o.type === 'puck') {
+      const a = sm.puckPos(o.id, T), b = sm.puckPos(o.id, 0);
+      p = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+      el = root.querySelector(`.puck-disc[data-puck="${o.id}"]`);
+    }
+    if (el && p) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
+  }
+}
+
 function animateFrame(dr, sm, root, fx, t, playing) {
+  const T = sm.duration();
+  if (t > T && T > 0) return returnFrame(dr, sm, root, fx, t - T);
   const bump = contactOffsets(dr, sm, t);
   const knock = knockState(dr, sm, t);
   // impact bursts flash during playback only — a parked timeline shows just the marker
@@ -778,12 +821,15 @@ function animateFrame(dr, sm, root, fx, t, playing) {
 
 function applyAnimation(t) { animateFrame(drill(), sim, objLayer, fxLayer, t, anim.playing); }
 
+/** Drill time plus the skate-back-to-start phase that plays after it. */
+function fullDuration() { return sim ? totalDuration() + returnTime(drill(), sim) : 0; }
+
 function tick(now) {
   if (!anim.playing) return;
   const dt = Math.min(0.1, (now - anim.last) / 1000);
   anim.last = now;
   anim.t += dt * anim.speed;
-  const T = totalDuration();
+  const T = fullDuration();
   if (anim.t >= T) {
     if (anim.loop && T > 0) anim.t = 0;
     else { anim.t = T; anim.playing = false; }
@@ -801,7 +847,7 @@ function togglePlay() {
     finishActive();
     if (pickTarget) { pickTarget = null; $('#hint').textContent = HINTS[tool] || ''; }
     if (sel) select(null);
-    if (anim.t >= totalDuration()) anim.t = 0;
+    if (anim.t >= fullDuration()) anim.t = 0;
     anim.playing = true; anim.last = performance.now();
     anim.raf = requestAnimationFrame(tick);
   }
@@ -819,7 +865,7 @@ function renderAnimBar() {
   $('#btn-play').disabled = T <= 0;
   const tl = $('#timeline');
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
-  $('#time-display').textContent = `${anim.t.toFixed(1)} / ${T.toFixed(1)} s`;
+  $('#time-display').textContent = anim.t > T ? `↩ ${T.toFixed(1)} / ${T.toFixed(1)} s` : `${anim.t.toFixed(1)} / ${T.toFixed(1)} s`;
   // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
   const impacts = sim ? sim.contacts() : [];
   const linked = [...new Set(impacts.flatMap(c => [c.a, c.b]))]
@@ -1663,6 +1709,7 @@ function wirePresentAnims(p) {
     const sm = makeSim(d);
     const T = sm.duration();
     if (T <= 0) { bar.remove(); continue; } // nothing moves in this drill
+    const full = T + returnTime(d, sm); // the drill, then everyone skates home at 2× speed
     const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svgEl.appendChild(fx);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
@@ -1671,20 +1718,20 @@ function wirePresentAnims(p) {
     presentAnims.push(a);
     const draw = () => {
       animateFrame(d, sm, svgEl, fx, a.t, a.playing);
-      tl.value = a.t;
-      disp.textContent = `${a.t.toFixed(1)} / ${T.toFixed(1)} s`;
+      tl.value = Math.min(a.t, T);
+      disp.textContent = `${Math.min(a.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
       btn.textContent = a.playing ? '⏸' : '▶';
     };
     const step = now => {
       if (!a.playing) return;
       a.t += Math.min(0.1, (now - a.last) / 1000); a.last = now;
-      if (a.t >= T) { a.t = T; a.playing = false; }
+      if (a.t >= full) { a.t = full; a.playing = false; }
       draw();
       if (a.playing) a.raf = requestAnimationFrame(step);
     };
     btn.addEventListener('click', () => {
       a.playing = !a.playing;
-      if (a.playing) { if (a.t >= T) a.t = 0; a.last = performance.now(); a.raf = requestAnimationFrame(step); }
+      if (a.playing) { if (a.t >= full) a.t = 0; a.last = performance.now(); a.raf = requestAnimationFrame(step); }
       else cancelAnimationFrame(a.raf);
       draw();
     });

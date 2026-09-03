@@ -130,7 +130,7 @@ function commit(fn) {
 
 // ---------- tools ----------
 const HINTS = {
-  select: 'Click to select · drag to move · drag handles to reshape · double-click a waypoint to delete it · Delete removes',
+  select: 'Click to select · drag to move · drag handles to reshape · double-click a path to add a waypoint, a waypoint to delete it · Delete removes',
   pan: 'Drag to pan · wheel to zoom',
   skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater or coach to extend their path',
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
@@ -376,6 +376,17 @@ function onPointerDown(e) {
     return;
   }
 
+  // Double-clicks are detected here by hand: setPointerCapture retargets pointerup to the svg,
+  // which stops the browser from ever synthesizing a native dblclick on the canvas.
+  const now = performance.now();
+  const dbl = lastDown && now - lastDown.t < 400 && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 8;
+  lastDown = { t: now, x: e.clientX, y: e.clientY };
+  if (dbl) {
+    lastDown = null; // a triple-click shouldn't chain
+    if (activePoly || activeSkater) { finishActive(); drag = null; return; } // double-click finishes a drawing
+    if (tool === 'select' && doubleClickSelect(e, idEl, handleEl)) { drag = null; return; }
+  }
+
   switch (tool) {
     case 'select': {
       const markEl = e.target.closest('[data-evmark]');
@@ -613,16 +624,37 @@ function onPointerUp(e) {
   }
 }
 
-function onDblClick(e) {
-  const handleEl = e.target.closest('[data-handle]');
-  const idEl = e.target.closest('[data-id]');
-  if (tool === 'select' && handleEl && idEl) {
+let lastDown = null; // {t, x, y} of the previous pointerdown, for manual double-click detection
+
+/** Double-click with the Select tool: delete the clicked waypoint handle, or insert a waypoint on the clicked path line. Returns true if consumed. */
+function doubleClickSelect(e, idEl, handleEl) {
+  if (handleEl && idEl) {
     const o = getObj(idEl.dataset.id);
+    if (!o) return false;
     const key = isPlayer(o) ? 'path' : 'points';
-    if (key === 'points' && o.points.length <= 2) return;
+    if (key === 'points' && o.points.length <= 2) return true;
     commit(() => o[key].splice(+handleEl.dataset.handle, 1));
-    return;
+    return true;
   }
+  if (!idEl) return false;
+  const o = getObj(idEl.dataset.id);
+  if (!isPlayer(o) || !o.path?.length) return false;
+  if (o.follow) { $('#hint').textContent = `${playerName(o)} follows ${playerName(getObj(o.follow))}'s path — add the waypoint on that path instead.`; return true; }
+  // Test against the smoothed curve — that's the line the user sees and clicks.
+  const pts = skaterPoints(o);
+  const dense = G.smoothPath(pts);
+  const proj = G.projectOnPolyline(dense, G.cumulative(dense), toRink(e));
+  if (!proj || proj.dist >= 3) return false;
+  // Insert between the raw waypoints whose positions along the smooth curve bracket the click.
+  let i = 0;
+  while (i + 1 < pts.length - 1 && G.closestOnPolyline(dense, pts[i + 1]).along <= proj.d) i++;
+  commit(() => o.path.splice(i, 0, snapPt(proj)));
+  select(o.id);
+  return true;
+}
+
+function onDblClick() {
+  // Real dblclick rarely reaches the canvas (see the manual detection in onPointerDown); kept as a harmless fallback.
   if (activePoly || activeSkater) finishActive();
 }
 

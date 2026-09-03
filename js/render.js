@@ -45,8 +45,9 @@ function playerPath(o, opts) {
   const pts = skaterPoints(o);
   const dense = smoothPath(pts);
   const dash = back => isCoach ? 'stroke-dasharray="2.5 1.5"' : back ? 'stroke-dasharray="1.5 1.2"' : '';
+  const hit = `<polyline class="path-hit" points="${ptsStr(dense)}"/>`; // fat invisible stroke: forgiving click / double-click target
   const pivots = pts.filter((p, i) => i > 0 && p.pivot);
-  if (!pivots.length) return `<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward)}/>${arrowHead(dense, color)}`;
+  if (!pivots.length) return `${hit}<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward)}/>${arrowHead(dense, color)}`;
   // Split the line at each pivot; the stretches alternate forward/backward from the start direction.
   const idxOf = p => { let bi = 0, bd = Infinity; for (let i = 0; i < dense.length; i++) { const d = (dense[i].x - p.x) ** 2 + (dense[i].y - p.y) ** 2; if (d < bd) { bd = d; bi = i; } } return bi; };
   const cuts = [0, ...pivots.map(idxOf).sort((a, b) => a - b), dense.length - 1];
@@ -58,7 +59,7 @@ function playerPath(o, opts) {
     back = !back;
   }
   const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">⇄</text></g>`).join('');
-  return segs.join('') + arrowHead(dense, color) + marks;
+  return hit + segs.join('') + arrowHead(dense, color) + marks;
 }
 
 export function renderObjects(drill, selId, opts = {}) {

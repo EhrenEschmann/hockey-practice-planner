@@ -39,6 +39,7 @@ export const SVG_STYLE = `
   .crease{fill:#9ec9ee;fill-opacity:.75;stroke:#d7263d;stroke-width:.3}
   .trap{stroke:#d7263d;stroke-width:.3}
   .path-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
+  .path-hit{fill:none;stroke:#000;stroke-width:2.6;stroke-opacity:0;pointer-events:stroke}
   .arrow-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .skater-body .body{stroke:#fff;stroke-width:.3}
   .skater-body.sliding .body{stroke-dasharray:.6 .4}
@@ -68,6 +69,7 @@ export const SVG_STYLE = `
   .ev-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .ev-mark.draggable{cursor:move}
   .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
+  .wp-label{pointer-events:none} /* display-only badges: clicks must reach the waypoint handle beneath */
   .wp-label circle{fill:#fff;stroke:#555;stroke-width:.2}
   .wp-label text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .contact-zone{fill:#f59e0b;fill-opacity:.12;stroke:#b45309;stroke-width:.28;stroke-dasharray:.9 .7}

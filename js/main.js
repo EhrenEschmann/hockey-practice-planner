@@ -2,7 +2,7 @@ import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
-import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill } from './store.js';
+import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill, syncFollowers } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 
 const $ = s => document.querySelector(s);
@@ -46,6 +46,7 @@ function toRink(e) {
 // ---------- rendering ----------
 function renderCanvas() {
   const d = drill();
+  syncFollowers(d); // shared routes: followers pick up any edit to their leader's path
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
   fxLayer.innerHTML = '';
@@ -373,6 +374,7 @@ function onPointerDown(e) {
     case 'skater': {
       const o = id && getObj(id);
       if (isPlayer(o) && o.id !== activeSkater) {
+        if (o.follow) { select(o.id); $('#hint').textContent = `${playerName(o)} follows ${playerName(getObj(o.follow))}'s path — set "Same path as" to their own path to draw one.`; break; }
         o.path ||= [];
         activeSkater = o.id; select(o.id);
       } else if (activeSkater && getObj(activeSkater)) {
@@ -1186,10 +1188,17 @@ function renderProps() {
     const hasPath = !!o.path?.length;
     const start = tm.delay > 0 || o.trigger ? ` · starts at ${tm.delay.toFixed(1)} s` : '';
     extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${start}${hasPath ? '' : ` (no path yet — use the Skater tool on this ${o.type} to add waypoints)`}</p>`);
+    if (o.type === 'skater') {
+      const leaders = drill().objects.filter(s => s.type === 'skater' && s.id !== o.id && !s.follow && s.path?.length);
+      if (leaders.length || o.follow) extra.push(`<label class="field inline"><span>Same path as</span><select data-prop="follow">
+        <option value="">— their own path —</option>
+        ${leaders.map(s => `<option value="${s.id}" ${o.follow === s.id ? 'selected' : ''}>${playerName(s)} (${s.color})</option>`).join('')}</select></label>`);
+      if (o.follow) extra.push(`<p class="muted small">Skates ${playerName(getObj(o.follow))}'s route from their own spot in line. Edit that skater's path to reroute everyone; stagger the line with each skater's Delay.</p>`);
+    }
     const myPuck = drill().objects.find(pk => pk.type === 'puck' && pk.carrier === o.id);
     extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
-    extra.push(`<button data-act="extend">${hasPath ? 'Extend path' : 'Add path'}</button>`);
-    extra.push(`<button data-act="clearpath" ${hasPath ? '' : 'disabled'}>Clear path</button>`);
+    extra.push(`<button data-act="extend" ${o.follow ? 'disabled title="Following another skater&#39;s path"' : ''}>${hasPath ? 'Extend path' : 'Add path'}</button>`);
+    extra.push(`<button data-act="clearpath" ${hasPath && !o.follow ? '' : 'disabled'}>Clear path</button>`);
     if (drill().objects.some(x => x.type === 'pile')) extra.push(`<button data-act="takepuck" title="Add a puck they pick up from the nearest pile where their path passes it">Take puck from pile</button>`);
     if (o.type === 'coach') extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.</p>`);
   }
@@ -1379,6 +1388,14 @@ propsBody.addEventListener('input', e => {
   if (key === 'pilegive') {
     const player = getObj(el.value); el.value = '';
     if (player) { const pk = puckFromPile(o, player); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); }
+    return;
+  }
+  if (key === 'follow') {
+    // unfollowing keeps the copied route, so the skater becomes independent with the path they had
+    if (el.value) o.follow = el.value; else delete o.follow;
+    syncFollowers(drill());
+    el.blur();
+    store.save(); renderCanvas(); renderAnimBar();
     return;
   }
   if (key === 'triggerPlayer' || key === 'triggerWp') {

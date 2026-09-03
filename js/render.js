@@ -254,7 +254,7 @@ const draw = {
 
   skater(o, sel, opts) {
     const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.blue;
-    const h = sel ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects)
+    const h = sel && !o.follow ? handles(o.path || []) : ''; // path draws in the underlay; a follower's route is edited via its leader
     const body = o.role === 'G'
       ? `<rect class="body" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".7" fill="${color}"/>`
       : `<circle class="body" r="1.75" fill="${color}"/>`;

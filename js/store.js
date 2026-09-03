@@ -24,6 +24,23 @@ export function newPractice(team = '') {
 /** How a practice is shown anywhere it needs a label. */
 export function practiceLabel(p) { return `${p.team || 'No team'} — ${p.date || 'no date'}`; }
 
+/**
+ * Skaters can share a route: a skater with `follow` skates another skater's path. The route is
+ * materialised into the follower's own `path` (leader's spot, then their waypoints — so the follower
+ * skates from their place in line to the start, then the route) and kept in sync here whenever the
+ * drill is loaded or re-rendered. Everything downstream (sim, render, print, presentation) just sees
+ * an ordinary path.
+ */
+export function syncFollowers(d) {
+  for (const o of d.objects || []) {
+    if (o.type !== 'skater' || !o.follow) continue;
+    const lead = d.objects.find(x => x.id === o.follow);
+    // Leader gone, no longer routed, or itself a follower (chains would cycle): keep the copied path, stop following.
+    if (!lead || lead.type !== 'skater' || lead.id === o.id || lead.follow || !lead.path?.length) { delete o.follow; continue; }
+    o.path = [{ x: lead.x, y: lead.y }, ...lead.path.map(p => ({ x: p.x, y: p.y }))];
+  }
+}
+
 /** Normalise older saved drills (e.g. skater.hasPuck → a puck object carried by that skater). */
 export function migrateDrill(d) {
   d.objects ||= [];
@@ -39,6 +56,7 @@ export function migrateDrill(d) {
   for (const o of d.objects) if (o.type === 'puck') { o.events ||= []; o.carrier ??= null; o.passSpeed ??= 45; o.shotSpeed ??= 90; }
   for (const o of d.objects) if (o.type === 'coach') { o.path ||= []; o.speed ??= 10; o.delay ??= 0; } // coaches learned to move
   for (const o of d.objects) if (o.type === 'skater' && o.role === 'G' && o.color === 'black') o.color = 'green'; // goalies wear green now
+  syncFollowers(d);
   return d;
 }
 
@@ -50,6 +68,7 @@ export function cloneObjects(objects) {
     const c = JSON.parse(JSON.stringify(o));
     c.id = map.get(o.id);
     if (c.trigger?.player) c.trigger.player = re(c.trigger.player);
+    if (c.follow) c.follow = re(c.follow);
     if (c.type === 'contact') { c.a = re(c.a); c.b = re(c.b); }
     if (c.type === 'puck') {
       c.carrier = re(c.carrier);

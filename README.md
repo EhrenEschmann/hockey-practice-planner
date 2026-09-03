@@ -18,9 +18,11 @@ Practices auto-save to Firebase so they follow you between devices. Without a co
 
 1. Create a Firebase project, add a **Web app**, and copy its config.
 2. Enable **Authentication → Sign-in method → Google**.
-3. Create a **Firestore** database and paste [firestore.rules](firestore.rules) as its rules (each user can only read/write their own practices).
+3. Create a **Firestore** database and paste [firestore.rules](firestore.rules) as its rules (each user can only read/write their own practices; a practice can additionally be *read* by the Google accounts listed in its **Coach emails** — presentation mode).
 4. `cp js/firebase-config.example.js js/firebase-config.js` and paste the config in. (The file is git-ignored; putting it at the project root as `firebase-config.js` works too.)
 5. Reload: a **Sign in** button appears in the top bar.
+
+**Presentation mode / sharing with coaches.** Open practice details (**+ Practice**) and list your assistant coaches' Google emails under **Coach emails**, then hit **🔗 Copy coach link** and send it to them. A coach who opens the link signs in with Google and gets a thin read-only view of the practice — header, each drill's diagram, timing and notes — that updates live as you edit. The **📺 Present** button in the top bar opens the same view of your own practice (works offline too); **Esc** or ✕ closes it. This needs the current [firestore.rules](firestore.rules) deployed.
 
 With a config in place the app is **gated**: a sign-in screen covers the planner until you sign in with Google (and comes back when you sign out), so nothing can be created or edited anonymously. If a different Google account signs in on the same browser, the previous account's locally cached practices are cleared first, so accounts never mix. Once signed in, every edit is written about a second after you stop making changes (status shows *Saving… / Saved to cloud ✓*), deletes propagate, and edits from another device appear live. On sign-in, local and cloud practices are merged — the newer copy of each practice wins and practices that exist only on one side are copied to the other. Data lives at `users/{uid}/practices/{practiceId}`, one document per practice. The SDK is loaded from Google's CDN, so there is still no build step.
 

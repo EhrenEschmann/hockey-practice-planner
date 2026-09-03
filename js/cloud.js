@@ -40,6 +40,10 @@ export async function firebaseBackend(config) {
         for (const ch of snap.docChanges()) cb(ch.type, ch.doc.id, ch.doc.data());
       }, err => cb('error', null, err));
     },
+    /** Live view of one practice in someone else's account (presentation mode; rules check the viewer's email). */
+    subscribePractice(uid, id, cb) {
+      return fs.onSnapshot(fs.doc(col(uid), id), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err));
+    },
   };
 }
 

@@ -20,6 +20,8 @@
       <label class="field"><span>Date</span><input id="practice-date" type="date"></label>
       <label class="field"><span>Start time</span><input id="practice-time" type="time"></label>
       <label class="field"><span>Coaches</span><input id="practice-coaches" placeholder="e.g. Ehren, Mike, Dante"></label>
+      <label class="field"><span>Coach emails (can view this practice)</span><input id="practice-emails" placeholder="mike@gmail.com, dante@gmail.com" spellcheck="false"></label>
+      <button id="btn-share-link" title="Copy a link coaches can open — they sign in with Google and get a read-only view of this practice">🔗 Copy coach link</button>
       <button id="btn-create-practice" class="primary">＋ Create new practice</button>
     </div>
   </div>
@@ -39,6 +41,7 @@
   <button id="btn-export" title="Export this practice as JSON">Export JSON</button>
   <button id="btn-png" title="Export current drill as PNG">Export PNG</button>
   <button id="btn-print" title="Print practice plan">Print</button>
+  <button id="btn-present" title="Presentation mode — a read-only scroll-through of this practice (share it with coaches via 🔗 Copy coach link in practice details)">📺 Present</button>
   <input type="file" id="file-import" accept="application/json,.json" hidden>
 </header>
 
@@ -152,6 +155,23 @@
     <p id="gate-msg">Sign in to plan practices.</p>
     <button id="gate-signin" class="primary">Sign in with Google</button>
     <p id="gate-detail" class="muted small"></p>
+  </div>
+</div>
+<div id="present" hidden>
+  <div id="present-top">
+    <span class="brand">🏒</span>
+    <b id="present-title"></b>
+    <span class="spacer"></span>
+    <span id="present-user" class="muted small"></span>
+    <button id="present-close" title="Close">✕</button>
+  </div>
+  <div id="present-scroll"><div id="present-body"></div></div>
+  <div id="present-gate" hidden>
+    <div class="gate-card">
+      <div class="gate-brand">🏒 Practice Plan</div>
+      <p id="present-msg"></p>
+      <button id="present-signin" class="primary" hidden>Sign in with Google</button>
+    </div>
   </div>
 </div>
 <div id="print-area"></div>

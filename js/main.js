@@ -92,6 +92,7 @@ function renderAll() { renderCanvas(); renderUI(); updateRoute(); }
 
 // ---------- routing: the URL tracks the open practice & drill so refresh restores them ----------
 function updateRoute() {
+  if (/view=/.test(location.hash)) return; // presentation mode owns the URL
   const p = store.practice, d = store.drill;
   if (!p || !d) return;
   if ((store.data.lastDrill ||= {})[p.id] !== d.id) { store.data.lastDrill[p.id] = d.id; store.persist(); }
@@ -111,6 +112,8 @@ function applyRoute() {
 }
 
 window.addEventListener('hashchange', () => {
+  refreshPresent();
+  if (presenting) return; // the editor underneath stays as it was
   finishActive();
   applyRoute();
   sel = null; stopAnim(); renderAll();
@@ -616,6 +619,7 @@ let gated = false; // sign-in required (Firebase configured, nobody signed in): 
 
 document.addEventListener('keydown', e => {
   if (gated) return;
+  if (presenting) { if (e.key === 'Escape') location.hash = '#'; return; } // presentation mode: Esc closes, nothing else
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
@@ -645,7 +649,7 @@ document.addEventListener('keydown', e => {
   if (t) setTool(t);
 });
 document.addEventListener('keyup', e => {
-  if (gated) return;
+  if (gated || presenting) return;
   if (e.key === ' ') {
     if (spaceDown && !isEditing() && !drag) togglePlay();
     spaceDown = false;
@@ -669,23 +673,23 @@ function totalDuration() { return sim ? sim.duration() : 0; }
  * Body-contact resolution — only for pairs explicitly linked by a contact marker: those skaters
  * shoulder each other apart instead of overlapping. Unlinked crossing paths pass freely.
  */
-function contactOffsets(t) {
+function contactOffsets(dr, sm, t) {
   const off = new Map();
   if (t <= 0) return off;
-  const mover = id => { const o = getObj(id); return o?.type === 'skater' && o.path?.length ? o : null; };
-  const pairs = [...new Set(drill().objects
+  const mover = id => { const o = dr.objects.find(x => x.id === id); return o?.type === 'skater' && o.path?.length ? o : null; };
+  const pairs = [...new Set(dr.objects
     .filter(o => o.type === 'contact' && o.a && o.b && o.a !== o.b && mover(o.a) && mover(o.b))
     .map(c => [c.a, c.b].sort().join('|')))].map(k => k.split('|'));
   if (!pairs.length) return off;
   const ids = [...new Set(pairs.flat())];
-  const pos = new Map(ids.map(id => [id, sim.skaterPos(id, t)]));
+  const pos = new Map(ids.map(id => [id, sm.skaterPos(id, t)]));
   for (let pass = 0; pass < 2; pass++) {
     for (const [A, B] of pairs) {
       const oa = off.get(A) || { x: 0, y: 0 }, ob = off.get(B) || { x: 0, y: 0 };
       const dx = (pos.get(A).x + oa.x) - (pos.get(B).x + ob.x), dy = (pos.get(A).y + oa.y) - (pos.get(B).y + ob.y);
       const d = Math.hypot(dx, dy);
       if (d >= CONTACT_DIST || d < 1e-6) continue;
-      const loser = drill().impactLoser;
+      const loser = dr.impactLoser;
       const [shA, shB] = loser === A ? [0.9, 0.1] : loser === B ? [0.1, 0.9] : [0.5, 0.5]; // the loser absorbs the hit
       const push = CONTACT_DIST - d, ux = dx / d, uy = dy / d;
       off.set(A, { x: oa.x + ux * push * shA, y: oa.y + uy * push * shA });
@@ -700,15 +704,15 @@ const KNOCK_DUR = 0.9;  // seconds the losing skater staggers after a hit
 const KNOCK_DIST = 3.5; // ft they are shoved off their line at the peak
 
 /** If the selected "worse for" skater is mid-stagger at time t: their shove offset and body wobble. */
-function knockState(t) {
-  const loser = drill().impactLoser;
+function knockState(dr, sm, t) {
+  const loser = dr.impactLoser;
   if (!loser || t <= 0) return null;
-  for (const c of sim.contacts()) {
+  for (const c of sm.contacts()) {
     if (c.a !== loser && c.b !== loser) continue;
     const u = (t - c.t) / KNOCK_DUR;
     if (u < 0 || u > 1) continue;
     const winner = c.a === loser ? c.b : c.a;
-    const wp = sim.skaterPos(winner, c.t), lp = sim.skaterPos(loser, c.t);
+    const wp = sm.skaterPos(winner, c.t), lp = sm.skaterPos(loser, c.t);
     let dx = lp.x - wp.x, dy = lp.y - wp.y;
     const d = Math.hypot(dx, dy);
     if (d < 1e-6) { dx = 0; dy = 1; } else { dx /= d; dy /= d; }
@@ -718,21 +722,22 @@ function knockState(t) {
   return null;
 }
 
-function applyAnimation(t) {
-  const bump = contactOffsets(t);
-  const knock = knockState(t);
+/** Draw one animation frame of drill `dr` (simulated by `sm`) onto any rendered copy of it: `root` holds the objects, `fx` the impact bursts. */
+function animateFrame(dr, sm, root, fx, t, playing) {
+  const bump = contactOffsets(dr, sm, t);
+  const knock = knockState(dr, sm, t);
   // impact bursts flash during playback only — a parked timeline shows just the marker
-  fxLayer.innerHTML = (anim.playing && t > 0 ? sim.contacts() : []).filter(c => t >= c.t && t - c.t <= FX_DUR).map(c => {
+  fx.innerHTML = (playing && t > 0 ? sm.contacts() : []).filter(c => t >= c.t && t - c.t <= FX_DUR).map(c => {
     const u = (t - c.t) / FX_DUR;
     return `<g class="fx-burst" transform="translate(${c.x.toFixed(2)} ${c.y.toFixed(2)})" opacity="${(1 - u).toFixed(2)}">` +
       `<polygon points="${starPoints(2 + 3 * u)}"/><circle r="${(1 + 5 * u).toFixed(2)}"/></g>`;
   }).join('');
-  const raised = drill().objects.filter(o => o.type === 'raisedpad');
-  const jumps = drill().objects.filter(o => o.type === 'jumppad');
-  for (const o of drill().objects) {
+  const raised = dr.objects.filter(o => o.type === 'raisedpad');
+  const jumps = dr.objects.filter(o => o.type === 'jumppad');
+  for (const o of dr.objects) {
     let el, p;
     if (isPlayer(o) && o.path?.length) {
-      p = sim.skaterPose(o.id, t); el = objLayer.querySelector(`[data-skater="${o.id}"]`);
+      p = sm.skaterPose(o.id, t); el = root.querySelector(`[data-skater="${o.id}"]`);
       const b = bump.get(o.id);
       if (b) p = { ...p, x: p.x + b.x, y: p.y + b.y };
       if (knock?.id === o.id) p = { ...p, x: p.x + knock.x, y: p.y + knock.y };
@@ -753,21 +758,23 @@ function applyAnimation(t) {
       }
     }
     else if (o.type === 'puck') {
-      p = sim.puckPos(o.id, t); el = objLayer.querySelector(`.puck-disc[data-puck="${o.id}"]`);
-      const carrier = sim.puckCarrierAt(o.id, t);
+      p = sm.puckPos(o.id, t); el = root.querySelector(`.puck-disc[data-puck="${o.id}"]`);
+      const carrier = sm.puckCarrierAt(o.id, t);
       const b = bump.get(carrier); // a carried puck rides the body-contact bump too
       if (b) p = { x: p.x + b.x, y: p.y + b.y };
       if (knock?.id === carrier) p = { x: p.x + knock.x, y: p.y + knock.y };
     }
     else if (o.type === 'pile') {
       // Count down as pucks are taken; before the drill starts the badge shows what the pile holds.
-      const taken = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id && (t > 0 ? (sim.puck(pk.id).info[0]?.t ?? Infinity) <= t : false)).length;
-      const badge = objLayer.querySelector(`[data-id="${o.id}"] .pile-count`);
-      if (badge) badge.textContent = Math.max(0, Math.round(+o.count || 0) - (t > 0 ? taken : drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id).length));
+      const taken = dr.objects.filter(pk => pk.type === 'puck' && pk.pile === o.id && (t > 0 ? (sm.puck(pk.id).info[0]?.t ?? Infinity) <= t : false)).length;
+      const badge = root.querySelector(`[data-id="${o.id}"] .pile-count`);
+      if (badge) badge.textContent = Math.max(0, Math.round(+o.count || 0) - (t > 0 ? taken : dr.objects.filter(pk => pk.type === 'puck' && pk.pile === o.id).length));
     }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
   }
 }
+
+function applyAnimation(t) { animateFrame(drill(), sim, objLayer, fxLayer, t, anim.playing); }
 
 function tick(now) {
   if (!anim.playing) return;
@@ -929,11 +936,19 @@ function renderPracticeProps() {
     const el = $(id);
     if (document.activeElement !== el) el.value = p[key] || '';
   }
+  const em = $('#practice-emails');
+  if (document.activeElement !== em) em.value = (p.sharedWith || []).join(', ');
 }
 for (const [id, key] of PRACTICE_FIELDS) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
   el.addEventListener('input', () => { store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
+  el.addEventListener('change', () => { store.commitPending(); renderUI(); });
+}
+{ // coach emails: stored as a lowercased array — these people may open the practice in presentation mode
+  const el = $('#practice-emails');
+  el.addEventListener('focus', () => store.beginPending());
+  el.addEventListener('input', () => { store.practice.sharedWith = el.value.split(/[\s,;]+/).filter(Boolean).map(s => s.toLowerCase()); store.save(); });
   el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
 
@@ -1535,16 +1550,19 @@ $('#btn-png').addEventListener('click', async () => {
   img.src = url;
 });
 
+// ---------- practice document (shared by print & presentation mode) ----------
+const parseStart = p => /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null;
+const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
+const ampm = m => (Math.floor(m / 60) % 24) < 12 ? 'am' : 'pm';
+const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '')
+  ? new Date(date + 'T12:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+  : (date || '');
+
 $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
   const rink = rinkSVG();
   const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
-  const startMin = /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null;
-  const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
-  const ampm = m => (Math.floor(m / 60) % 24) < 12 ? 'am' : 'pm';
-  const longDate = /^\d{4}-\d{2}-\d{2}$/.test(p.date || '')
-    ? new Date(p.date + 'T12:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
-    : (p.date || '');
+  const startMin = parseStart(p);
   let t = startMin;
   const drillRows = p.drills.map((d, i) => {
     const at = t; if (t != null) t += (+d.duration || 0);
@@ -1557,7 +1575,7 @@ $('#btn-print').addEventListener('click', () => {
   }).join('');
   $('#print-area').innerHTML = `
     <div class="p-title">${escHtml(p.team || 'Practice')}</div>
-    <div class="p-sub">${escHtml(longDate)}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
+    <div class="p-sub">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
     ${p.coaches ? `<div class="p-sub">Coaches: ${escHtml(p.coaches)}</div>` : ''}
     <div class="p-overview">${p.drills.map(d => standaloneSVG(d, rink, SVG_STYLE)).join('')}</div>
     <div class="p-sub">${startMin != null ? `Start @ ${clock(startMin)}` : ''} <span class="p-meta">${p.drills.length} drills · ${total} min</span></div>
@@ -1566,6 +1584,140 @@ $('#btn-print').addEventListener('click', () => {
     <div class="p-drill"><div class="p-head"><b>* Dismissal</b>${startMin != null ? `<span class="p-time">${clock(startMin + total)}</span>` : ''}</div></div>
     </div>`;
   window.print();
+});
+
+// ---------- presentation mode: a read-only scroll-through at #view=<ownerUid>/<practiceId> ----------
+// The owner opens it with 📺 Present; coaches listed in the practice's "Coach emails" open the same
+// link, sign in with Google, and read the practice live from the owner's cloud account.
+let presenting = false;
+let presentUnsub = null, presentKey = null;
+let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
+
+function presentHTML(p) {
+  const rink = rinkSVG();
+  const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const startMin = parseStart(p);
+  let t = startMin;
+  return `
+    <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
+    <div class="pr-meta">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
+    ${p.coaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
+    <div class="pr-meta">${p.drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
+    ${p.drills.map((d, i) => {
+      const at = t; if (t != null) t += (+d.duration || 0);
+      return `
+      <section class="pr-drill" data-did="${d.id}">
+        <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
+        ${standaloneSVG(d, rink, SVG_STYLE)}
+        <div class="pr-animbar">
+          <button class="pr-play" title="Watch the drill">▶</button>
+          <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
+          <span class="pr-timedisp muted small"></span>
+        </div>
+        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+      </section>`;
+    }).join('')}
+    ${startMin != null ? `<section class="pr-drill"><header><b>* Dismissal</b><span class="pr-time">${clock(startMin + total)}</span></header></section>` : ''}`;
+}
+
+function presentDoc(p) {
+  $('#present-title').textContent = practiceLabel(p);
+  $('#present-body').innerHTML = presentHTML(p);
+  wirePresentAnims(p);
+  $('#present-gate').hidden = true;
+}
+
+// Each drill card gets its own little player: ▶/⏸, a scrubber and the drill clock,
+// driving animateFrame() on that card's SVG copy of the drill.
+const presentAnims = [];
+function stopPresentAnims() { for (const a of presentAnims) cancelAnimationFrame(a.raf); presentAnims.length = 0; }
+function wirePresentAnims(p) {
+  stopPresentAnims();
+  for (const sec of $$('#present-body .pr-drill[data-did]')) {
+    const d = p.drills.find(x => x.id === sec.dataset.did);
+    const svgEl = sec.querySelector('svg');
+    const bar = sec.querySelector('.pr-animbar');
+    if (!d || !svgEl || !bar) continue;
+    const sm = makeSim(d);
+    const T = sm.duration();
+    if (T <= 0) { bar.remove(); continue; } // nothing moves in this drill
+    const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    svgEl.appendChild(fx);
+    const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
+    tl.max = T;
+    const a = { raf: 0, t: 0, playing: false, last: 0 };
+    presentAnims.push(a);
+    const draw = () => {
+      animateFrame(d, sm, svgEl, fx, a.t, a.playing);
+      tl.value = a.t;
+      disp.textContent = `${a.t.toFixed(1)} / ${T.toFixed(1)} s`;
+      btn.textContent = a.playing ? '⏸' : '▶';
+    };
+    const step = now => {
+      if (!a.playing) return;
+      a.t += Math.min(0.1, (now - a.last) / 1000); a.last = now;
+      if (a.t >= T) { a.t = T; a.playing = false; }
+      draw();
+      if (a.playing) a.raf = requestAnimationFrame(step);
+    };
+    btn.addEventListener('click', () => {
+      a.playing = !a.playing;
+      if (a.playing) { if (a.t >= T) a.t = 0; a.last = performance.now(); a.raf = requestAnimationFrame(step); }
+      else cancelAnimationFrame(a.raf);
+      draw();
+    });
+    tl.addEventListener('input', () => { a.t = +tl.value; draw(); });
+    draw();
+  }
+}
+function presentMsg(msg, canSignIn = false) {
+  $('#present-gate').hidden = false;
+  $('#present-msg').textContent = msg;
+  $('#present-signin').hidden = !canSignIn;
+}
+
+/** Show/hide presentation mode to match the URL; called at boot, on hash changes and on sign-in changes. */
+function refreshPresent() {
+  const m = location.hash.match(/view=(\w+)\/(\w+)/);
+  presenting = !!m;
+  document.body.classList.toggle('presenting', presenting);
+  $('#present').hidden = !presenting;
+  if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; return; }
+  $('#present-user').textContent = cloudSync?.user?.name || '';
+  const [, ownerUid, pid] = m;
+  const mine = store.data.practices.find(x => x.id === pid);
+  if (mine) { presentUnsub?.(); presentUnsub = null; presentKey = null; presentDoc(mine); return; } // own practice: straight from the store
+  if (!cloudBackend) return presentMsg('This practice is not available on this device.');
+  if (!cloudSync?.user) return presentMsg('This practice plan is shared with specific coaches. Sign in to view it.', true);
+  const key = `${ownerUid}/${pid}`;
+  if (presentKey === key) return; // already watching this practice
+  presentUnsub?.();
+  presentKey = key;
+  presentMsg('Loading…');
+  presentUnsub = cloudBackend.subscribePractice(ownerUid, pid, (p, err) => {
+    if (err) return presentMsg(err.code === 'permission-denied'
+      ? "You don't have access to this practice. Ask the coach who shared it to add your Google email in the practice details."
+      : `Could not load the practice: ${err.message || err}`);
+    if (!p) return presentMsg('This practice no longer exists.');
+    (p.drills || []).forEach(migrateDrill);
+    presentDoc(p);
+  });
+}
+
+$('#btn-present').addEventListener('click', () => {
+  finishActive();
+  location.hash = `#view=${store.data.ownerUid || 'local'}/${store.practice.id}`;
+});
+$('#present-close').addEventListener('click', () => { location.hash = '#'; });
+$('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, true)));
+$('#btn-share-link').addEventListener('click', async e => {
+  const b = e.currentTarget;
+  if (!store.data.ownerUid) return alert('Sign in first — coaches read the practice from your cloud account.');
+  const url = `${location.origin}${location.pathname}#view=${store.data.ownerUid}/${store.practice.id}`;
+  try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); return; }
+  const old = b.textContent;
+  b.textContent = '✓ Link copied';
+  setTimeout(() => { b.textContent = old; }, 1500);
 });
 
 // ---------- cloud sync (Firebase) ----------
@@ -1605,13 +1757,16 @@ function setGate(state, detail = '') {
       if (state === 'signedout') setGate('signedout');
       else if (state === 'error' && !sync.user) setGate('error', detail);
       else if (sync.user) setGate(null);
+      refreshPresent(); // presentation mode reacts to sign-in changes too
     },
     onRemote: (ids, { full } = {}) => {
       // Practices changed from another device (or first sync): refresh what is on screen.
       if (full || ids.includes(store.data.currentId) || !store.practice) { finishActive(); sel = null; stopAnim(); renderAll(); }
       else renderPracticeSelect();
+      if (presenting) refreshPresent(); // presenting one's own practice: pick up the change live
     },
   });
+  cloudSync = sync; cloudBackend = backend;
   $('#gate-signin').addEventListener('click', () => sync.signIn().catch(e => setGate('error', e?.message || String(e))));
   $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   $('#btn-signout').addEventListener('click', () => sync.signOut().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
@@ -1621,5 +1776,6 @@ function setGate(state, detail = '') {
 // ---------- boot ----------
 applyRoute();
 setTool('select');
+refreshPresent();
 renderAll();
 window.addEventListener('resize', drawSelection);

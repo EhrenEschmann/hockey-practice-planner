@@ -247,6 +247,23 @@ function puckFromPile(pile, player) {
   }
   return pk;
 }
+// ---------- coach at a puck pile: chips into the corner / around the boards ----------
+const PILE_LINK_DIST = 5; // ft: a coach standing this close to a pile feeds pucks from it
+function pileAtCoach(coach) { return drill().objects.find(p => p.type === 'pile' && G.dist(p, coach) <= PILE_LINK_DIST) || null; }
+function coachAtPile(pile) { return drill().objects.find(c => c.type === 'coach' && G.dist(c, pile) <= PILE_LINK_DIST) || null; }
+
+/** Where dumped pucks collect: just inside the glass in each corner. */
+const CORNERS = [{ x: 9, y: 9 }, { x: 9, y: 76 }, { x: 191, y: 9 }, { x: 191, y: 76 }];
+const nearestCorner = p => [...CORNERS].sort((a, b) => G.dist(a, p) - G.dist(b, p))[0];
+
+/** A puck the coach takes from the pile and chips in: straight into the nearest corner, or banked there and rimmed around the end boards to the far corner. */
+function chipPuck(coach, pile, around) {
+  const c1 = nearestCorner(coach);
+  const ev = { type: 'shoot', wp: 0, target: { ...c1 } };
+  if (around) { ev.bank = { ...c1 }; ev.target = { ...CORNERS.find(c => c.x === c1.x && c !== c1) }; }
+  return { id: uid(), type: 'puck', x: pile.x, y: pile.y, carrier: coach.id, pile: pile.id, events: [ev], passSpeed: DEFAULT_PASS_SPEED, shotSpeed: 55 };
+}
+
 /** The pile closest to a player's path (or to the player), if there is one. */
 function nearestPile(player) {
   const piles = drill().objects.filter(o => o.type === 'pile');
@@ -1242,12 +1259,27 @@ function renderProps() {
     extra.push(`<button data-act="extend" ${o.follow ? 'disabled title="Following another skater&#39;s path"' : ''}>${hasPath ? 'Extend path' : 'Add path'}</button>`);
     extra.push(`<button data-act="clearpath" ${hasPath && !o.follow ? '' : 'disabled'}>Clear path</button>`);
     if (drill().objects.some(x => x.type === 'pile')) extra.push(`<button data-act="takepuck" title="Add a puck they pick up from the nearest pile where their path passes it">Take puck from pile</button>`);
-    if (o.type === 'coach') extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.</p>`);
+    if (o.type === 'coach') {
+      const pile = pileAtCoach(o);
+      if (pile) {
+        const chips = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === pile.id && pk.carrier === o.id).length;
+        extra.push(`<p class="muted">🪣 At a puck pile${chips ? ` · ${chips} chipped` : ''}. Chips happen at this coach's Delay — select a chipped puck to retarget it or drag its B bounce marker.</p>`);
+        extra.push(`<button data-act="chipcorner" title="Take a puck from the pile and chip it into the nearest corner">Chip to corner</button>`);
+        extra.push(`<button data-act="chipboards" title="Take a puck from the pile and rim it around the end boards to the far corner">Chip around boards</button>`);
+      }
+      extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.${pile ? '' : ' Stand them on a puck pile to chip pucks into play.'}</p>`);
+    }
   }
   if (o.type === 'pile') {
     const taken = drill().objects.filter(pk => pk.type === 'puck' && pk.pile === o.id);
     extra.push(`<p class="muted">${taken.length} taken so far · ${Math.max(0, Math.round(+o.count || 0) - taken.length)} left</p>`);
     extra.push(`<label class="field inline"><span>Give a puck to</span><select data-prop="pilegive">${skaterOptions('', '— choose a player —')}</select></label>`);
+    const feeder = coachAtPile(o);
+    if (feeder) {
+      extra.push(`<p class="muted">📋 ${playerName(feeder)} is at this pile and can chip pucks into play.</p>`);
+      extra.push(`<button data-act="chipcorner" title="The coach takes a puck and chips it into the nearest corner">Chip to corner</button>`);
+      extra.push(`<button data-act="chipboards" title="The coach takes a puck and rims it around the end boards to the far corner">Chip around boards</button>`);
+    }
   }
   if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
   if (o.type === 'net') {
@@ -1360,7 +1392,11 @@ function puckProps(o) {
         + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
       body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', ev.bank ? null : rec?.carrier, rec?.carrier)}</select>${bankUI}${bySel}${where('')}${arrive}${mark}`;
     }
-    else if (ev.type === 'shoot') body = `<span>${who}</span>${where()}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${mark}`;
+    else if (ev.type === 'shoot') {
+      const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
+      body = `<span>${who}</span>${where()}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${bankUI}${mark}`;
+    }
     else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where()}${mark}`;
     return `<div class="event">
       <div class="event-head">
@@ -1478,6 +1514,14 @@ propsBody.addEventListener('click', e => {
     case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
     case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
     case 'takepuck': { const pile = nearestPile(o); if (!pile) break; const pk = puckFromPile(pile, o); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
+    case 'chipcorner': case 'chipboards': {
+      const coach = o.type === 'coach' ? o : coachAtPile(o);
+      const pile = o.type === 'pile' ? o : pileAtCoach(o);
+      if (!coach || !pile) break;
+      const pk = chipPuck(coach, pile, btn.dataset.act === 'chipboards');
+      commit(() => drill().objects.push(pk));
+      select(pk.id); renderProps(); break;
+    }
     case 'givepuck': { const pk = { id: uid(), ...newPuck(o, o.id) }; commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }
     case 'addpass': case 'addshoot': case 'addpickup': {

@@ -320,15 +320,20 @@ export function makeSim(drill) {
         Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank, by: byReceiver ? 'receiver' : 'carrier',
           mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr) });
       } else if (ev.type === 'shoot') {
+        // A shot (or a coach's chip) can bank off the boards at ev.bank on its way — e.g. rimmed around the end boards.
+        const bank = ev.bank && Number.isFinite(+ev.bank.x) && Number.isFinite(+ev.bank.y) ? { x: +ev.bank.x, y: +ev.bank.y } : null;
         const want = evTime(carrier, ev), tr = Math.max(t, want);
         rec.late = tr > want + 1e-6;
         pushCarried(tr);
         const from = puckAt(carrier, tr);
         const to = ev.target || nearestNet(from);
-        const travel = G.dist(from, to) / shotSpeed;
-        segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
+        const travel = (bank ? G.dist(from, bank) + G.dist(bank, to) : G.dist(from, to)) / shotSpeed;
+        if (bank) {
+          const tb = tr + G.dist(from, bank) / shotSpeed;
+          segs.push({ t0: tr, t1: tb, kind: 'flying', from, to: bank }, { t0: tb, t1: tr + travel, kind: 'flying', from: bank, to });
+        } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
         t = tr + travel; carrier = null; loose = to;
-        Object.assign(rec, { ok: true, t: tr, from, to, mark: markAt(rec.carrier, tr) });
+        Object.assign(rec, { ok: true, t: tr, from, to, bank, mark: markAt(rec.carrier, tr) });
       }
     }
     if (carrier) pushCarried(Infinity);

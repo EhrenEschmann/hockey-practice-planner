@@ -82,8 +82,9 @@ function shotOverlay(opts) {
     if (o.type !== 'puck') continue;
     for (const r of opts.sim.puck(o.id).info) {
       if (r.type !== 'shoot' || !r.ok || !r.from) continue;
-      if (!goalies.some(g => closestOnPolyline([r.from, r.to], g).dist < 2.8)) continue;
-      lines.push(`<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 2)}`);
+      const pts = r.bank ? [r.from, r.bank, r.to] : [r.from, r.to];
+      if (!goalies.some(g => closestOnPolyline(pts, g).dist < 2.8)) continue;
+      lines.push(`<polyline class="shot-line" fill="none" points="${ptsStr(pts)}"/>${arrowHead(pts.slice(-2), '#333', 2)}`);
     }
   }
   return lines.length ? `<g class="shot-overlay">${lines.join('')}</g>` : '';
@@ -221,7 +222,11 @@ const draw = {
     const pos = sim.puckPos(o.id, 0);
     const lines = opts.showPaths === false ? '' : ps.info.map((r, i) => {
       if (!r.ok || !r.from) return '';
-      if (r.type !== 'pass') return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 2)}`;
+      if (r.type !== 'pass') {
+        if (!r.bank) return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 2)}`;
+        return `<polyline class="shot-line" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 2)}
+        <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;
+      }
       if (!r.bank) return `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.6)}`;
       return `<polyline class="pass-line" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 1.6)}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;

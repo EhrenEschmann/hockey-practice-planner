@@ -37,7 +37,7 @@ export function syncFollowers(d) {
     const lead = d.objects.find(x => x.id === o.follow);
     // Leader gone, no longer routed, or itself a follower (chains would cycle): keep the copied path, stop following.
     if (!lead || lead.type !== 'skater' || lead.id === o.id || lead.follow || !lead.path?.length) { delete o.follow; continue; }
-    o.path = [{ x: lead.x, y: lead.y }, ...lead.path.map(p => ({ x: p.x, y: p.y }))];
+    o.path = [{ x: lead.x, y: lead.y }, ...lead.path.map(p => ({ ...p }))]; // spread keeps waypoint flags (e.g. pivot)
   }
 }
 

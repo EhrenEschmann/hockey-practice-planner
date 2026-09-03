@@ -51,7 +51,7 @@ function renderCanvas() {
   sim = makeSim(d);
   fxLayer.innerHTML = '';
   const selObj = getObj(sel);
-  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger });
+  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
   drawSelection();
   if (anim.t > 0) applyAnimation(anim.t);
   $$('#viewbar [data-view]').forEach(b => b.classList.toggle('active', sameView(VIEWS[b.dataset.view], d.view)));
@@ -499,7 +499,7 @@ function onPointerMove(e) {
       if (!drag.pushed) { store.pushUndo(JSON.stringify(withObj(drag.orig))); drag.pushed = true; }
       let dx = raw.x - drag.start.x, dy = raw.y - drag.start.y;
       if (snap) { dx = Math.round(dx); dy = Math.round(dy); }
-      const tr = q => ({ x: G.round1(q.x + dx), y: G.round1(q.y + dy) });
+      const tr = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) }); // spread keeps waypoint flags (e.g. pivot)
       if (o.points) o.points = drag.orig.points.map(tr);
       else { Object.assign(o, tr(drag.orig)); if (o.path) o.path = drag.orig.path.map(tr); }
       if (o.type === 'puck') { o.carrier = null; delete o.pile; } // dragging detaches; dropping on a skater re-attaches (see onPointerUp)
@@ -509,7 +509,7 @@ function onPointerMove(e) {
     case 'handle': {
       const o = getObj(drag.id); if (!o) return;
       if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
-      o[drag.key][drag.index] = p;
+      Object.assign(o[drag.key][drag.index], p); // assign in place: waypoint flags (e.g. pivot) survive the drag
       renderCanvas();
       break;
     }
@@ -690,7 +690,7 @@ document.addEventListener('keyup', e => {
 
 function translateObj(o, dx, dy) {
   if (!o) return;
-  const tr = q => ({ x: G.round1(q.x + dx), y: G.round1(q.y + dy) });
+  const tr = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) }); // spread keeps waypoint flags (e.g. pivot)
   if (o.points) o.points = o.points.map(tr);
   else { Object.assign(o, tr(o)); if (o.path) o.path = o.path.map(tr); }
 }
@@ -1206,7 +1206,7 @@ const PROPS = {
   skater: [
     ['label', 'text', 'Label'], ['side', 'select:=— none —,O=Offense (blue),D=Defense (red)', 'Side'], ['color', 'swatch', 'Color'], ['role', 'select:F=Forward,D=Defense,G=Goalie', 'Role'],
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
-    ['backward', 'checkbox', 'Skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
+    ['backward', 'checkbox', 'Starts skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
   coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
@@ -1260,6 +1260,10 @@ function renderProps() {
     const hasPath = !!o.path?.length;
     const start = tm.delay > 0 || o.trigger ? ` · starts at ${tm.delay.toFixed(1)} s` : '';
     extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${start}${hasPath ? '' : ` (no path yet — use the Skater tool on this ${o.type} to add waypoints)`}</p>`);
+    if (o.type === 'skater' && o.path?.length && !o.follow) {
+      const toggles = o.path.map((pt, i) => `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1}: switch between forward and backward skating there">${i + 1}</button>`).join('');
+      extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this skater is selected">Pivot forward ⇄ backward at waypoint</span><div class="row wp-row">${toggles}</div></div>`);
+    }
     if (o.type === 'skater') {
       const leaders = drill().objects.filter(s => s.type === 'skater' && s.id !== o.id && !s.follow && s.path?.length);
       if (leaders.length || o.follow) extra.push(`<label class="field inline"><span>Same path as</span><select data-prop="follow">
@@ -1528,6 +1532,11 @@ propsBody.addEventListener('click', e => {
     case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
     case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
     case 'takepuck': { const pile = nearestPile(o); if (!pile) break; const pk = puckFromPile(pile, o); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
+    case 'pivot': {
+      const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
+      commit(() => { if (pt.pivot) delete pt.pivot; else pt.pivot = true; });
+      renderProps(); break;
+    }
     case 'chasepuck': {
       const hit = nearestLoosePuck(o); if (!hit) break;
       const ev = { type: 'pickup', skater: o.id, wp: 0 };

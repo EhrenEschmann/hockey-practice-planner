@@ -37,13 +37,28 @@ function handles(pts) {
 const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'goalie', 'contact'];
 const zType = o => (o.type === 'skater' && o.role === 'G' ? 'goalie' : o.type);
 
-/** A player's skating path (line + arrowhead), or '' if there is none to draw. */
+/** A player's skating path (line + arrowhead), or '' if there is none to draw. Backward stretches (from `backward` / waypoint pivots) draw dotted, with a ⇄ marker at each pivot. */
 function playerPath(o, opts) {
   if (!o.path?.length || opts.showPaths === false) return '';
-  const color = SKATER_COLORS[o.color] || o.color || (o.type === 'coach' ? SKATER_COLORS.black : SKATER_COLORS.blue);
-  const dense = smoothPath(skaterPoints(o));
-  const dash = o.type === 'coach' ? 'stroke-dasharray="2.5 1.5"' : o.backward ? 'stroke-dasharray="1.5 1.2"' : '';
-  return `<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash}/>${arrowHead(dense, color)}`;
+  const isCoach = o.type === 'coach';
+  const color = SKATER_COLORS[o.color] || o.color || (isCoach ? SKATER_COLORS.black : SKATER_COLORS.blue);
+  const pts = skaterPoints(o);
+  const dense = smoothPath(pts);
+  const dash = back => isCoach ? 'stroke-dasharray="2.5 1.5"' : back ? 'stroke-dasharray="1.5 1.2"' : '';
+  const pivots = pts.filter((p, i) => i > 0 && p.pivot);
+  if (!pivots.length) return `<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward)}/>${arrowHead(dense, color)}`;
+  // Split the line at each pivot; the stretches alternate forward/backward from the start direction.
+  const idxOf = p => { let bi = 0, bd = Infinity; for (let i = 0; i < dense.length; i++) { const d = (dense[i].x - p.x) ** 2 + (dense[i].y - p.y) ** 2; if (d < bd) { bd = d; bi = i; } } return bi; };
+  const cuts = [0, ...pivots.map(idxOf).sort((a, b) => a - b), dense.length - 1];
+  let back = !!o.backward;
+  const segs = [];
+  for (let s = 0; s + 1 < cuts.length; s++) {
+    const slice = dense.slice(cuts[s], cuts[s + 1] + 1);
+    if (slice.length > 1) segs.push(`<polyline class="path-line" points="${ptsStr(slice)}" stroke="${color}" ${dash(back)}/>`);
+    back = !back;
+  }
+  const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">⇄</text></g>`).join('');
+  return segs.join('') + arrowHead(dense, color) + marks;
 }
 
 export function renderObjects(drill, selId, opts = {}) {

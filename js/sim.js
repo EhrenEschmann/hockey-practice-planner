@@ -97,7 +97,13 @@ export function facingOf(o, objs = []) {
 function carryFrames(o, dense, cum, objs) {
   const len = cum[cum.length - 1];
   if (len < 0.01) return { step: 0, h: [facingOf(o, objs)], l: [CARRY.rest], f: [CARRY.lead] };
-  const flip = o.backward ? Math.PI : 0;
+  // Body facing vs travel: `backward` sets the start direction, and each waypoint marked `pivot` flips it.
+  const pts = skaterPoints(o);
+  const pivotDs = [];
+  for (let i = 1; i < pts.length; i++) if (pts[i].pivot) pivotDs.push(G.closestOnPolyline(dense, pts[i]).along);
+  pivotDs.sort((a, b) => a - b);
+  const baseFlip = o.backward ? Math.PI : 0;
+  const flipAt = d => { let k = 0; for (const pd of pivotDs) if (pd <= d) k++; return baseFlip + (k % 2) * Math.PI; };
   const N = Math.max(2, Math.ceil(len / CARRY.step) + 1);
   const step = len / (N - 1);
   const ease = 1 - Math.exp(-step / CARRY.tau);
@@ -116,7 +122,7 @@ function carryFrames(o, dense, cum, objs) {
     const d = i * step;
     const p = G.pointAt(dense, cum, d);
     const a = G.pointAt(dense, cum, Math.max(0, d - 0.5)), b = G.pointAt(dense, cum, Math.min(len, d + 0.5));
-    const hd = wrapAngle(Math.atan2(b.y - a.y, b.x - a.x) + flip);
+    const hd = wrapAngle(Math.atan2(b.y - a.y, b.x - a.x) + flipAt(d));
     let target = CARRY.rest;
     if (prevH !== null) target -= G.clamp(wrapAngle(hd - prevH) / step * CARRY.curve, -CARRY.max, CARRY.max);
     for (const c of obstacles) {

@@ -180,6 +180,10 @@ body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
   #print-area pre{white-space:pre-wrap;font:9.5px/1.35 system-ui,sans-serif;margin:1.5mm 0 0}
 }
 
+.wp-row{display:flex;flex-wrap:wrap;gap:3px}
+.wp-toggle{padding:2px 8px;font-size:12px}
+.wp-toggle.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
 .event{border:1px solid var(--border);border-radius:6px;padding:6px;margin-bottom:6px;background:var(--panel-2)}
 .event-head{display:flex;gap:4px;align-items:center}
 .event-head select{width:auto}

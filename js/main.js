@@ -272,6 +272,19 @@ function nearestPile(player) {
   return piles.sort((a, b) => G.projectOnPolyline(tm.dense, tm.cum, a).dist - G.projectOnPolyline(tm.dense, tm.cum, b).dist)[0];
 }
 
+/** The puck that ends up loose (chipped into the corner, a missed shot, a plain loose puck) nearest this player's path: { pk, at, d } or null. */
+function nearestLoosePuck(player) {
+  const tm = sim.skater(player.id);
+  let best = null;
+  for (const pk of drill().objects.filter(x => x.type === 'puck' && x.id !== player.id)) {
+    const last = sim.puck(pk.id).segs.at(-1);
+    if (last.kind !== 'loose') continue; // ends the drill carried by someone
+    const d = G.projectOnPolyline(tm.dense, tm.cum, last.at).dist;
+    if (!best || d < best.d) best = { pk, at: last.at, d };
+  }
+  return best;
+}
+
 /** Where a goalie stands for a net: just in front of the goal line, on the side the net opens to. */
 function creaseSpot(net) {
   const a = (net.rot || 0) * Math.PI / 180;
@@ -1259,6 +1272,7 @@ function renderProps() {
     extra.push(`<button data-act="extend" ${o.follow ? 'disabled title="Following another skater&#39;s path"' : ''}>${hasPath ? 'Extend path' : 'Add path'}</button>`);
     extra.push(`<button data-act="clearpath" ${hasPath && !o.follow ? '' : 'disabled'}>Clear path</button>`);
     if (drill().objects.some(x => x.type === 'pile')) extra.push(`<button data-act="takepuck" title="Add a puck they pick up from the nearest pile where their path passes it">Take puck from pile</button>`);
+    if (!myPuck && nearestLoosePuck(o)) extra.push(`<button data-act="chasepuck" title="They pick up the nearest puck that ends up loose (a coach's chip in the corner, a missed shot, a loose puck) where their path passes its resting spot">Pick up loose puck</button>`);
     if (o.type === 'coach') {
       const pile = pileAtCoach(o);
       if (pile) {
@@ -1514,6 +1528,13 @@ propsBody.addEventListener('click', e => {
     case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
     case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
     case 'takepuck': { const pile = nearestPile(o); if (!pile) break; const pk = puckFromPile(pile, o); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
+    case 'chasepuck': {
+      const hit = nearestLoosePuck(o); if (!hit) break;
+      const ev = { type: 'pickup', skater: o.id, wp: 0 };
+      if (o.path?.length) { const tm = sim.skater(o.id); ev.dist = G.round1(G.projectOnPolyline(tm.dense, tm.cum, hit.at).d); }
+      commit(() => { hit.pk.events ||= []; hit.pk.events.push(ev); });
+      select(hit.pk.id); renderProps(); break;
+    }
     case 'chipcorner': case 'chipboards': {
       const coach = o.type === 'coach' ? o : coachAtPile(o);
       const pile = o.type === 'pile' ? o : pileAtCoach(o);

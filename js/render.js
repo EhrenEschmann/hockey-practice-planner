@@ -74,6 +74,7 @@ export function renderObjects(drill, selId, opts = {}) {
  * that passes through a goalie's body is echoed as a translucent copy on top of everything.
  */
 function shotOverlay(opts) {
+  if (opts.showPaths === false) return ''; // hidden along with the shot lines it echoes
   const goalies = opts.objs.filter(o => o.type === 'skater' && o.role === 'G');
   if (!goalies.length) return '';
   const lines = [];
@@ -218,7 +219,7 @@ const draw = {
     const sim = opts.sim;
     const ps = sim.puck(o.id);
     const pos = sim.puckPos(o.id, 0);
-    const lines = ps.info.map((r, i) => {
+    const lines = opts.showPaths === false ? '' : ps.info.map((r, i) => {
       if (!r.ok || !r.from) return '';
       if (r.type !== 'pass') return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 2)}`;
       if (!r.bank) return `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.6)}`;
@@ -226,7 +227,7 @@ const draw = {
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;
     }).join('');
     const letter = { pass: 'P', shoot: 'S', pickup: 'U' };
-    const marks = ps.info.map((r, i) => r.ok && r.mark
+    const marks = opts.showPaths === false ? '' : ps.info.map((r, i) => r.ok && r.mark
       ? `<g class="ev-mark ${r.type}${r.by === 'receiver' ? ' receive' : ''}${sel ? ' draggable' : ''}" data-evmark="${i}" transform="translate(${n(r.mark.x)} ${n(r.mark.y)})"><circle r="1.25"/><text y=".55" font-size="1.5" text-anchor="middle">${r.by === 'receiver' ? 'R' : letter[r.type] || '?'}</text></g>`
       : '').join('');
     return `<g class="obj puck" data-id="${o.id}"><g class="puck-lines">${lines}</g>${marks}

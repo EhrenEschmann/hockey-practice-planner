@@ -818,8 +818,8 @@ function renderAnimBar() {
   const tl = $('#timeline');
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
   $('#time-display').textContent = `${anim.t.toFixed(1)} / ${T.toFixed(1)} s`;
-  // "worse for" selector: skaters linked by contact markers
-  const linked = [...new Set(drill().objects.filter(o => o.type === 'contact').flatMap(c => [c.a, c.b]))]
+  // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
+  const linked = [...new Set((sim ? sim.contacts() : []).flatMap(c => [c.a, c.b]))]
     .filter(id => getObj(id)?.type === 'skater');
   const el = $('#impact-loser');
   $('#impact-loser-wrap').hidden = !linked.length;

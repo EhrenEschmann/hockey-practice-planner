@@ -30,7 +30,7 @@ const SIDES = { O: { color: 'blue', name: 'Offense' }, D: { color: 'red', name: 
 let newSide = 'O';            // side (and colour) given to newly placed skaters
 let lastZoneColor = 0;
 
-const anim = { playing: false, t: 0, speed: 1, loop: false, raf: null, last: 0 };
+const anim = { playing: false, t: 0, speed: 1, raf: null, last: 0 };
 let sim = null;          // simulation of the current drill (rebuilt on every canvas render)
 let pickTarget = null;   // { puckId, ev, kind: 'target' | 'dist' | 'bank' } while waiting for a click to set a shot target / path mark / board bounce
 
@@ -830,10 +830,7 @@ function tick(now) {
   anim.last = now;
   anim.t += dt * anim.speed;
   const T = fullDuration();
-  if (anim.t >= T) {
-    if (anim.loop && T > 0) anim.t = 0;
-    else { anim.t = T; anim.playing = false; }
-  }
+  if (anim.t >= T) { anim.t = T; anim.playing = false; }
   applyAnimation(anim.t);
   renderAnimBar();
   if (anim.playing) anim.raf = requestAnimationFrame(tick);
@@ -895,7 +892,6 @@ $('#btn-stop').addEventListener('click', stopAnim);
 $('#timeline').addEventListener('input', e => { anim.t = +e.target.value; if (anim.t === 0) renderCanvas(); else applyAnimation(anim.t); renderAnimBar(); });
 $('#timeline').addEventListener('change', e => e.target.blur()); // scrub done → hotkeys work again
 $('#anim-speed').addEventListener('change', e => anim.speed = +e.target.value);
-$('#anim-loop').addEventListener('change', e => anim.loop = e.target.checked);
 $('#anim-trails').addEventListener('change', e => { showPaths = e.target.checked; renderCanvas(); });
 
 // ---------- view bar ----------

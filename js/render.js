@@ -37,15 +37,34 @@ function handles(pts) {
 const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'goalie', 'contact'];
 const zType = o => (o.type === 'skater' && o.role === 'G' ? 'goalie' : o.type);
 
+/** A player's skating path (line + arrowhead), or '' if there is none to draw. */
+function playerPath(o, opts) {
+  if (!o.path?.length || opts.showPaths === false) return '';
+  const color = SKATER_COLORS[o.color] || o.color || (o.type === 'coach' ? SKATER_COLORS.black : SKATER_COLORS.blue);
+  const dense = smoothPath(skaterPoints(o));
+  const dash = o.type === 'coach' ? 'stroke-dasharray="2.5 1.5"' : o.backward ? 'stroke-dasharray="1.5 1.2"' : '';
+  return `<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash}/>${arrowHead(dense, color)}`;
+}
+
 export function renderObjects(drill, selId, opts = {}) {
   const objs = drill.objects
     .map((o, i) => ({ o, i }))
     .sort((a, b) => (Z_ORDER.indexOf(zType(a.o)) - Z_ORDER.indexOf(zType(b.o))) || (a.i - b.i))
     .map(x => x.o);
   const o2 = { ...opts, sim: opts.sim || makeSim(drill), objs: drill.objects };
+  // Players' paths all draw in one underlay beneath every player body, so a busy drill's path lines
+  // never cover another skater. The underlay groups repeat the player's data-id so clicking a path
+  // still selects its player.
+  const playerZ = Z_ORDER.indexOf('coach');
+  const below = objs.filter(o => Z_ORDER.indexOf(zType(o)) < playerZ);
+  const above = objs.filter(o => Z_ORDER.indexOf(zType(o)) >= playerZ);
+  const pathLayer = above.filter(o => o.type === 'skater' || o.type === 'coach')
+    .map(o => { const p = playerPath(o, o2); return p ? `<g class="obj ${o.type} path-under" data-id="${o.id}">${p}</g>` : ''; }).join('');
   // Raised pads are drawn in two parts: tires in normal order, and the slab on top of everything so
   // skaters visibly slide underneath it.
-  return objs.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
+  return below.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
+    + pathLayer
+    + above.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
     + objs.filter(o => o.type === 'raisedpad').map(raisedPadTop).join('')
     + shotOverlay(o2);
 }
@@ -217,14 +236,9 @@ const draw = {
   coach(o, sel, opts) {
     const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.black;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
-    let path = '';
-    if (o.path?.length && opts.showPaths !== false) {
-      const dense = smoothPath(skaterPoints(o));
-      path = `<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" stroke-dasharray="2.5 1.5"/>${arrowHead(dense, color)}`;
-    }
-    const h = sel ? handles(o.path || []) : '';
+    const h = sel ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects)
     const wps = opts.numberWaypoints ? wpLabels(o) : '';
-    return `<g class="obj coach" data-id="${o.id}">${path}${h}${wps}
+    return `<g class="obj coach" data-id="${o.id}">${h}${wps}
       <g class="coach-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         <polygon class="body" points="0,-2.5 2.5,0 0,2.5 -2.5,0" fill="${color}"/>
         <text y=".65" font-size="1.8" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>
@@ -240,18 +254,13 @@ const draw = {
 
   skater(o, sel, opts) {
     const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.blue;
-    let path = '';
-    if (o.path?.length && opts.showPaths !== false) {
-      const dense = smoothPath(skaterPoints(o));
-      path = `<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${o.backward ? 'stroke-dasharray="1.5 1.2"' : ''}/>${arrowHead(dense, color)}`;
-    }
-    const h = sel ? handles(o.path || []) : '';
+    const h = sel ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects)
     const body = o.role === 'G'
       ? `<rect class="body" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".7" fill="${color}"/>`
       : `<circle class="body" r="1.75" fill="${color}"/>`;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
     const wps = opts.numberWaypoints ? wpLabels(o) : '';
-    return `<g class="obj skater" data-id="${o.id}">${path}${h}${wps}
+    return `<g class="obj skater" data-id="${o.id}">${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         <ellipse class="shadow" rx="1.9" ry="1.2" fill="#000" fill-opacity=".22" style="display:none"/>
         <g class="figure">${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text></g>

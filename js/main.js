@@ -61,7 +61,7 @@ function sameView(a, b) { return a && b && ['x', 'y', 'w', 'h'].every(k => Math.
 function drawSelection() {
   overlay.innerHTML = '';
   if (!sel) return;
-  const el = objLayer.querySelector(`[data-id="${sel}"]`);
+  const el = objLayer.querySelector(`[data-id="${sel}"]:not(.path-under)`);
   if (!el) { sel = null; return; }
   const target = el.querySelector('.skater-body, .coach-body, .puck-disc') || el;
   const handlesToHide = Array.from(el.querySelectorAll('.handle'));

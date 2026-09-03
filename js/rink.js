@@ -59,7 +59,7 @@ export const SVG_STYLE = `
   .bank-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .bank-mark.draggable{cursor:move}
   .bank-mark.draggable circle{stroke:#3b82f6;stroke-width:.45}
-  .shot-line{stroke:#333;stroke-width:.6}
+  .shot-line{stroke:#333;stroke-width:.35}
   .shot-overlay{opacity:.5;pointer-events:none}
   .puck-ring{fill:none;stroke:#3b82f6;stroke-width:.3}
   .ev-mark circle{fill:#fff;stroke:#333;stroke-width:.3}

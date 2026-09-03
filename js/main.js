@@ -1689,6 +1689,12 @@ function presentDoc(p) {
   $('#present-body').innerHTML = presentHTML(p);
   wirePresentAnims(p);
   $('#present-gate').hidden = true;
+  presentNote('');
+}
+/** Status line under the presentation top bar (e.g. "Offline copy from …"); '' hides it. */
+function presentNote(text) {
+  $('#present-note').textContent = text;
+  $('#present-note').hidden = !text;
 }
 
 // Each drill card gets its own little player: ▶/⏸, a scrubber and the drill clock,
@@ -1752,19 +1758,35 @@ function refreshPresent() {
   const [, ownerUid, pid] = m;
   const mine = store.data.practices.find(x => x.id === pid);
   if (mine) { presentUnsub?.(); presentUnsub = null; presentKey = null; presentDoc(mine); return; } // own practice: straight from the store
-  if (!cloudBackend) return presentMsg('This practice is not available on this device.');
-  if (!cloudSync?.user) return presentMsg('This practice plan is shared with specific coaches. Sign in to view it.', true);
+  // Rink mode: a previously viewed copy is kept on this device, shown immediately, and replaced live when online.
   const key = `${ownerUid}/${pid}`;
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem(`hpp.viewcache.${key}`) || 'null'); } catch { cached = null; }
+  const showCached = note => {
+    if (!cached?.p) return false;
+    (cached.p.drills || []).forEach(migrateDrill);
+    presentDoc(cached.p);
+    presentNote(`Offline copy from ${new Date(cached.at).toLocaleString()} — ${note}`);
+    return true;
+  };
+  if (!cloudBackend) { if (!showCached('reconnect to get updates.')) presentMsg('This practice is not available on this device.'); return; }
+  if (!cloudSync?.user) { if (!showCached('sign in when online to get updates.')) presentMsg('This practice plan is shared with specific coaches. Sign in to view it.', true); return; }
   if (presentKey === key) return; // already watching this practice
   presentUnsub?.();
   presentKey = key;
-  presentMsg('Loading…');
+  if (!showCached('checking for updates…')) presentMsg('Loading…');
   presentUnsub = cloudBackend.subscribePractice(ownerUid, pid, (p, err) => {
-    if (err) return presentMsg(err.code === 'permission-denied'
-      ? "You don't have access to this practice. Ask the coach who shared it to add your Google email in the practice details."
-      : `Could not load the practice: ${err.message || err}`);
+    if (err) {
+      const msg = err.code === 'permission-denied'
+        ? "You don't have access to this practice. Ask the coach who shared it to add your Google email in the practice details."
+        : `Could not load the practice: ${err.message || err}`;
+      if (!showCached('could not reach the cloud.')) presentMsg(msg);
+      return;
+    }
     if (!p) return presentMsg('This practice no longer exists.');
     (p.drills || []).forEach(migrateDrill);
+    try { localStorage.setItem(`hpp.viewcache.${key}`, JSON.stringify({ p, at: Date.now() })); } catch { /* full/blocked storage: live view still works */ }
+    cached = { p, at: Date.now() };
     presentDoc(p);
   });
 }
@@ -1810,8 +1832,15 @@ function setGate(state, detail = '') {
   // `globalThis.__hppBackend` lets tests plug in a fake backend; otherwise use Firebase when configured.
   let backend = globalThis.__hppBackend || null;
   let cfg = null;
-  if (!backend) { cfg = await loadConfig(); if (cfg) { setGate('checking'); backend = await firebaseBackend(cfg); } }
-  if (!backend) return; // no config: local-only, no sign-in possible, the cloud controls stay hidden
+  if (!backend) {
+    cfg = await loadConfig();
+    if (cfg) {
+      setGate('checking');
+      try { backend = await firebaseBackend(cfg); }
+      catch { setGate(null); } // offline and the SDK isn't cached yet: run local-only rather than hang the gate
+    }
+  }
+  if (!backend) { refreshPresent(); return; } // no config (or offline boot): local-only; presentation falls back to its offline copy
   setGate('checking');
   $('#cloud').hidden = false;
   const sync = createSync({
@@ -1839,6 +1868,8 @@ function setGate(state, detail = '') {
 })();
 
 // ---------- boot ----------
+// Offline support: cache the app shell so the rink works without internet (needs HTTPS or localhost).
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 applyRoute();
 setTool('select');
 refreshPresent();

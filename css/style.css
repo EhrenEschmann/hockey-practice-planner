@@ -124,6 +124,22 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 
 #library{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.7)}
 #library[hidden]{display:none}
+
+/* team manager: coaches with emails, players with family contacts */
+#teammgr{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.7)}
+#teammgr[hidden]{display:none}
+#teammgr .lib-panel{width:min(760px,94vw)}
+#team-select{width:auto;max-width:220px}
+#team-body{flex:1;overflow-y:auto;padding:14px 16px}
+#team-body h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:16px 0 8px;font-weight:600}
+.ros-team-name{max-width:380px}
+.ros-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+.ros-row input{flex:1}
+.ros-row button{flex:none;padding:3px 8px}
+.ros-row .ros-rel{flex:0 0 130px}
+.ros-player{border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:8px;background:var(--panel-2)}
+.ros-player .ros-contact{margin-left:18px}
+.ros-player .ros-row:last-child{margin-bottom:0}
 .lib-panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;width:min(1060px,94vw);height:min(720px,90vh);display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5)}
 .lib-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);flex:none}
 .lib-head input{width:220px}

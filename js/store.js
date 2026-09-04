@@ -107,6 +107,16 @@ export class Store {
     this.onSave?.(this.practice);
   }
 
+  /** The team roster: coaches (with emails) and players (with family contacts), per team. */
+  get roster() { return (this.data.roster ||= { teams: [], updatedAt: 0 }); }
+
+  /** The roster was edited: stamp it, persist locally and notify cloud sync (if any). */
+  saveRoster() {
+    this.roster.updatedAt = Date.now();
+    this.persist();
+    this.onRosterSave?.(this.roster);
+  }
+
   /** Write everything to browser storage without marking anything as edited. */
   persist() {
     try { localStorage.setItem(KEY, JSON.stringify(this.data)); }

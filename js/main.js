@@ -696,6 +696,7 @@ document.addEventListener('keydown', e => {
   if (gated) return;
   if (presenting) return; // presentation is view-only and terminal: no editor shortcuts, no way "back"
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
+  if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
@@ -1100,6 +1101,123 @@ $('#plan-pin').addEventListener('click', () => {
   applyPlanPin();
 });
 applyPlanPin();
+
+// ---------- team manager: coaches (with emails) and players (with family contacts), per team ----------
+let teamSelId = null; // team open in the manager
+
+function currentMgrTeam() {
+  const teams = store.roster.teams;
+  return teams.find(t => t.id === teamSelId)
+    || teams.find(t => (t.name || '').toLowerCase() === (store.practice.team || '').toLowerCase())
+    || teams[0] || null;
+}
+
+function openTeamMgr() {
+  finishActive();
+  if (!store.roster.teams.length) {
+    store.roster.teams.push({ id: uid(), name: store.practice.team || 'My team', coaches: [], players: [] });
+    store.saveRoster();
+  }
+  teamSelId = currentMgrTeam()?.id || null;
+  $('#teammgr').hidden = false;
+  renderTeamMgr();
+}
+function closeTeamMgr() { $('#teammgr').hidden = true; }
+
+function renderTeamMgr() {
+  const t = currentMgrTeam();
+  teamSelId = t?.id || null;
+  $('#team-select').innerHTML = store.roster.teams.map(x => `<option value="${x.id}" ${x.id === teamSelId ? 'selected' : ''}>${escHtml(x.name || 'unnamed')}</option>`).join('');
+  const body = $('#team-body');
+  if (!t) { body.innerHTML = '<p class="muted">No team yet — add one with ＋ Team.</p>'; return; }
+  const coachRows = t.coaches.map(c => `
+    <div class="ros-row" data-cid="${c.id}">
+      <input placeholder="Coach name" data-field="name" value="${escHtml(c.name || '')}">
+      <input placeholder="email@…" data-field="email" value="${escHtml(c.email || '')}" spellcheck="false">
+      <button data-act="delcoach" title="Remove coach">✕</button>
+    </div>`).join('');
+  const playerBlocks = t.players.map(p => `
+    <div class="ros-player" data-pid="${p.id}">
+      <div class="ros-row">
+        <input placeholder="Player name" data-field="name" value="${escHtml(p.name || '')}">
+        <button data-act="addcontact" title="Add a parent / grandparent contact">＋ contact</button>
+        <button data-act="delplayer" title="Remove player">✕</button>
+      </div>
+      ${(p.contacts || []).map(k => `
+      <div class="ros-row ros-contact" data-kid="${k.id}">
+        <input class="ros-rel" placeholder="mom / grandpa …" data-field="rel" value="${escHtml(k.rel || '')}">
+        <input placeholder="Contact name" data-field="name" value="${escHtml(k.name || '')}">
+        <input placeholder="email@…" data-field="email" value="${escHtml(k.email || '')}" spellcheck="false">
+        <button data-act="delcontact" title="Remove contact">✕</button>
+      </div>`).join('')}
+    </div>`).join('');
+  body.innerHTML = `
+    <label class="field inline ros-team-name"><span>Team name</span><input data-field="teamname" value="${escHtml(t.name || '')}"></label>
+    <h3>Coaches</h3>
+    ${coachRows || '<p class="muted small">No coaches yet.</p>'}
+    <div class="row"><button data-act="addcoach">＋ Add coach</button></div>
+    <h3>Players &amp; family contacts</h3>
+    ${playerBlocks || '<p class="muted small">No players yet.</p>'}
+    <div class="row"><button data-act="addplayer">＋ Add player</button></div>`;
+}
+
+$('#btn-team').addEventListener('click', openTeamMgr);
+$('#team-close').addEventListener('click', closeTeamMgr);
+$('#team-select').addEventListener('change', e => { teamSelId = e.target.value; renderTeamMgr(); });
+$('#team-add').addEventListener('click', () => {
+  const t = { id: uid(), name: 'New team', coaches: [], players: [] };
+  store.roster.teams.push(t);
+  teamSelId = t.id;
+  store.saveRoster(); renderTeamMgr();
+  const el = $('#team-body input[data-field="teamname"]'); if (el) { el.focus(); el.select(); }
+});
+$('#team-del').addEventListener('click', () => {
+  const t = currentMgrTeam(); if (!t) return;
+  if (!confirm(`Delete team "${t.name || 'unnamed'}" and its roster? This cannot be undone.`)) return;
+  store.roster.teams = store.roster.teams.filter(x => x.id !== t.id);
+  teamSelId = null;
+  store.saveRoster(); renderTeamMgr();
+});
+$('#team-body').addEventListener('input', e => {
+  const el = e.target; const t = currentMgrTeam();
+  if (!t || !el.dataset.field) return;
+  if (el.dataset.field === 'teamname') { t.name = el.value; store.saveRoster(); return; }
+  const row = el.closest('[data-cid],[data-kid],[data-pid]');
+  if (!row) return;
+  const obj = row.dataset.cid ? t.coaches.find(c => c.id === row.dataset.cid)
+    : row.dataset.kid ? t.players.flatMap(p => p.contacts || []).find(k => k.id === row.dataset.kid)
+    : t.players.find(p => p.id === row.dataset.pid);
+  if (!obj) return;
+  obj[el.dataset.field] = el.value;
+  store.saveRoster();
+});
+$('#team-body').addEventListener('change', e => { if (e.target.dataset.field === 'teamname') renderTeamMgr(); }); // the team select shows the new name
+$('#team-body').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn?.dataset.act) return;
+  const t = currentMgrTeam(); if (!t) return;
+  const player = t.players.find(p => p.id === btn.closest('[data-pid]')?.dataset.pid);
+  switch (btn.dataset.act) {
+    case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
+    case 'delcoach': t.coaches = t.coaches.filter(c => c.id !== btn.closest('[data-cid]').dataset.cid); break;
+    case 'addplayer': t.players.push({ id: uid(), name: '', contacts: [] }); break;
+    case 'delplayer': if (!player) return; t.players = t.players.filter(p => p !== player); break;
+    case 'addcontact': if (!player) return; (player.contacts ||= []).push({ id: uid(), rel: '', name: '', email: '' }); break;
+    case 'delcontact': if (!player) return; player.contacts = (player.contacts || []).filter(k => k.id !== btn.closest('[data-kid]').dataset.kid); break;
+    default: return;
+  }
+  store.saveRoster(); renderTeamMgr();
+});
+// Practice popover: pull the roster team's coach emails into this practice's viewer list.
+$('#btn-team-emails').addEventListener('click', () => {
+  const team = store.roster.teams.find(t => (t.name || '').toLowerCase() === (store.practice.team || '').toLowerCase()) || store.roster.teams[0];
+  const emails = (team?.coaches || []).map(c => (c.email || '').trim().toLowerCase()).filter(Boolean);
+  if (!emails.length) return alert('No coach emails in the team roster yet — add them under 👥 Team.');
+  store.beginPending();
+  store.practice.sharedWith = [...new Set([...(store.practice.sharedWith || []), ...emails])];
+  store.commitPending();
+  store.save();
+  renderPracticeProps();
+});
 
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
 let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
@@ -2062,6 +2180,7 @@ function setGate(state, detail = '') {
       else renderPracticeSelect();
       if (presenting) refreshPresent(); // presenting one's own practice: pick up the change live
     },
+    onRoster: () => { if (!$('#teammgr').hidden) renderTeamMgr(); }, // roster edited on another device
   });
   cloudSync = sync; cloudBackend = backend;
   $('#gate-signin').addEventListener('click', () => sync.signIn().catch(e => setGate('error', e?.message || String(e))));

@@ -44,6 +44,14 @@ export async function firebaseBackend(config) {
     subscribePractice(uid, id, cb) {
       return fs.onSnapshot(fs.doc(col(uid), id), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err));
     },
+    // The team roster: one document per user at users/{uid}/meta/roster.
+    async loadRoster(uid) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'meta', 'roster')); return s.exists() ? s.data() : null; },
+    async saveRoster(uid, r) { await fs.setDoc(fs.doc(db, 'users', uid, 'meta', 'roster'), r); },
+    subscribeRoster(uid, cb) {
+      return fs.onSnapshot(fs.doc(db, 'users', uid, 'meta', 'roster'), s => {
+        if (!s.metadata.hasPendingWrites && s.exists()) cb(s.data());
+      }, () => { /* roster sync is best-effort; practice sync reports errors */ });
+    },
   };
 }
 
@@ -55,9 +63,10 @@ export async function firebaseBackend(config) {
  * `onStatus(state, detail)` reports: signedout | syncing | saving | saved | error.
  * `onRemote(ids)` fires after cloud changes were applied to those practices.
  */
-export function createSync({ store, backend, onStatus = () => {}, onRemote = () => {} }) {
-  let uid = null, user = null, unsub = null, applying = false;
+export function createSync({ store, backend, onStatus = () => {}, onRemote = () => {}, onRoster = () => {} }) {
+  let uid = null, user = null, unsub = null, unsubRoster = null, applying = false;
   const timers = new Map();
+  let rosterTimer = null;
   const clean = p => JSON.parse(JSON.stringify(p)); // drops undefined (Firestore rejects it) and detaches
   const local = id => store.data.practices.find(p => p.id === id);
   const newer = (a, b) => (a?.updatedAt || 0) > (b?.updatedAt || 0);
@@ -78,7 +87,22 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
     try { await backend.save(uid, clean(p)); if (!timers.size) status('saved'); }
     catch (e) { status('error', e?.message || String(e)); }
   }
-  async function flush() { for (const id of [...timers.keys()]) { clearTimeout(timers.get(id)); await flushOne(id); } }
+  async function flush() { for (const id of [...timers.keys()]) { clearTimeout(timers.get(id)); await flushOne(id); } await flushRoster(); }
+
+  // ----- roster (one meta document, same debounce + newest-wins treatment) -----
+  function scheduleRoster() {
+    if (!uid || applying || !backend.saveRoster) return;
+    clearTimeout(rosterTimer);
+    status('saving');
+    rosterTimer = setTimeout(flushRoster, SAVE_DELAY);
+  }
+  async function flushRoster() {
+    if (!rosterTimer) return;
+    clearTimeout(rosterTimer); rosterTimer = null;
+    if (!uid) return;
+    try { await backend.saveRoster(uid, clean(store.roster)); if (!timers.size) status('saved'); }
+    catch (e) { status('error', e?.message || String(e)); }
+  }
   async function remove(id) {
     if (!uid || applying) return;
     clearTimeout(timers.get(id)); timers.delete(id);
@@ -102,6 +126,12 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
     for (const p of store.data.practices) {
       const r = remote.find(x => x.id === p.id);
       if (!r || newer(p, r)) await backend.save(uid, clean(p));
+    }
+    // Roster: newest copy wins, missing side copied over.
+    if (backend.loadRoster) {
+      const rr = await backend.loadRoster(uid);
+      if (rr && (rr.updatedAt || 0) > (store.roster.updatedAt || 0)) { store.data.roster = rr; store.persist(); onRoster(); }
+      else if ((store.roster.updatedAt || 0) > (rr?.updatedAt || 0)) await backend.saveRoster(uid, clean(store.roster));
     }
     onRemote(changed, { full: true });
     status(timers.size ? 'saving' : 'saved');
@@ -132,6 +162,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
   // ----- auth -----
   backend.onUser(async u => {
     unsub?.(); unsub = null;
+    unsubRoster?.(); unsubRoster = null;
     user = u; uid = u?.uid || null;
     if (!uid) { status('signedout'); return; }
     try {
@@ -140,13 +171,18 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
       store.data.ownerUid = uid; store.persist();
       await pull();
       unsub = backend.subscribe(uid, onChange);
+      unsubRoster = backend.subscribeRoster?.(uid, r => {
+        if (rosterTimer || !r || (r.updatedAt || 0) <= (store.roster.updatedAt || 0)) return;
+        store.data.roster = r; store.persist(); onRoster();
+      });
     } catch (e) { status('error', e?.message || String(e)); }
   });
 
   store.onSave = p => schedule(p);
+  store.onRosterSave = () => scheduleRoster();
   store.onDelete = id => remove(id);
   if (typeof addEventListener === 'function') {
-    addEventListener('beforeunload', () => { for (const id of [...timers.keys()]) { clearTimeout(timers.get(id)); flushOne(id); } });
+    addEventListener('beforeunload', () => { for (const id of [...timers.keys()]) { clearTimeout(timers.get(id)); flushOne(id); } flushRoster(); });
     addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
   }
 

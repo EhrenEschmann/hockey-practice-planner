@@ -21,10 +21,12 @@
       <label class="field"><span>Start time</span><input id="practice-time" type="time"></label>
       <label class="field"><span>Coaches</span><input id="practice-coaches" placeholder="e.g. Ehren, Mike, Dante"></label>
       <label class="field"><span>Coach emails (can view this practice)</span><input id="practice-emails" placeholder="mike@gmail.com, dante@gmail.com" spellcheck="false"></label>
+      <button id="btn-team-emails" title="Add the coach emails from this team's roster (👥 Team)">＋ from team roster</button>
       <button id="btn-share-link" title="Copy a link coaches can open — they sign in with Google and get a read-only view of this practice">🔗 Copy coach link</button>
       <button id="btn-create-practice" class="primary">＋ Create new practice</button>
     </div>
   </div>
+  <button id="btn-team" title="Manage your team: coaches with emails, players with parent / grandparent contacts">👥 Team</button>
   <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
   <button id="btn-del-practice" title="Delete practice" class="danger">Delete</button>
   <div class="spacer"></div>
@@ -146,6 +148,20 @@
       <button id="lib-close" title="Close (Esc)">✕ Done</button>
     </div>
     <div id="lib-grid"></div>
+  </div>
+</div>
+<div id="teammgr" hidden>
+  <div class="lib-panel">
+    <div class="lib-head">
+      <b>👥 Team</b>
+      <select id="team-select" title="Which team to manage"></select>
+      <button id="team-add" title="Add a team">＋ Team</button>
+      <button id="team-del" class="danger" title="Delete this team from the roster">✕ Delete team</button>
+      <span class="spacer"></span>
+      <span class="muted small">Saved to your account</span>
+      <button id="team-close" title="Close (Esc)">✕ Done</button>
+    </div>
+    <div id="team-body"></div>
   </div>
 </div>
 <div id="gate" hidden>

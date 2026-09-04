@@ -950,12 +950,19 @@ function renderAnimBar() {
   $('#impact-loser-wrap').hidden = !linked.length;
   $('#impact-loser-wrap').title = impacts // hover explains where the impacts driving this selector are
     .map(c => `${playerName(getObj(c.a))} × ${playerName(getObj(c.b))} at ${c.t.toFixed(1)}s (${Math.round(c.x)}, ${Math.round(c.y)} ft)`).join('\n');
-  const sig = linked.map(id => id + ':' + getObj(id).label).join(',');
+  const sig = linked.map(id => { const o = getObj(id); return `${id}:${o.label}:${o.color}`; }).join(',');
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
-    el.innerHTML = `<option value="">— even —</option>` + linked.map(id => `<option value="${id}">${playerName(getObj(id))}</option>`).join('');
+    el.innerHTML = `<option value="">— even —</option>` + linked.map(id => loserOption(getObj(id), id === drill().impactLoser)).join('');
   }
   if (document.activeElement !== el) el.value = linked.includes(drill().impactLoser) ? drill().impactLoser : '';
+}
+
+/** One "Impact: worse for" option: number + colour name, tinted in the skater's colour (readable fallback for light ones). */
+function loserOption(o, selected) {
+  const hex = SKATER_COLORS[o.color] || o.color || '';
+  const tint = o.color === 'white' || o.color === 'yellow' ? '' : ` style="color:${escHtml(hex)}"`;
+  return `<option value="${o.id}"${tint} ${selected ? 'selected' : ''}>${playerName(o)} (${escHtml(o.color || '')})</option>`;
 }
 
 $('#impact-loser').addEventListener('change', e => {
@@ -1900,9 +1907,8 @@ function wirePresentAnims(p) {
     const impacts = sm.contacts();
     const linked = [...new Set(impacts.flatMap(c => [c.a, c.b]))].filter(id => dcur.objects.find(o => o.id === id)?.type === 'skater');
     if (linked.length) {
-      const name = id => { const o = dcur.objects.find(x => x.id === id); return o ? `#${escHtml(o.label)}` : '?'; };
       bar.querySelector('.pr-impact').innerHTML = `<label class="check small">Impact: worse for <select class="pr-loser">
-        <option value="">— even —</option>${linked.map(id => `<option value="${id}" ${dcur.impactLoser === id ? 'selected' : ''}>${name(id)}</option>`).join('')}</select></label>`;
+        <option value="">— even —</option>${linked.map(id => loserOption(dcur.objects.find(x => x.id === id), dcur.impactLoser === id)).join('')}</select></label>`;
       bar.querySelector('.pr-loser').addEventListener('change', e => {
         dcur.impactLoser = e.target.value || null;
         sm = makeSim(dcur); // the loser's slowdown changes the drill's timing

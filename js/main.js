@@ -384,7 +384,9 @@ function onPointerDown(e) {
   if (dbl) {
     lastDown = null; // a triple-click shouldn't chain
     if (activePoly || activeSkater) { finishActive(); drag = null; return; } // double-click finishes a drawing
-    if (tool === 'select' && doubleClickSelect(e, idEl, handleEl)) { drag = null; return; }
+    // Like a native dblclick, the action fires on *release* — if this press turns into a drag
+    // (select something, then immediately grab a handle and pull), it must drag, not double-click.
+    if (tool === 'select') pendingDbl = { x: e.clientX, y: e.clientY, idEl, handleEl, rink: raw };
   }
 
   switch (tool) {
@@ -486,6 +488,7 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
+  if (pendingDbl && Math.hypot(e.clientX - pendingDbl.x, e.clientY - pendingDbl.y) > 4) pendingDbl = null; // it became a drag
   if (!drag) {
     if (activePoly && getObj(activePoly)) {
       const o = getObj(activePoly);
@@ -573,6 +576,10 @@ function withObj(orig) {
 
 function onPointerUp(e) {
   document.body.classList.remove('panning');
+  if (pendingDbl) { // released without moving: this really was a double-click
+    const pd = pendingDbl; pendingDbl = null;
+    if (doubleClickSelect(pd.rink, pd.idEl, pd.handleEl)) { drag = null; return; }
+  }
   if (!drag) return;
   const dg = drag; drag = null;
   const d = drill();
@@ -624,10 +631,11 @@ function onPointerUp(e) {
   }
 }
 
-let lastDown = null; // {t, x, y} of the previous pointerdown, for manual double-click detection
+let lastDown = null;   // {t, x, y} of the previous pointerdown, for manual double-click detection
+let pendingDbl = null; // a detected double-click waiting for its release; movement cancels it (it became a drag)
 
 /** Double-click with the Select tool: delete the clicked waypoint handle, or insert a waypoint on the clicked path line. Returns true if consumed. */
-function doubleClickSelect(e, idEl, handleEl) {
+function doubleClickSelect(p, idEl, handleEl) {
   if (handleEl && idEl) {
     const o = getObj(idEl.dataset.id);
     if (!o) return false;
@@ -643,7 +651,7 @@ function doubleClickSelect(e, idEl, handleEl) {
   // Test against the smoothed curve — that's the line the user sees and clicks.
   const pts = skaterPoints(o);
   const dense = G.smoothPath(pts);
-  const proj = G.projectOnPolyline(dense, G.cumulative(dense), toRink(e));
+  const proj = G.projectOnPolyline(dense, G.cumulative(dense), p);
   if (!proj || proj.dist >= 3) return false;
   // Insert between the raw waypoints whose positions along the smooth curve bracket the click.
   let i = 0;

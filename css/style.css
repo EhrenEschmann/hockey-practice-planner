@@ -158,7 +158,8 @@ body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 .pr-min{color:var(--muted);font-size:13px}
 .pr-time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
 .pr-drill svg{width:100%;height:auto;border-radius:6px;display:block}
-.pr-animbar{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pr-animbar{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.pr-animbar .pr-tl{min-width:120px}
 .pr-animbar select{width:auto}
 .pr-animbar .check{color:var(--muted)}
 .pr-animbar .pr-tl{flex:1}

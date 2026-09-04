@@ -1843,6 +1843,7 @@ function presentHTML(p) {
           <span class="pr-timedisp muted small"></span>
           <select class="pr-speed" title="Playback speed">${['0.25', '0.5', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
+          <span class="pr-impact"></span>
         </div>
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </section>`;
@@ -1875,10 +1876,12 @@ function wirePresentAnims(p) {
     let svgEl = sec.querySelector('svg');
     const bar = sec.querySelector('.pr-animbar');
     if (!d || !svgEl || !bar) continue;
-    const sm = makeSim(d);
-    const T = sm.duration();
+    // The card animates a local view of the drill, so a coach's tweaks (impact loser) never touch the practice.
+    const dcur = { ...d };
+    let sm = makeSim(dcur);
+    let T = sm.duration();
     if (T <= 0) { bar.remove(); continue; } // nothing moves in this drill
-    const full = T + returnTime(d, sm); // the drill, then everyone skates home at 2× speed
+    let full = T + returnTime(dcur, sm); // the drill, then everyone skates home at 2× speed
     const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svgEl.appendChild(fx);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
@@ -1886,18 +1889,35 @@ function wirePresentAnims(p) {
     bar.querySelector('.pr-speed')?.addEventListener('change', e => spd = +e.target.value);
     bar.querySelector('.pr-paths')?.addEventListener('change', e => { // re-render this card with paths on/off
       const tmp = document.createElement('div');
-      tmp.innerHTML = standaloneSVG(d, rinkStr, SVG_STYLE, undefined, { showPaths: e.target.checked });
+      tmp.innerHTML = standaloneSVG(dcur, rinkStr, SVG_STYLE, undefined, { showPaths: e.target.checked });
       const fresh = tmp.firstElementChild;
       svgEl.replaceWith(fresh);
       svgEl = fresh;
       svgEl.appendChild(fx);
       draw();
     });
+    // "Impact: worse for" — same control as the editor's animation bar, when the drill has real impacts
+    const impacts = sm.contacts();
+    const linked = [...new Set(impacts.flatMap(c => [c.a, c.b]))].filter(id => dcur.objects.find(o => o.id === id)?.type === 'skater');
+    if (linked.length) {
+      const name = id => { const o = dcur.objects.find(x => x.id === id); return o ? `#${escHtml(o.label)}` : '?'; };
+      bar.querySelector('.pr-impact').innerHTML = `<label class="check small">Impact: worse for <select class="pr-loser">
+        <option value="">— even —</option>${linked.map(id => `<option value="${id}" ${dcur.impactLoser === id ? 'selected' : ''}>${name(id)}</option>`).join('')}</select></label>`;
+      bar.querySelector('.pr-loser').addEventListener('change', e => {
+        dcur.impactLoser = e.target.value || null;
+        sm = makeSim(dcur); // the loser's slowdown changes the drill's timing
+        T = sm.duration();
+        full = T + returnTime(dcur, sm);
+        tl.max = T;
+        a.t = Math.min(a.t, full);
+        draw();
+      });
+    }
     tl.max = T;
     const a = { raf: 0, t: 0, playing: false, last: 0 };
     presentAnims.push(a);
     const draw = () => {
-      animateFrame(d, sm, svgEl, fx, a.t, a.playing);
+      animateFrame(dcur, sm, svgEl, fx, a.t, a.playing);
       tl.value = Math.min(a.t, T);
       disp.textContent = `${Math.min(a.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
       btn.textContent = a.playing ? '⏸' : '▶';

@@ -1445,8 +1445,11 @@ function puckProps(o) {
       else if (ev.type === 'pass' && ev.to === rec.carrier && !ev.bank) problem = `${playerName(getObj(rec.carrier))} can't pass to themselves — pick another receiver, or bank it off the boards`;
       else problem = 'pick a receiver';
     }
+    const late = !rec?.late ? ''
+      : ev.type === 'shoot' ? ` <span class="warn" title="They reach this waypoint before the puck gets back to them, so the shot happens later, from wherever they are once they have it">⚠ no puck yet at this waypoint — shot deferred</span>`
+      : ` <span class="warn" title="The skater passes the marked spot before the puck reaches them, so this happens where they are when it arrives">⚠ puck arrives after the mark</span>`;
     const status = problem ? `<span class="warn">⚠ ${problem}</span>`
-      : `<span class="muted">${ev.type === 'pass' && ev.by === 'receiver' ? `arrives t = ${rec.arrive.toFixed(1)} s` : `t = ${rec.t.toFixed(1)} s`}</span>${rec.late ? ` <span class="warn" title="The skater passes the marked spot before the puck reaches them, so this happens where they are when it arrives">⚠ puck arrives after the mark</span>` : ''}`;
+      : `<span class="muted">${ev.type === 'pass' && ev.by === 'receiver' ? `arrives t = ${rec.arrive.toFixed(1)} s` : `t = ${rec.t.toFixed(1)} s`}</span>${late}`;
     const onPath = ev.dist != null;
     const where = (prefix = 'at ') => onPath
       ? `<span>${prefix.trim()}</span><input class="wp" type="number" min="0" step="0.5" data-ev="${i}" data-evprop="dist" value="${ev.dist}" title="Feet along the skater's path"><span>ft on path</span>`
@@ -1616,14 +1619,35 @@ propsBody.addEventListener('click', e => {
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }
     case 'addpass': case 'addshoot': case 'addpickup': {
       const carrier = finalCarrier(o);
-      const wp = carrier ? (getObj(carrier).path?.length || 0) : 0;
+      // The sim knows when possession changes hands — default new events to a player's first
+      // waypoint after the puck's last event, so a chain (pass, get it back, shoot) doesn't pile up at the path end.
+      const wpAfter = who => {
+        const path = getObj(who)?.path || [];
+        const last = sim.puck(o.id).info.at(-1);
+        const tHave = last ? (last.arrive ?? last.t ?? 0) : 0;
+        for (let w = 1; w <= path.length; w++) if (sim.wpTime(who, w) >= tHave - 1e-6) return w;
+        return path.length;
+      };
+      const wp = !carrier ? 0 : o.events?.length ? wpAfter(carrier) : (getObj(carrier).path?.length || 0);
       let ev;
       if (btn.dataset.act === 'addpass') {
         const from = carrier ? sim.skaterPos(carrier, sim.wpTime(carrier, wp)) : o;
         const to = nearestSkater(from, carrier);
         ev = { type: 'pass', wp, to: to?.id || null };
-        // A stationary passer (coach, waiting skater) feeding a moving receiver: time it by the receiver.
-        if (carrier && !getObj(carrier).path?.length && to?.path?.length) { ev.by = 'receiver'; ev.wp = 1; }
+        // A stationary passer (coach, waiting skater) feeding a moving receiver: time it by the receiver,
+        // at the first waypoint they reach late enough for the puck to actually fly there.
+        if (carrier && !getObj(carrier).path?.length && to?.path?.length) {
+          ev.by = 'receiver';
+          const speed = +o.passSpeed || DEFAULT_PASS_SPEED;
+          const last = sim.puck(o.id).info.at(-1);
+          const tHave = last ? (last.arrive ?? last.t ?? 0) : 0;
+          const passer = getObj(carrier);
+          ev.wp = to.path.length;
+          for (let w = 1; w <= to.path.length; w++) {
+            const q = to.path[w - 1];
+            if (sim.wpTime(to.id, w) >= tHave + Math.hypot(q.x - passer.x, q.y - passer.y) / speed - 1e-6) { ev.wp = w; break; }
+          }
+        }
       } else if (btn.dataset.act === 'addshoot') {
         ev = { type: 'shoot', wp, target: null };
       } else {

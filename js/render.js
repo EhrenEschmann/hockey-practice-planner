@@ -58,7 +58,7 @@ function playerPath(o, opts) {
     if (slice.length > 1) segs.push(`<polyline class="path-line" points="${ptsStr(slice)}" stroke="${color}" ${dash(back)}/>`);
     back = !back;
   }
-  const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">⇄</text></g>`).join('');
+  const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">${p.pivot === 'L' ? '⟲' : p.pivot === 'R' ? '⟳' : '⇄'}</text></g>`).join('');
   return hit + segs.join('') + arrowHead(dense, color) + marks;
 }
 

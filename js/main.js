@@ -1321,8 +1321,8 @@ function renderProps() {
     const start = tm.delay > 0 || o.trigger ? ` · starts at ${tm.delay.toFixed(1)} s` : '';
     extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${start}${hasPath ? '' : ` (no path yet — use the Skater tool on this ${o.type} to add waypoints)`}</p>`);
     if (o.type === 'skater' && o.path?.length && !o.follow) {
-      const toggles = o.path.map((pt, i) => `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1}: switch between forward and backward skating there">${i + 1}</button>`).join('');
-      extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this skater is selected">Pivot forward ⇄ backward at waypoint</span><div class="row wp-row">${toggles}</div></div>`);
+      const toggles = o.path.map((pt, i) => `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1} — click cycles: no pivot → ⟲ face swings left → ⟳ face swings right">${i + 1}${pt.pivot === 'L' ? ' ⟲' : pt.pivot ? ' ⟳' : ''}</button>`).join('');
+      extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this skater is selected. A pivot turns the skater 180° (forward ⇄ backward); pick which way their face and the puck swing around.">Pivot forward ⇄ backward at waypoint</span><div class="row wp-row">${toggles}</div></div>`);
     }
     if (o.type === 'skater') {
       const leaders = drill().objects.filter(s => s.type === 'skater' && s.id !== o.id && !s.follow && s.path?.length);
@@ -1597,7 +1597,8 @@ propsBody.addEventListener('click', e => {
     case 'takepuck': { const pile = nearestPile(o); if (!pile) break; const pk = puckFromPile(pile, o); commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'pivot': {
       const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
-      commit(() => { if (pt.pivot) delete pt.pivot; else pt.pivot = true; });
+      // cycle: no pivot → 'L' (face swings left) → 'R' (face swings right) → no pivot
+      commit(() => { if (!pt.pivot) pt.pivot = 'L'; else if (pt.pivot === 'L') pt.pivot = 'R'; else delete pt.pivot; });
       renderProps(); break;
     }
     case 'chasepuck': {

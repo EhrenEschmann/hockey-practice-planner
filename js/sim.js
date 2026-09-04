@@ -97,13 +97,20 @@ export function facingOf(o, objs = []) {
 function carryFrames(o, dense, cum, objs) {
   const len = cum[cum.length - 1];
   if (len < 0.01) return { step: 0, h: [facingOf(o, objs)], l: [CARRY.rest], f: [CARRY.lead] };
-  // Body facing vs travel: `backward` sets the start direction, and each waypoint marked `pivot` flips it.
+  // Body facing vs travel: `backward` sets the start direction, and each waypoint marked `pivot`
+  // turns the body 180° — through the marked side ('L' = face swings left, else right) — spread
+  // over a few feet of glide so the face and the carried puck sweep around rather than snap.
+  const PIVOT_TURN = 5; // ft of glide across which the body swings round
   const pts = skaterPoints(o);
-  const pivotDs = [];
-  for (let i = 1; i < pts.length; i++) if (pts[i].pivot) pivotDs.push(G.closestOnPolyline(dense, pts[i]).along);
-  pivotDs.sort((a, b) => a - b);
+  const pivots = [];
+  for (let i = 1; i < pts.length; i++) if (pts[i].pivot) pivots.push({ d: G.closestOnPolyline(dense, pts[i]).along, s: pts[i].pivot === 'L' ? -1 : 1 });
+  pivots.sort((a, b) => a.d - b.d);
   const baseFlip = o.backward ? Math.PI : 0;
-  const flipAt = d => { let k = 0; for (const pd of pivotDs) if (pd <= d) k++; return baseFlip + (k % 2) * Math.PI; };
+  const flipAt = d => {
+    let a = baseFlip;
+    for (const pv of pivots) a += pv.s * Math.PI * G.clamp((d - pv.d) / PIVOT_TURN + 0.5, 0, 1);
+    return a;
+  };
   const N = Math.max(2, Math.ceil(len / CARRY.step) + 1);
   const step = len / (N - 1);
   const ease = 1 - Math.exp(-step / CARRY.tau);

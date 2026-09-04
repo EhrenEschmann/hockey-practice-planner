@@ -1073,6 +1073,22 @@ for (const [id, key] of PRACTICE_FIELDS) {
   el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
 
+// Drills pane pin: unpinned, the pane collapses to its header and Selection fills the sidebar.
+const PLAN_PIN_KEY = 'hpp.ui.planPinned';
+function applyPlanPin() {
+  let pinned = true;
+  try { pinned = localStorage.getItem(PLAN_PIN_KEY) !== '0'; } catch { /* storage blocked: stay pinned */ }
+  $('#sidebar').classList.toggle('plan-unpinned', !pinned);
+  const b = $('#plan-pin');
+  b.textContent = pinned ? '📌' : '📍';
+  b.title = pinned ? 'Unpin the drills pane — collapse it so Selection gets the space' : 'Pin the drills pane open';
+}
+$('#plan-pin').addEventListener('click', () => {
+  try { localStorage.setItem(PLAN_PIN_KEY, localStorage.getItem(PLAN_PIN_KEY) !== '0' ? '0' : '1'); } catch { }
+  applyPlanPin();
+});
+applyPlanPin();
+
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
 let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
 

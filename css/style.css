@@ -159,6 +159,8 @@ body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 .pr-time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
 .pr-drill svg{width:100%;height:auto;border-radius:6px;display:block}
 .pr-animbar{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pr-animbar select{width:auto}
+.pr-animbar .check{color:var(--muted)}
 .pr-animbar .pr-tl{flex:1}
 .pr-animbar .pr-play{padding:2px 10px}
 .pr-timedisp{font-variant-numeric:tabular-nums;white-space:nowrap}

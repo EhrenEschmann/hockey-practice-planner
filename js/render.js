@@ -303,10 +303,10 @@ function raisedPadTop(o) {
   </g>`;
 }
 
-/** Standalone SVG document string for export/print. */
-export function standaloneSVG(drill, rinkSVG, style, view) {
+/** Standalone SVG document string for export/print. `opts` passes through to renderObjects (e.g. { showPaths: false }). */
+export function standaloneSVG(drill, rinkSVG, style, view, opts) {
   const v = view || drill.view;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(v.x)} ${n(v.y)} ${n(v.w)} ${n(v.h)}" width="${n(v.w * 6)}" height="${n(v.h * 6)}">
   <style>${style}</style><rect x="${n(v.x)}" y="${n(v.y)}" width="${n(v.w)}" height="${n(v.h)}" fill="#fff"/>
-  ${rinkSVG}${renderObjects(drill, null)}</svg>`;
+  ${rinkSVG}${renderObjects(drill, null, opts)}</svg>`;
 }

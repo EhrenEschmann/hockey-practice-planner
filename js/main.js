@@ -24,7 +24,10 @@ let activePoly = null;     // barricade/arrow currently being drawn
 let drag = null;           // current pointer drag operation
 let spaceDown = false;
 let snap = false;
-let showPaths = true;
+// Playback preferences (speed, show paths) live on the drill itself, so they save with the
+// practice, sync to the cloud, and carry into presentation mode for coaches.
+const drillSpeed = () => +drill().animSpeed || 1;
+const drillPaths = () => drill().showPaths !== false;
 let lastSkaterColor = 'blue';
 const SIDES = { O: { color: 'blue', name: 'Offense' }, D: { color: 'red', name: 'Defense' } };
 let newSide = 'O';            // side (and colour) given to newly placed skaters
@@ -51,7 +54,7 @@ function renderCanvas() {
   sim = makeSim(d);
   fxLayer.innerHTML = '';
   const selObj = getObj(sel);
-  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths, sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
+  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths: drillPaths(), sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
   drawSelection();
   if (anim.t > 0) applyAnimation(anim.t);
   $$('#viewbar [data-view]').forEach(b => b.classList.toggle('active', sameView(VIEWS[b.dataset.view], d.view)));
@@ -902,7 +905,7 @@ function tick(now) {
   if (!anim.playing) return;
   const dt = Math.min(0.1, (now - anim.last) / 1000);
   anim.last = now;
-  anim.t += dt * anim.speed;
+  anim.t += dt * drillSpeed();
   const T = fullDuration();
   if (anim.t >= T) { anim.t = T; anim.playing = false; }
   applyAnimation(anim.t);
@@ -936,6 +939,8 @@ function renderAnimBar() {
   $('#btn-play').disabled = T <= 0;
   const tl = $('#timeline');
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
+  if (document.activeElement !== $('#anim-speed')) $('#anim-speed').value = String(drillSpeed());
+  $('#anim-trails').checked = drillPaths();
   $('#time-display').textContent = anim.t > T ? `↩ ${T.toFixed(1)} / ${T.toFixed(1)} s` : `${anim.t.toFixed(1)} / ${T.toFixed(1)} s`;
   // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
   const impacts = sim ? sim.contacts() : [];
@@ -965,8 +970,8 @@ $('#btn-play').addEventListener('click', togglePlay);
 $('#btn-stop').addEventListener('click', stopAnim);
 $('#timeline').addEventListener('input', e => { anim.t = +e.target.value; if (anim.t === 0) renderCanvas(); else applyAnimation(anim.t); renderAnimBar(); });
 $('#timeline').addEventListener('change', e => e.target.blur()); // scrub done → hotkeys work again
-$('#anim-speed').addEventListener('change', e => anim.speed = +e.target.value);
-$('#anim-trails').addEventListener('change', e => { showPaths = e.target.checked; renderCanvas(); });
+$('#anim-speed').addEventListener('change', e => { drill().animSpeed = +e.target.value; store.save(); });
+$('#anim-trails').addEventListener('change', e => { drill().showPaths = e.target.checked; store.save(); renderCanvas(); });
 
 // ---------- view bar ----------
 $$('#viewbar [data-view]').forEach(b => b.addEventListener('click', () => setView(VIEWS[b.dataset.view])));
@@ -1831,11 +1836,13 @@ function presentHTML(p) {
       return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
-        ${standaloneSVG(d, rink, SVG_STYLE)}
+        ${standaloneSVG(d, rink, SVG_STYLE, undefined, { showPaths: d.showPaths !== false })}
         <div class="pr-animbar">
           <button class="pr-play" title="Watch the drill">▶</button>
           <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
           <span class="pr-timedisp muted small"></span>
+          <select class="pr-speed" title="Playback speed">${['0.25', '0.5', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
+          <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
         </div>
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </section>`;
@@ -1862,9 +1869,10 @@ const presentAnims = [];
 function stopPresentAnims() { for (const a of presentAnims) cancelAnimationFrame(a.raf); presentAnims.length = 0; }
 function wirePresentAnims(p) {
   stopPresentAnims();
+  const rinkStr = rinkSVG();
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     const d = p.drills.find(x => x.id === sec.dataset.did);
-    const svgEl = sec.querySelector('svg');
+    let svgEl = sec.querySelector('svg');
     const bar = sec.querySelector('.pr-animbar');
     if (!d || !svgEl || !bar) continue;
     const sm = makeSim(d);
@@ -1874,6 +1882,17 @@ function wirePresentAnims(p) {
     const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svgEl.appendChild(fx);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
+    let spd = +d.animSpeed || 1; // seeded from the drill's saved playback speed
+    bar.querySelector('.pr-speed')?.addEventListener('change', e => spd = +e.target.value);
+    bar.querySelector('.pr-paths')?.addEventListener('change', e => { // re-render this card with paths on/off
+      const tmp = document.createElement('div');
+      tmp.innerHTML = standaloneSVG(d, rinkStr, SVG_STYLE, undefined, { showPaths: e.target.checked });
+      const fresh = tmp.firstElementChild;
+      svgEl.replaceWith(fresh);
+      svgEl = fresh;
+      svgEl.appendChild(fx);
+      draw();
+    });
     tl.max = T;
     const a = { raf: 0, t: 0, playing: false, last: 0 };
     presentAnims.push(a);
@@ -1885,7 +1904,7 @@ function wirePresentAnims(p) {
     };
     const step = now => {
       if (!a.playing) return;
-      a.t += Math.min(0.1, (now - a.last) / 1000); a.last = now;
+      a.t += Math.min(0.1, (now - a.last) / 1000) * spd; a.last = now;
       if (a.t >= full) { a.t = full; a.playing = false; }
       draw();
       if (a.playing) a.raf = requestAnimationFrame(step);

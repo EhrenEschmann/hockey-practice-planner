@@ -694,7 +694,7 @@ let gated = false; // sign-in required (Firebase configured, nobody signed in): 
 
 document.addEventListener('keydown', e => {
   if (gated) return;
-  if (presenting) { if (e.key === 'Escape') location.hash = '#'; return; } // presentation mode: Esc closes, nothing else
+  if (presenting) return; // presentation is view-only and terminal: no editor shortcuts, no way "back"
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
@@ -1996,10 +1996,9 @@ function refreshPresent() {
 }
 
 $('#btn-present').addEventListener('click', () => {
-  finishActive();
-  location.hash = `#view=${store.data.ownerUid || 'local'}/${store.practice.id}`;
+  // Presentation is its own destination (same URL coaches get) — a new tab, so the editor stays put.
+  window.open(`${location.origin}${location.pathname}#view=${store.data.ownerUid || 'local'}/${store.practice.id}`, '_blank');
 });
-$('#present-close').addEventListener('click', () => { location.hash = '#'; });
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, true)));
 $('#btn-share-link').addEventListener('click', async e => {
   const b = e.currentTarget;

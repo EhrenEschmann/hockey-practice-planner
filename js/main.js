@@ -1309,7 +1309,6 @@ function renderPlan() {
       : `<li class="${i === store.drillIndex ? 'active' : ''}" data-index="${i}" draggable="true" title="Drag to reorder">
           <span class="num">${i + 1}.</span>
           <span class="name">${escHtml(d.name)}</span>
-          <span class="dur">${+d.duration || 0} min</span>
           ${btns(d)}
         </li>`;
     const notes = notesOpenFor === d.id

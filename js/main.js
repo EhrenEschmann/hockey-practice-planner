@@ -1293,10 +1293,8 @@ function renderPlan() {
   $('#plan-total').textContent = `${total} min total`;
   const list = $('#drill-list');
   if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
-  const btns = (d, i) => `
+  const btns = d => `
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">🗒</button>
-      <button data-act="up" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
-      <button data-act="down" title="Move down" ${i === p.drills.length - 1 ? 'disabled' : ''}>↓</button>
       <button data-act="dup" title="Duplicate">⧉</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>✕</button>`;
   list.innerHTML = p.drills.map((d, i) => {
@@ -1313,7 +1311,7 @@ function renderPlan() {
           <span class="num">${i + 1}.</span>
           <span class="name">${escHtml(d.name)}</span>
           <span class="dur">${+d.duration || 0} min</span>
-          <button data-act="edit" title="Rename / edit minutes">✎</button>${btns(d, i)}
+          <button data-act="edit" title="Rename / edit minutes">✎</button>${btns(d)}
         </li>`;
     const notes = notesOpenFor === d.id
       ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea></li>`
@@ -1441,10 +1439,7 @@ $('#drill-list').addEventListener('click', e => {
     if (i !== store.drillIndex) switchDrill(i);
     return;
   }
-  if (act === 'up' || act === 'down') {
-    const j = act === 'up' ? i - 1 : i + 1;
-    commit(() => { [p.drills[i], p.drills[j]] = [p.drills[j], p.drills[i]]; store.drillIndex = j; });
-  } else if (act === 'dup') {
+  if (act === 'dup') {
     commit(() => {
       const copy = JSON.parse(JSON.stringify(p.drills[i]));
       copy.id = uid(); copy.name += ' (copy)';

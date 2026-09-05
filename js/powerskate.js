@@ -65,6 +65,23 @@ const ELS = {
       return { x, y, heading, lean, crouch, feet: { L: foot(1), R: foot(-1) } };
     },
   },
+  kneedrop: {
+    name: 'Knee drops', desc: 'Glide, sink and touch one knee to the ice while the other skate carries you, then pop straight back up — alternate knees.', dur: 9,
+    pose(t) {
+      const { x, y } = straight(t, 6);
+      const cyc = 3, u = (t / cyc) % 1;
+      const s = Math.floor(t / cyc) % 2 ? 1 : -1;    // which knee drops this cycle
+      // drop envelope: sink → hold on the knee → pop back up (feet return to a symmetric glide, so cycles chain cleanly)
+      const e = u < 0.25 ? 0 : u < 0.42 ? ease((u - 0.25) / 0.17) : u < 0.72 ? 1 : u < 0.94 ? 1 - ease((u - 0.72) / 0.22) : 0;
+      const support = side => ({ x: x + lerp(0.25, 0.55, e), y: y + side * 0.3, z: 0, on: true });
+      const dropped = side => ({
+        x: x + lerp(0.25, -1.5, e), y: y + side * 0.33, z: lerp(0, 0.42, e), on: e < 0.05,
+        knee: { x: x + lerp(0.25, -0.45, e), y: y + side * 0.33, z: lerp(1.42, 0.22, e) },
+      });
+      return { x, y, heading: 0, lean: 0, crouch: 0.5 + 0.55 * e,
+        feet: s > 0 ? { L: dropped(1), R: support(-1) } : { L: support(1), R: dropped(-1) } };
+    },
+  },
   xoverf: {
     name: 'Forward crossovers', desc: 'On the circle: outside foot crosses over, inside foot pulls under.', dur: 8,
     pose(t) { return crossovers(t, 0); },
@@ -285,7 +302,8 @@ export function createPSView(canvas, { onCaption = () => {} } = {}) {
       const mid = { x: (hip.x + ank.x) / 2, y: (hip.y + ank.y) / 2, z: (hip.z + ank.z) / 2 };
       const d = Math.hypot(ank.x - hip.x, ank.y - hip.y, ank.z - hip.z);
       const h = Math.sqrt(Math.max(0.05, 1.62 * 1.62 - (d / 2) * (d / 2)));
-      const knee = { x: mid.x + cs * h * 0.75, y: mid.y + sn * h * 0.75, z: mid.z + h * 0.35 };
+      // a gait may place the knee explicitly (e.g. dropped onto the ice); otherwise bend toward the heading
+      const knee = f.knee || { x: mid.x + cs * h * 0.75, y: mid.y + sn * h * 0.75, z: mid.z + h * 0.35 };
       line(hip, knee, 0.19, '#1e56d6'); line(knee, ank, 0.17, '#1e56d6');
       // blade — a foot may aim its own way (f.dir), e.g. turned sideways for a stop
       const bd = f.dir ?? P.heading, bcs = Math.cos(bd), bsn = Math.sin(bd);

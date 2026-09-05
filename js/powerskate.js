@@ -36,11 +36,11 @@ const ELS = {
     },
   },
   ccuts: {
-    name: 'C-cuts', desc: 'One blade glides straight and stays quiet; the other carves the C push. Alternate feet.', dur: 8,
+    name: 'C-cuts', desc: 'One blade glides straight and stays quiet; the other carves the C push — 3 with the right leg, then 3 with the left.', dur: 10.8,
     pose(t) { return cCuts(t, 5.5, 1); },
   },
   bccuts: {
-    name: 'Backward C-cuts', desc: 'Skating backward, hips low: the glide blade stays quiet, the heel leads each C push.', dur: 8,
+    name: 'Backward C-cuts', desc: 'Skating backward, hips low: the glide blade stays quiet, the heel leads each C push — 3 per leg, then switch.', dur: 10.8,
     pose(t) { return cCuts(t, 4.2, -1); },
   },
   swizzle: {
@@ -135,7 +135,7 @@ function cCuts(t, speed, dir) {
   const { x, y } = straight(t, speed);
   const heading = dir > 0 ? 0 : Math.PI;
   const cyc = 1.8, u = (t / cyc) % 1;
-  const active = Math.floor(t / cyc) % 2 ? -1 : 1;   // which side pushes this cycle (+1 = left)
+  const active = Math.floor(t / cyc / 3) % 2 ? 1 : -1;   // 3 pushes with the right leg, then 3 with the left (+1 = left)
   const foot = side => {
     if (side !== active) return { x: x + 0.18 * dir, y: y + side * 0.3, z: 0, on: true }; // the still glide foot
     const out = 0.32 + 0.7 * Math.sin(Math.PI * ease(u));            // bulge out and back in — the C

@@ -127,11 +127,14 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
       const r = remote.find(x => x.id === p.id);
       if (!r || newer(p, r)) await backend.save(uid, clean(p));
     }
-    // Roster: newest copy wins, missing side copied over.
+    // Roster: newest copy wins, missing side copied over. Roster trouble (e.g. rules not yet
+    // deployed for users/{uid}/meta) must never block practice syncing — report it and move on.
     if (backend.loadRoster) {
-      const rr = await backend.loadRoster(uid);
-      if (rr && (rr.updatedAt || 0) > (store.roster.updatedAt || 0)) { store.data.roster = rr; store.persist(); onRoster(); }
-      else if ((store.roster.updatedAt || 0) > (rr?.updatedAt || 0)) await backend.saveRoster(uid, clean(store.roster));
+      try {
+        const rr = await backend.loadRoster(uid);
+        if (rr && (rr.updatedAt || 0) > (store.roster.updatedAt || 0)) { store.data.roster = rr; store.persist(); onRoster(); }
+        else if ((store.roster.updatedAt || 0) > (rr?.updatedAt || 0)) await backend.saveRoster(uid, clean(store.roster));
+      } catch (e) { status('error', `team roster: ${e?.message || e} — are the latest firestore.rules deployed?`); }
     }
     onRemote(changed, { full: true });
     status(timers.size ? 'saving' : 'saved');

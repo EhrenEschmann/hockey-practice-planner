@@ -43,6 +43,14 @@ const ELS = {
     name: 'Backward C-cuts', desc: 'Skating backward, hips low: the glide blade stays quiet, the heel leads each C push.', dur: 8,
     pose(t) { return cCuts(t, 4.2, -1); },
   },
+  swizzle: {
+    name: 'Swizzles', desc: 'Toes out: press both blades apart, then squeeze them back together — lemons on the ice.', dur: 8,
+    pose(t) { return swizzles(t, 4.8, 1); },
+  },
+  bswizzle: {
+    name: 'Backward swizzles', desc: 'Heels lead: both blades push apart and pull back together while skating backward.', dur: 8,
+    pose(t) { return swizzles(t, 4, -1); },
+  },
   xoverf: {
     name: 'Forward crossovers', desc: 'On the circle: outside foot crosses over, inside foot pulls under.', dur: 8,
     pose(t) { return crossovers(t, 0); },
@@ -112,6 +120,18 @@ function cCuts(t, speed, dir) {
     return { x: x + fwd, y: y + side * out, z: 0, on: true };
   };
   return { x, y, heading, lean: 0, crouch: 0.72, feet: { L: foot(1), R: foot(-1) } };
+}
+
+/** Swizzles (forward dir=1, backward dir=-1): both blades on the ice the whole time,
+ *  pressed apart to the widest point and squeezed back together — twin lemon-shaped trails. */
+function swizzles(t, speed, dir) {
+  const { x, y } = straight(t, speed);
+  const heading = dir > 0 ? 0 : Math.PI;
+  const cyc = 1.7, u = (t / cyc) % 1;
+  const out = 0.16 + 0.78 * Math.sin(Math.PI * ease(u));   // apart, then back together
+  const fwd = dir * 0.35 * Math.cos(Math.PI * u);          // slight fore-aft sweep through the lemon
+  const foot = side => ({ x: x + fwd, y: y + side * out, z: 0, on: true });
+  return { x, y, heading, lean: 0, crouch: 0.62 + 0.1 * Math.sin(Math.PI * u), feet: { L: foot(1), R: foot(-1) } };
 }
 
 function crossovers(t, faceFlip) {

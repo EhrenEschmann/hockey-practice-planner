@@ -793,6 +793,43 @@ function translateObj(o, dx, dy) {
   else { Object.assign(o, tr(o)); if (o.path) o.path = o.path.map(tr); }
 }
 
+/** Uniformly scale and centre everything in the drill (except `zone` itself) to fit inside `zone`. */
+function resizeDrillInto(zone) {
+  const objs = drill().objects.filter(o => o.id !== zone.id);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const grow = (x, y) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); };
+  for (const o of objs) {
+    if (o.points) o.points.forEach(p => grow(p.x, p.y));
+    if (o.x != null) grow(o.x, o.y);
+    (o.path || []).forEach(p => grow(p.x, p.y));
+    if (o.type === 'zone') { grow(o.x, o.y); grow(o.x + o.w, o.y + o.h); }
+  }
+  if (!isFinite(minX)) return;
+  const m = 2; // ft of breathing room inside the zone
+  const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+  const s = Math.min((zone.w - 2 * m) / bw, (zone.h - 2 * m) / bh);
+  if (!(s > 0)) { alert('The zone is too small to fit the drill into.'); return; }
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const zx = zone.x + zone.w / 2, zy = zone.y + zone.h / 2;
+  const tx = x => G.round1(zx + (x - cx) * s), ty = y => G.round1(zy + (y - cy) * s);
+  commit(() => {
+    for (const o of objs) {
+      if (o.points) o.points = o.points.map(p => ({ ...p, x: tx(p.x), y: ty(p.y) }));
+      if (o.x != null) { o.x = tx(o.x); o.y = ty(o.y); }
+      if (o.path) o.path = o.path.map(p => ({ ...p, x: tx(p.x), y: ty(p.y) }));
+      if (o.w != null) o.w = G.round1(o.w * s);
+      if (o.h != null) o.h = G.round1(o.h * s);
+      if (o.type === 'text' && o.size) o.size = G.round1(o.size * s);
+      if (o.type === 'puck') for (const ev of o.events || []) {
+        if (ev.target) ev.target = { x: tx(ev.target.x), y: ty(ev.target.y) };
+        if (ev.bank) ev.bank = { x: tx(ev.bank.x), y: ty(ev.bank.y) };
+        if (ev.dist != null && ev.dist !== '') ev.dist = G.round1(+ev.dist * s); // marks are distances along now-shorter paths
+      }
+      if (o.trigger?.dist != null) o.trigger.dist = G.round1(+o.trigger.dist * s);
+    }
+  });
+}
+
 function doUndo() { finishActive(); if (store.undo()) { sel = null; renderAll(); } }
 function doRedo() { if (store.redo()) { sel = null; renderAll(); } }
 
@@ -1590,7 +1627,10 @@ function renderProps() {
       extra.push(`<button data-act="chipboards" title="The coach takes a puck and rims it around the end boards to the far corner">Chip around boards</button>`);
     }
   }
-  if (o.type === 'zone') extra.push(`<button data-act="focus">Focus view on zone</button>`);
+  if (o.type === 'zone') {
+    extra.push(`<button data-act="focus">Focus view on zone</button>`);
+    extra.push(`<button data-act="fitdrill" title="Uniformly scale and centre everything in this drill so it fits inside this zone — paths, equipment, passes and shots included">⇲ Resize drill into zone</button>`);
+  }
   if (o.type === 'net') {
     const g = goalieOf(o);
     extra.push(g ? `<button data-act="selgoalie">Goalie ${escHtml(g.label)}…</button>` : `<button data-act="addgoalie">Add goalie</button>`);
@@ -1832,6 +1872,7 @@ propsBody.addEventListener('click', e => {
       commit(() => { if (!pt.pivot) pt.pivot = 'L'; else if (pt.pivot === 'L') pt.pivot = 'R'; else delete pt.pivot; });
       renderProps(); break;
     }
+    case 'fitdrill': resizeDrillInto(o); renderProps(); break;
     case 'chasepuck': {
       const hit = nearestLoosePuck(o); if (!hit) break;
       const ev = { type: 'pickup', skater: o.id, wp: 0 };

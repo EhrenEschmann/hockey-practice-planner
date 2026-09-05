@@ -6,15 +6,9 @@ const UNDO_LIMIT = 100;
 
 export const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
 
-export function defaultNets() {
-  return [
-    { id: uid(), type: 'net', x: 11, y: 42.5, rot: 0 },
-    { id: uid(), type: 'net', x: 189, y: 42.5, rot: 180 },
-  ];
-}
-
 export function newDrill(n = 1) {
-  return { id: uid(), name: `Drill ${n}`, duration: 10, notes: '', view: { ...VIEWS.full }, objects: defaultNets() };
+  // Drills start with clean ice — add nets with the Net tool (N) where the drill needs them.
+  return { id: uid(), name: `Drill ${n}`, duration: 10, notes: '', view: { ...VIEWS.full }, objects: [] };
 }
 
 export function newPractice(team = '') {

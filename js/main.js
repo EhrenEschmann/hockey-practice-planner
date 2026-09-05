@@ -2299,7 +2299,10 @@ $('#btn-share-link').addEventListener('click', async e => {
 const CLOUD_LABELS = { signedout: 'Not signed in (local only)', syncing: 'Syncing…', saving: 'Saving…', saved: 'Saved ✓', error: 'Cloud error' };
 function renderCloudStatus(sync, state, detail) {
   const u = sync.user;
-  $('#cloud-status').textContent = (u && state !== 'signedout' ? `${u.name} · ` : '') + (CLOUD_LABELS[state] || '') + (state === 'error' && detail ? ` (${detail})` : '');
+  const text = (u && state !== 'signedout' ? `${u.name} · ` : '') + (CLOUD_LABELS[state] || '') + (state === 'error' && detail ? ` (${detail})` : '');
+  $('#cloud-status').textContent = text;
+  // The status is width-capped with an ellipsis; hovering shows everything (especially full error details).
+  $('#cloud-status').title = state === 'error' && detail ? `Cloud error:\n${detail}` : text;
   $('#cloud-status').classList.toggle('warn', state === 'error');
   $('#btn-signin').hidden = !!u;
   $('#btn-signout').hidden = !u;

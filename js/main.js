@@ -1295,7 +1295,6 @@ function renderPlan() {
   if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
   const btns = d => `
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">🗒</button>
-      <button data-act="dup" title="Duplicate">⧉</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>✕</button>`;
   list.innerHTML = p.drills.map((d, i) => {
     const row = editingDrill === d.id
@@ -1311,7 +1310,7 @@ function renderPlan() {
           <span class="num">${i + 1}.</span>
           <span class="name">${escHtml(d.name)}</span>
           <span class="dur">${+d.duration || 0} min</span>
-          <button data-act="edit" title="Rename / edit minutes">✎</button>${btns(d)}
+          ${btns(d)}
         </li>`;
     const notes = notesOpenFor === d.id
       ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea></li>`
@@ -1405,13 +1404,6 @@ $('#drill-list').addEventListener('click', e => {
   const p = store.practice;
   if (li.classList.contains('notes-editor')) return;
   finishActive();
-  if (act === 'edit') {
-    editingDrill = p.drills[i].id;
-    if (store.drillIndex !== i) switchDrill(i); else renderPlan();
-    const el = $('#drill-list li.editing .dname');
-    if (el) { el.focus(); el.select(); }
-    return;
-  }
   if (act === 'save' || act === 'cancel') {
     const row = $('#drill-list li.editing');
     if (row?.contains(document.activeElement)) document.activeElement.blur(); // let the list rebuild
@@ -1439,14 +1431,7 @@ $('#drill-list').addEventListener('click', e => {
     if (i !== store.drillIndex) switchDrill(i);
     return;
   }
-  if (act === 'dup') {
-    commit(() => {
-      const copy = JSON.parse(JSON.stringify(p.drills[i]));
-      copy.id = uid(); copy.name += ' (copy)';
-      copy.objects = cloneObjects(copy.objects);
-      p.drills.splice(i + 1, 0, copy); store.drillIndex = i + 1;
-    });
-  } else if (act === 'del') {
+  if (act === 'del') {
     if (!confirm(`Delete "${p.drills[i].name}"?`)) return;
     if (editingDrill === p.drills[i].id) editingDrill = null;
     commit(() => { p.drills.splice(i, 1); store.drillIndex = Math.min(i, p.drills.length - 1); });

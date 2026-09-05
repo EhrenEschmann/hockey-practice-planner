@@ -128,6 +128,9 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 #drill-list{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:3px}
 #drill-list li{display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;cursor:pointer}
 #drill-list li.active{border-color:var(--accent);background:#1e2a44}
+#drill-list li.dragging{opacity:.45}
+#drill-list li.drop-above{box-shadow:0 -3px 0 var(--accent)}
+#drill-list li.drop-below{box-shadow:0 3px 0 var(--accent)}
 #drill-list li .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #drill-list li .dur{color:var(--muted);font-size:12px;white-space:nowrap}
 #drill-list li button{padding:1px 6px;font-size:12px;background:transparent;border-color:transparent}

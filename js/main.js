@@ -1309,7 +1309,7 @@ function renderPlan() {
           <button data-act="save" class="primary" title="Save (Enter)">✓</button>
           <button data-act="cancel" title="Cancel (Esc)">✕</button>
         </li>`
-      : `<li class="${i === store.drillIndex ? 'active' : ''}" data-index="${i}">
+      : `<li class="${i === store.drillIndex ? 'active' : ''}" data-index="${i}" draggable="true" title="Drag to reorder">
           <span class="num">${i + 1}.</span>
           <span class="name">${escHtml(d.name)}</span>
           <span class="dur">${+d.duration || 0} min</span>
@@ -1321,6 +1321,49 @@ function renderPlan() {
     return row + notes;
   }).join('');
 }
+
+// Drag to reorder drills (↑/↓ buttons remain for touch).
+let dragDrill = null; // index being dragged
+const clearDropMarks = () => $$('#drill-list li').forEach(li => li.classList.remove('dragging', 'drop-above', 'drop-below'));
+$('#drill-list').addEventListener('dragstart', e => {
+  const li = e.target.closest('li');
+  if (!li || li.classList.contains('editing') || li.classList.contains('notes-editor')) { e.preventDefault(); return; }
+  dragDrill = +li.dataset.index;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', ''); // Firefox requires data for a drag to start
+  li.classList.add('dragging');
+});
+$('#drill-list').addEventListener('dragover', e => {
+  if (dragDrill == null) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  clearDropMarks();
+  $(`#drill-list li[data-index="${dragDrill}"]:not(.notes-editor)`)?.classList.add('dragging');
+  const li = e.target.closest('li');
+  if (!li || li.classList.contains('notes-editor') || +li.dataset.index === dragDrill) return;
+  const r = li.getBoundingClientRect();
+  li.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
+});
+$('#drill-list').addEventListener('drop', e => {
+  if (dragDrill == null) return;
+  e.preventDefault();
+  const li = e.target.closest('li');
+  const p = store.practice;
+  const from = dragDrill;
+  dragDrill = null; clearDropMarks();
+  if (!li || li.classList.contains('notes-editor')) return;
+  const r = li.getBoundingClientRect();
+  let to = +li.dataset.index + (e.clientY < r.top + r.height / 2 ? 0 : 1);
+  if (to > from) to--;
+  if (to === from || !p.drills[from]) return;
+  const activeId = p.drills[store.drillIndex]?.id;
+  commit(() => {
+    const [d] = p.drills.splice(from, 1);
+    p.drills.splice(to, 0, d);
+    store.drillIndex = Math.max(0, p.drills.findIndex(x => x.id === activeId)); // keep the open drill open
+  });
+});
+$('#drill-list').addEventListener('dragend', () => { dragDrill = null; clearDropMarks(); });
 
 // Inline notes editing (live) — name/minutes only commit via the edit row's Save button.
 $('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea')) store.beginPending(); });

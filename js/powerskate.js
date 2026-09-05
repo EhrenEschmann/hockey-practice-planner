@@ -212,7 +212,7 @@ export const PS_ELEMENTS = Object.entries(ELS).map(([key, e]) => ({ key, name: e
 // ---------------------------------------------------------------------------
 // Viewer
 // ---------------------------------------------------------------------------
-export function createPSView(canvas, { onCaption = () => {} } = {}) {
+export function createPSView(canvas, { onCaption = () => {}, onIndex = () => {} } = {}) {
   const ctx = canvas.getContext('2d');
   const cam = { yaw: -2.35, pitch: 0.46, dist: 26 };
   const target = { x: 0, y: 0 };
@@ -224,7 +224,8 @@ export function createPSView(canvas, { onCaption = () => {} } = {}) {
 
   function caption() {
     const e = el();
-    onCaption(e ? `${idx + 1}/${keys.length} · ${e.name} — ${e.desc}` : 'Pick power skating elements on the right, then press ▶.');
+    onCaption(e ? `${idx + 1}/${keys.length} · ${e.name} — ${e.desc}` : 'Add power skating elements on the right, then press ▶.');
+    onIndex(idx);
   }
 
   // ----- camera & projection -----
@@ -367,14 +368,22 @@ export function createPSView(canvas, { onCaption = () => {} } = {}) {
   canvas.addEventListener('wheel', e => { e.preventDefault(); cam.dist = clamp(cam.dist * (e.deltaY > 0 ? 1.1 : 0.9), 10, 60); if (!playing) draw(); }, { passive: false });
 
   return {
-    setElements(k) {
+    setElements(k, keepIdx = false) {
       const same = k.join() === keys.join();
       keys = k.slice();
-      if (!same) { idx = 0; t = 0.8; trails.L.length = 0; trails.R.length = 0; }
-      if (idx >= keys.length) idx = 0;
+      if (!same && !keepIdx) { idx = 0; t = 0.8; trails.L.length = 0; trails.R.length = 0; }
+      if (idx >= keys.length) idx = Math.max(0, keys.length - 1);
+      caption(); draw();
+    },
+    /** Jump the viewer to list entry i (playback, if running, continues from there). */
+    select(i) {
+      idx = clamp(i, 0, Math.max(0, keys.length - 1));
+      t = playing ? 0 : 0.8;
+      trails.L.length = 0; trails.R.length = 0;
       caption(); draw();
     },
     toggle, stop, draw,
     get playing() { return playing; },
+    get index() { return idx; },
   };
 }

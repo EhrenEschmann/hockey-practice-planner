@@ -52,26 +52,51 @@ function toRink(e) {
 const isPSDrill = d => /power\s*skat/i.test(d?.name || '');
 let psViewInst = null;
 function psView() {
-  return (psViewInst ||= createPSView($('#ps-canvas'), { onCaption: txt => { $('#ps-caption').textContent = txt; } }));
+  return (psViewInst ||= createPSView($('#ps-canvas'), {
+    onCaption: txt => { $('#ps-caption').textContent = txt; },
+    onIndex: i => { // playback advanced (or a row was picked): highlight the current list entry
+      $$('#ps-seq li').forEach(li => li.classList.toggle('active', +li.dataset.i === i));
+    },
+  }));
 }
 function renderPSMode(d) {
   const ps = isPSDrill(d);
   $('#canvas-wrap').hidden = ps;
   $('#ps-wrap').hidden = !ps;
   if (!ps) { if (psViewInst?.playing) psViewInst.stop(); return; }
-  const sel = d.psElements || [];
-  $('#ps-list').innerHTML = PS_ELEMENTS.map(e =>
-    `<label title="${escHtml(e.desc)}"><input type="checkbox" data-ps="${e.key}" ${sel.includes(e.key) ? 'checked' : ''}> ${escHtml(e.name)}</label>`).join('');
-  psView().setElements(sel.filter(k => PS_ELEMENTS.some(e => e.key === k)));
+  const seq = (d.psElements || []).filter(k => PS_ELEMENTS.some(e => e.key === k));
+  $('#ps-list').innerHTML = `
+    <div class="row ps-addrow">
+      <select id="ps-pick" title="Element to add">${PS_ELEMENTS.map(e => `<option value="${e.key}">${escHtml(e.name)}</option>`).join('')}</select>
+      <button data-act="psadd" title="Add this element to the drill's list">＋ Add</button>
+    </div>
+    <ol id="ps-seq">${seq.map((k, i) => {
+      const e = PS_ELEMENTS.find(x => x.key === k);
+      return `<li data-i="${i}" class="${i === (psViewInst?.index || 0) ? 'active' : ''}" title="${escHtml(e?.desc || '')}\nClick to open this element in the 3D view"><span class="muted">${i + 1}.</span><span class="name">${escHtml(e?.name || k)}</span><button data-act="psdel" title="Remove from the list">✕</button></li>`;
+    }).join('')}</ol>
+    ${seq.length ? '' : '<p class="muted small">No elements yet — add some above.</p>'}`;
+  psView().setElements(seq, true);
 }
-$('#ps-list').addEventListener('change', e => {
-  const k = e.target.dataset.ps; if (!k) return;
+$('#ps-list').addEventListener('click', e => {
   const d = drill();
-  const sel = new Set(d.psElements || []);
-  e.target.checked ? sel.add(k) : sel.delete(k);
-  d.psElements = PS_ELEMENTS.map(x => x.key).filter(x => sel.has(x)); // keep catalog order
-  store.save();
-  psView().setElements(d.psElements);
+  const btn = e.target.closest('button');
+  if (btn?.dataset.act === 'psadd') {
+    (d.psElements ||= []).push($('#ps-pick').value);
+    store.save(); renderPSMode(d); renderAnimBar();
+    psView().select(d.psElements.length - 1); // jump the 3D view to the newly added element
+    return;
+  }
+  const li = e.target.closest('#ps-seq li');
+  if (!li) return;
+  const i = +li.dataset.i;
+  if (btn?.dataset.act === 'psdel') {
+    d.psElements.splice(i, 1);
+    store.save(); renderPSMode(d); renderAnimBar();
+    return;
+  }
+  // selecting a list entry opens that element in the 3D view and plays it
+  psView().select(i);
+  if (!psView().playing) psView().toggle();
   renderAnimBar();
 });
 

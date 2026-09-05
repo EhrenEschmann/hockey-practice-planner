@@ -51,6 +51,20 @@ const ELS = {
     name: 'Backward swizzles', desc: 'Heels lead: both blades push apart and pull back together while skating backward.', dur: 8,
     pose(t) { return swizzles(t, 4, -1); },
   },
+  slalom: {
+    name: 'Slalom', desc: 'Feet together, knees soft: carve edge to edge in one long serpentine.', dur: 8,
+    pose(t) {
+      const speed = 7, amp = 2.2, k = TAU / 14;            // one full weave every 14 ft
+      const x = t * speed - 14;
+      const y = amp * Math.sin(k * x);
+      const heading = Math.atan2(amp * k * Math.cos(k * x), 1);
+      const lean = -0.38 * Math.sin(k * x);                 // into each curve
+      const crouch = 0.6 + 0.1 * Math.abs(Math.sin(k * x));
+      const cs = Math.cos(heading), sn = Math.sin(heading);
+      const foot = side => ({ x: x + cs * side * 0.12 - sn * side * 0.24, y: y + sn * side * 0.12 + cs * side * 0.24, z: 0, on: true });
+      return { x, y, heading, lean, crouch, feet: { L: foot(1), R: foot(-1) } };
+    },
+  },
   xoverf: {
     name: 'Forward crossovers', desc: 'On the circle: outside foot crosses over, inside foot pulls under.', dur: 8,
     pose(t) { return crossovers(t, 0); },

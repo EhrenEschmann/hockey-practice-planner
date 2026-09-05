@@ -4,6 +4,7 @@ import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES,
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill, syncFollowers } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
+import { PS_ELEMENTS, createPSView } from './powerskate.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -47,9 +48,37 @@ function toRink(e) {
 }
 
 // ---------- rendering ----------
+// ---------- power skating mode: a drill named "power skating" swaps the rink for the 3D technique viewer ----------
+const isPSDrill = d => /power\s*skat/i.test(d?.name || '');
+let psViewInst = null;
+function psView() {
+  return (psViewInst ||= createPSView($('#ps-canvas'), { onCaption: txt => { $('#ps-caption').textContent = txt; } }));
+}
+function renderPSMode(d) {
+  const ps = isPSDrill(d);
+  $('#canvas-wrap').hidden = ps;
+  $('#ps-wrap').hidden = !ps;
+  if (!ps) { if (psViewInst?.playing) psViewInst.stop(); return; }
+  const sel = d.psElements || [];
+  $('#ps-list').innerHTML = PS_ELEMENTS.map(e =>
+    `<label title="${escHtml(e.desc)}"><input type="checkbox" data-ps="${e.key}" ${sel.includes(e.key) ? 'checked' : ''}> ${escHtml(e.name)}</label>`).join('');
+  psView().setElements(sel.filter(k => PS_ELEMENTS.some(e => e.key === k)));
+}
+$('#ps-list').addEventListener('change', e => {
+  const k = e.target.dataset.ps; if (!k) return;
+  const d = drill();
+  const sel = new Set(d.psElements || []);
+  e.target.checked ? sel.add(k) : sel.delete(k);
+  d.psElements = PS_ELEMENTS.map(x => x.key).filter(x => sel.has(x)); // keep catalog order
+  store.save();
+  psView().setElements(d.psElements);
+  renderAnimBar();
+});
+
 function renderCanvas() {
   const d = drill();
   syncFollowers(d); // shared routes: followers pick up any edit to their leader's path
+  renderPSMode(d);
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
   fxLayer.innerHTML = '';
@@ -915,6 +944,7 @@ function tick(now) {
 }
 
 function togglePlay() {
+  if (isPSDrill(drill())) { psView().toggle(); renderAnimBar(); return; } // power skating mode: ▶ plays the technique elements
   if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); fxLayer.innerHTML = ''; }
   else {
     if (totalDuration() <= 0) return;
@@ -931,10 +961,20 @@ function togglePlay() {
 
 function stopAnim() {
   anim.playing = false; cancelAnimationFrame(anim.raf); anim.t = 0;
+  if (psViewInst && isPSDrill(drill())) psViewInst.stop();
   renderCanvas(); renderAnimBar();
 }
 
 function renderAnimBar() {
+  if (isPSDrill(drill())) { // power skating mode: ▶/⏹ drive the 3D viewer; the timeline doesn't apply
+    $('#btn-play').textContent = psViewInst?.playing ? '⏸' : '▶';
+    $('#btn-play').disabled = !(drill().psElements || []).length;
+    $('#timeline').disabled = true;
+    $('#time-display').textContent = 'technique demo';
+    $('#impact-loser-wrap').hidden = true;
+    return;
+  }
+  $('#timeline').disabled = false;
   const T = totalDuration();
   $('#btn-play').textContent = anim.playing ? '⏸' : '▶';
   $('#btn-play').disabled = T <= 0;
@@ -1958,6 +1998,12 @@ function presentHTML(p) {
     <div class="pr-meta">${p.drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
     ${p.drills.map((d, i) => {
       const at = t; if (t != null) t += (+d.duration || 0);
+      if (isPSDrill(d)) return `
+      <section class="pr-drill" data-did="${d.id}">
+        <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
+        <ul class="pr-ps">${(d.psElements || []).map(k => { const e = PS_ELEMENTS.find(x => x.key === k); return e ? `<li><b>${escHtml(e.name)}</b> — ${escHtml(e.desc)}</li>` : ''; }).join('') || '<li class="muted">Technique work — elements on the whiteboard.</li>'}</ul>
+        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+      </section>`;
       return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>

@@ -2100,12 +2100,18 @@ function presentHTML(p) {
     <div class="pr-meta">${p.drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
     ${p.drills.map((d, i) => {
       const at = t; if (t != null) t += (+d.duration || 0);
-      if (isPSDrill(d)) return `
+      if (isPSDrill(d)) {
+        const tiles = (d.psElements || []).map(k => {
+          const e = PS_ELEMENTS.find(x => x.key === k);
+          return e ? `<figure class="pr-pstile" data-ps="${e.key}" title="${escHtml(e.desc)}"><canvas></canvas><figcaption>${escHtml(e.name)}</figcaption></figure>` : '';
+        }).join('');
+        return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
-        <ul class="pr-ps">${(d.psElements || []).map(k => { const e = PS_ELEMENTS.find(x => x.key === k); return e ? `<li><b>${escHtml(e.name)}</b> — ${escHtml(e.desc)}</li>` : ''; }).join('') || '<li class="muted">Technique work — elements on the whiteboard.</li>'}</ul>
+        ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </section>`;
+      }
       return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
@@ -2140,9 +2146,22 @@ function presentNote(text) {
 // Each drill card gets its own little player: ▶/⏸, a scrubber and the drill clock,
 // driving animateFrame() on that card's SVG copy of the drill.
 const presentAnims = [];
-function stopPresentAnims() { for (const a of presentAnims) cancelAnimationFrame(a.raf); presentAnims.length = 0; }
+const presentPSTiles = []; // little looping 3D viewers on power skating cards
+function stopPresentAnims() {
+  for (const a of presentAnims) cancelAnimationFrame(a.raf);
+  presentAnims.length = 0;
+  for (const v of presentPSTiles) v.stop();
+  presentPSTiles.length = 0;
+}
 function wirePresentAnims(p) {
   stopPresentAnims();
+  // power skating cards: a looping mini 3D demo per element
+  for (const fig of $$('#present-body .pr-pstile')) {
+    const v = createPSView(fig.querySelector('canvas'), { wheel: false }); // wheel scrolls the page, drag still orbits
+    v.setElements([fig.dataset.ps]);
+    v.toggle();
+    presentPSTiles.push(v);
+  }
   const rinkStr = rinkSVG();
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     const d = p.drills.find(x => x.id === sec.dataset.did);

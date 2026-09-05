@@ -212,7 +212,7 @@ export const PS_ELEMENTS = Object.entries(ELS).map(([key, e]) => ({ key, name: e
 // ---------------------------------------------------------------------------
 // Viewer
 // ---------------------------------------------------------------------------
-export function createPSView(canvas, { onCaption = () => {}, onIndex = () => {} } = {}) {
+export function createPSView(canvas, { onCaption = () => {}, onIndex = () => {}, wheel = true } = {}) {
   const ctx = canvas.getContext('2d');
   const cam = { yaw: -2.35, pitch: 0.46, dist: 26 };
   const target = { x: 0, y: 0 };
@@ -365,7 +365,7 @@ export function createPSView(canvas, { onCaption = () => {}, onIndex = () => {} 
     if (!playing) draw();
   });
   canvas.addEventListener('pointerup', () => dragCam = null);
-  canvas.addEventListener('wheel', e => { e.preventDefault(); cam.dist = clamp(cam.dist * (e.deltaY > 0 ? 1.1 : 0.9), 10, 60); if (!playing) draw(); }, { passive: false });
+  if (wheel) canvas.addEventListener('wheel', e => { e.preventDefault(); cam.dist = clamp(cam.dist * (e.deltaY > 0 ? 1.1 : 0.9), 10, 60); if (!playing) draw(); }, { passive: false });
 
   return {
     setElements(k, keepIdx = false) {

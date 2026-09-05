@@ -207,6 +207,10 @@ body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 .pr-timedisp{font-variant-numeric:tabular-nums;white-space:nowrap}
 .pr-drill pre{white-space:pre-wrap;font:13px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:8px 0 2px}
 .pr-ps{margin:4px 0;padding-left:20px;line-height:1.6;font-size:13.5px}
+.pr-psgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(172px,100%),1fr));gap:8px;margin-top:4px} /* caps at 4-wide in the 760px column */
+.pr-pstile{margin:0;background:radial-gradient(ellipse at 50% 30%,#182030,#10151f 75%);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.pr-pstile canvas{display:block;width:100%;aspect-ratio:4/3;touch-action:pan-y;cursor:grab}
+.pr-pstile figcaption{font-size:12px;color:var(--muted);padding:4px 8px 6px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #present-gate{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.82)}
 #present-gate[hidden]{display:none}
 

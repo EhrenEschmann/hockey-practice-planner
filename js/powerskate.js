@@ -36,22 +36,12 @@ const ELS = {
     },
   },
   ccuts: {
-    name: 'C-cuts (sculling)', desc: 'Both blades stay on the ice; push half-moons out and pull back in.', dur: 7,
-    pose(t) {
-      const { x, y } = straight(t, 5.5);
-      const ph = t / 1.7 * TAU;
-      const foot = side => { const o = 0.34 + 0.6 * (0.5 + 0.5 * Math.sin(ph)); return { x: x + 0.35 * Math.cos(ph), y: y + side * o, z: 0, on: true }; };
-      return { x, y, heading: 0, lean: 0, crouch: 0.72, feet: { L: foot(1), R: foot(-1) } };
-    },
+    name: 'C-cuts', desc: 'One blade glides straight and stays quiet; the other carves the C push. Alternate feet.', dur: 8,
+    pose(t) { return cCuts(t, 5.5, 1); },
   },
   bccuts: {
-    name: 'Backward C-cuts', desc: 'Skating backward: hips low, heels lead the half-moon pushes.', dur: 7,
-    pose(t) {
-      const { x, y } = straight(t, 4.5);
-      const ph = t / 1.8 * TAU;
-      const foot = side => { const o = 0.34 + 0.55 * (0.5 + 0.5 * Math.sin(ph)); return { x: x - 0.3 * Math.cos(ph), y: y + side * o, z: 0, on: true }; };
-      return { x, y, heading: Math.PI, lean: 0, crouch: 0.75, feet: { L: foot(1), R: foot(-1) } };
-    },
+    name: 'Backward C-cuts', desc: 'Skating backward, hips low: the glide blade stays quiet, the heel leads each C push.', dur: 8,
+    pose(t) { return cCuts(t, 4.2, -1); },
   },
   xoverf: {
     name: 'Forward crossovers', desc: 'On the circle: outside foot crosses over, inside foot pulls under.', dur: 8,
@@ -107,6 +97,22 @@ const ELS = {
     },
   },
 };
+
+/** C-cuts (forward dir=1, backward dir=-1): the glide foot holds a straight line under the body
+ *  while the other blade carves a C out-and-around — alternating feet each push, both blades on the ice. */
+function cCuts(t, speed, dir) {
+  const { x, y } = straight(t, speed);
+  const heading = dir > 0 ? 0 : Math.PI;
+  const cyc = 1.8, u = (t / cyc) % 1;
+  const active = Math.floor(t / cyc) % 2 ? -1 : 1;   // which side pushes this cycle (+1 = left)
+  const foot = side => {
+    if (side !== active) return { x: x + 0.18 * dir, y: y + side * 0.3, z: 0, on: true }; // the still glide foot
+    const out = 0.32 + 0.7 * Math.sin(Math.PI * ease(u));            // bulge out and back in — the C
+    const fwd = dir * (0.5 * Math.cos(Math.PI * u) - 0.05);          // sweeps front → back through the push
+    return { x: x + fwd, y: y + side * out, z: 0, on: true };
+  };
+  return { x, y, heading, lean: 0, crouch: 0.72, feet: { L: foot(1), R: foot(-1) } };
+}
 
 function crossovers(t, faceFlip) {
   const r = 8.5, speed = 7.5, a0 = -Math.PI / 2;

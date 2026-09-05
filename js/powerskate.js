@@ -139,7 +139,7 @@ function oneFootStop(t, edge) {
   else { const u = clamp((t - tAcc - tGlide) / tStop, 0, 1); dec = u; x = tAcc * v - 15 + tGlide * v + v * tStop * (u - u * u / 2); }
   const stopping = t >= tAcc + tGlide;
   const u = (t / 1.4) % 1;
-  let feet, heading = 0, lean = 0, crouch = 0.5;
+  let feet, heading = 0, lean = 0, crouch = 0.5, back = 0;
   if (t < tAcc) feet = { L: strideFoot(x, 0, 0, 1, u, 0.9), R: strideFoot(x, 0, 0, -1, (u + 0.5) % 1, 0.9) };
   else if (!stopping) feet = { L: { x: x + 0.15, y: 0.32, z: 0, on: true }, R: { x: x + 0.4, y: -0.32, z: 0, on: true } };
   else {
@@ -148,15 +148,16 @@ function oneFootStop(t, edge) {
     heading = (edge > 0 ? -0.15 : 0.3) * turn;       // outside: shoulders open with the stop; inside: stay square
     lean = (edge > 0 ? 0.24 : -0.28) * turn;         // which way the weight stacks decides the edge
     crouch = 0.5 + (edge > 0 ? 0.32 : 0.28) * turn;
+    back = 0.6 * turn;                               // sit back against the deceleration
+    const sideways = Math.PI / 2 * 0.94 * turn;      // the whole lower body rotates: both blades turn across the travel
     feet = {
       L: edge > 0
-        ? { x: x - 0.25, y: 0.32, z: 0.4 * lift, on: false }                             // free foot rises beside
-        : { x: x - 0.35 - 0.45 * lift, y: 0.38, z: 0.45 * lift, on: false },             // free foot rises behind
-      R: { x: x + (edge > 0 ? 0.6 : 0.35), y: edge > 0 ? -0.5 : -0.12, z: 0, on: true,
-        dir: Math.PI / 2 * 0.94 * turn },                                                // stopping blade turned across the travel
+        ? { x: x - 0.25, y: 0.32, z: 0.4 * lift, on: false, dir: sideways }              // free foot rises beside
+        : { x: x - 0.35 - 0.45 * lift, y: 0.38, z: 0.45 * lift, on: false, dir: sideways }, // free foot rises behind
+      R: { x: x + (edge > 0 ? 0.6 : 0.35), y: edge > 0 ? -0.5 : -0.12, z: 0, on: true, dir: sideways }, // stopping blade
     };
   }
-  return { x, y: 0, heading, lean, crouch, feet };
+  return { x, y: 0, heading, lean, crouch, back, feet };
 }
 
 /** Swizzles (forward dir=1, backward dir=-1): both blades on the ice the whole time,
@@ -267,10 +268,12 @@ export function createPSView(canvas, { onCaption = () => {} } = {}) {
   function drawSkater(P) {
     const cs = Math.cos(P.heading), sn = Math.sin(P.heading);
     const latX = -sn, latY = cs;                          // skater's left
+    const back = P.back || 0;                             // 0..1: sit back against the deceleration (stops)
     const pelvisH = 3.05 - 1.15 * P.crouch;
     const leanS = Math.sin(P.lean);
-    const pelvis = { x: P.x + latX * leanS * 0.9, y: P.y + latY * leanS * 0.9, z: pelvisH };
-    const shoulder = { x: pelvis.x + cs * 0.45 * P.crouch + latX * leanS * 0.8, y: pelvis.y + sn * 0.45 * P.crouch + latY * leanS * 0.8, z: pelvisH + 1.5 - 0.25 * P.crouch };
+    const pelvis = { x: P.x + latX * leanS * 0.9 - cs * 0.4 * back, y: P.y + latY * leanS * 0.9 - sn * 0.4 * back, z: pelvisH };
+    const torsoFwd = 0.45 * P.crouch - 0.95 * back;       // leaning back puts the shoulders behind the hips
+    const shoulder = { x: pelvis.x + cs * torsoFwd + latX * leanS * 0.8, y: pelvis.y + sn * torsoFwd + latY * leanS * 0.8, z: pelvisH + 1.5 - 0.25 * P.crouch };
     const head = { x: shoulder.x + cs * 0.12, y: shoulder.y + sn * 0.12, z: shoulder.z + 0.62 };
     const { L, R } = P.feet;
     // shadows

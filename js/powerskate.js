@@ -102,32 +102,13 @@ const ELS = {
       return { x, y, heading, lean, crouch, feet: { L: foot(1, lean > 0.05 ? 0.55 : 0.2), R: foot(-1, -0.15) } };
     },
   },
+  onefootstopin: {
+    name: 'One-foot inside edge stop', desc: 'Glide, push the stopping blade out ahead turned sideways, and shave on its inside edge — free foot off the ice.', dur: 6.5,
+    pose(t) { return oneFootStop(t, 1); },
+  },
   onefootstop: {
     name: 'One-foot outside edge stop', desc: 'Glide, swing the stopping blade fully sideways and ride its outside edge to a stand-still — free foot off the ice.', dur: 6.5,
-    pose(t) {
-      const tAcc = 2.2, tGlide = 0.6, v = 8, tStop = 1.7;
-      let x, dec = 0;
-      if (t < tAcc) x = t * v - 15;
-      else if (t < tAcc + tGlide) x = tAcc * v - 15 + (t - tAcc) * v;
-      else { const u = clamp((t - tAcc - tGlide) / tStop, 0, 1); dec = u; x = tAcc * v - 15 + tGlide * v + v * tStop * (u - u * u / 2); }
-      const stopping = t >= tAcc + tGlide;
-      const u = (t / 1.4) % 1;
-      let feet, heading = 0, lean = 0, crouch = 0.5;
-      if (t < tAcc) feet = { L: strideFoot(x, 0, 0, 1, u, 0.9), R: strideFoot(x, 0, 0, -1, (u + 0.5) % 1, 0.9) };
-      else if (!stopping) feet = { L: { x: x + 0.15, y: 0.32, z: 0, on: true }, R: { x: x + 0.4, y: -0.32, z: 0, on: true } };
-      else {
-        const turn = ease(clamp(dec * 2.4, 0, 1));       // the blade snaps sideways at the start of the stop
-        const lift = ease(clamp(dec * 2, 0, 1));
-        heading = 0.3 * turn;                            // shoulders open slightly with the stop
-        lean = -0.28 * turn;                             // weight stacked over the outside edge
-        crouch = 0.5 + 0.28 * turn;
-        feet = {
-          L: { x: x - 0.35 - 0.45 * lift, y: 0.38, z: 0.45 * lift, on: false },          // free foot rises behind
-          R: { x: x + 0.35, y: -0.12, z: 0, on: true, dir: Math.PI / 2 * 0.94 * turn },  // stopping blade turned across the travel
-        };
-      }
-      return { x, y: 0, heading, lean, crouch, feet };
-    },
+    pose(t) { return oneFootStop(t, -1); },
   },
 };
 
@@ -145,6 +126,37 @@ function cCuts(t, speed, dir) {
     return { x: x + fwd, y: y + side * out, z: 0, on: true };
   };
   return { x, y, heading, lean: 0, crouch: 0.72, feet: { L: foot(1), R: foot(-1) } };
+}
+
+/** One-foot stop on the right blade, edge = 1 (inside) or -1 (outside).
+ *  Inside: the stopping foot pushes out ahead and the body leans AWAY from it, pressing the inside edge.
+ *  Outside: the body stacks OVER the stopping foot, riding the outside edge; free foot lifts behind. */
+function oneFootStop(t, edge) {
+  const tAcc = 2.2, tGlide = 0.6, v = 8, tStop = 1.7;
+  let x, dec = 0;
+  if (t < tAcc) x = t * v - 15;
+  else if (t < tAcc + tGlide) x = tAcc * v - 15 + (t - tAcc) * v;
+  else { const u = clamp((t - tAcc - tGlide) / tStop, 0, 1); dec = u; x = tAcc * v - 15 + tGlide * v + v * tStop * (u - u * u / 2); }
+  const stopping = t >= tAcc + tGlide;
+  const u = (t / 1.4) % 1;
+  let feet, heading = 0, lean = 0, crouch = 0.5;
+  if (t < tAcc) feet = { L: strideFoot(x, 0, 0, 1, u, 0.9), R: strideFoot(x, 0, 0, -1, (u + 0.5) % 1, 0.9) };
+  else if (!stopping) feet = { L: { x: x + 0.15, y: 0.32, z: 0, on: true }, R: { x: x + 0.4, y: -0.32, z: 0, on: true } };
+  else {
+    const turn = ease(clamp(dec * 2.4, 0, 1));       // the blade snaps sideways at the start of the stop
+    const lift = ease(clamp(dec * 2, 0, 1));
+    heading = (edge > 0 ? -0.15 : 0.3) * turn;       // outside: shoulders open with the stop; inside: stay square
+    lean = (edge > 0 ? 0.24 : -0.28) * turn;         // which way the weight stacks decides the edge
+    crouch = 0.5 + (edge > 0 ? 0.32 : 0.28) * turn;
+    feet = {
+      L: edge > 0
+        ? { x: x - 0.25, y: 0.32, z: 0.4 * lift, on: false }                             // free foot rises beside
+        : { x: x - 0.35 - 0.45 * lift, y: 0.38, z: 0.45 * lift, on: false },             // free foot rises behind
+      R: { x: x + (edge > 0 ? 0.6 : 0.35), y: edge > 0 ? -0.5 : -0.12, z: 0, on: true,
+        dir: Math.PI / 2 * 0.94 * turn },                                                // stopping blade turned across the travel
+    };
+  }
+  return { x, y: 0, heading, lean, crouch, feet };
 }
 
 /** Swizzles (forward dir=1, backward dir=-1): both blades on the ice the whole time,

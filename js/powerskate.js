@@ -103,19 +103,30 @@ const ELS = {
     },
   },
   onefootstop: {
-    name: 'One-foot stop', desc: 'Glide, rotate the stopping blade sideways, shave the ice to a stand-still.', dur: 6,
+    name: 'One-foot outside edge stop', desc: 'Glide, swing the stopping blade fully sideways and ride its outside edge to a stand-still — free foot off the ice.', dur: 6.5,
     pose(t) {
-      const tAcc = 2.4, tGlide = 0.7, v = 8;
-      let x;
+      const tAcc = 2.2, tGlide = 0.6, v = 8, tStop = 1.7;
+      let x, dec = 0;
       if (t < tAcc) x = t * v - 15;
       else if (t < tAcc + tGlide) x = tAcc * v - 15 + (t - tAcc) * v;
-      else { const u = clamp((t - tAcc - tGlide) / 1.5, 0, 1); x = tAcc * v - 15 + tGlide * v + v * 1.5 * (u - u * u / 2); }
+      else { const u = clamp((t - tAcc - tGlide) / tStop, 0, 1); dec = u; x = tAcc * v - 15 + tGlide * v + v * tStop * (u - u * u / 2); }
       const stopping = t >= tAcc + tGlide;
       const u = (t / 1.4) % 1;
-      const feet = t < tAcc
-        ? { L: strideFoot(x, 0, 0, 1, u, 0.9), R: strideFoot(x, 0, 0, -1, (u + 0.5) % 1, 0.9) }
-        : { L: { x: x + 0.15, y: 0.34, z: 0, on: true }, R: { x: x + (stopping ? 0.85 : 0.4), y: -0.38, z: 0, on: true } };
-      return { x, y: 0, heading: 0, lean: 0, crouch: stopping ? 0.7 : 0.5, feet };
+      let feet, heading = 0, lean = 0, crouch = 0.5;
+      if (t < tAcc) feet = { L: strideFoot(x, 0, 0, 1, u, 0.9), R: strideFoot(x, 0, 0, -1, (u + 0.5) % 1, 0.9) };
+      else if (!stopping) feet = { L: { x: x + 0.15, y: 0.32, z: 0, on: true }, R: { x: x + 0.4, y: -0.32, z: 0, on: true } };
+      else {
+        const turn = ease(clamp(dec * 2.4, 0, 1));       // the blade snaps sideways at the start of the stop
+        const lift = ease(clamp(dec * 2, 0, 1));
+        heading = 0.3 * turn;                            // shoulders open slightly with the stop
+        lean = -0.28 * turn;                             // weight stacked over the outside edge
+        crouch = 0.5 + 0.28 * turn;
+        feet = {
+          L: { x: x - 0.35 - 0.45 * lift, y: 0.38, z: 0.45 * lift, on: false },          // free foot rises behind
+          R: { x: x + 0.35, y: -0.12, z: 0, on: true, dir: Math.PI / 2 * 0.94 * turn },  // stopping blade turned across the travel
+        };
+      }
+      return { x, y: 0, heading, lean, crouch, feet };
     },
   },
 };
@@ -261,8 +272,9 @@ export function createPSView(canvas, { onCaption = () => {} } = {}) {
       const h = Math.sqrt(Math.max(0.05, 1.62 * 1.62 - (d / 2) * (d / 2)));
       const knee = { x: mid.x + cs * h * 0.75, y: mid.y + sn * h * 0.75, z: mid.z + h * 0.35 };
       line(hip, knee, 0.19, '#1e56d6'); line(knee, ank, 0.17, '#1e56d6');
-      // blade
-      line({ x: f.x - cs * 0.5, y: f.y - sn * 0.5, z: f.z + 0.05 }, { x: f.x + cs * 0.55, y: f.y + sn * 0.55, z: f.z + 0.05 }, 0.1, '#dfe6f2');
+      // blade — a foot may aim its own way (f.dir), e.g. turned sideways for a stop
+      const bd = f.dir ?? P.heading, bcs = Math.cos(bd), bsn = Math.sin(bd);
+      line({ x: f.x - bcs * 0.5, y: f.y - bsn * 0.5, z: f.z + 0.05 }, { x: f.x + bcs * 0.55, y: f.y + bsn * 0.55, z: f.z + 0.05 }, 0.1, '#dfe6f2');
     }
     // torso, head, arms
     line(pelvis, shoulder, 0.24, '#1e56d6');

@@ -1316,6 +1316,20 @@ $('#drill-list').addEventListener('keydown', e => {
   else if (e.key === 'Escape') { e.stopPropagation(); row.querySelector('[data-act=cancel]')?.click(); }
 });
 
+// Double-click a drill row: rename it inline (same as the ✎ button).
+$('#drill-list').addEventListener('dblclick', e => {
+  const li = e.target.closest('li');
+  if (!li || li.classList.contains('editing') || li.classList.contains('notes-editor')) return;
+  if (e.target.closest('button,input,textarea')) return;
+  const i = +li.dataset.index;
+  if (!store.practice.drills[i]) return;
+  finishActive();
+  editingDrill = store.practice.drills[i].id;
+  if (store.drillIndex !== i) switchDrill(i); else renderPlan();
+  const el = $('#drill-list li.editing .dname');
+  if (el) { el.focus(); el.select(); }
+});
+
 $('#drill-list').addEventListener('click', e => {
   const li = e.target.closest('li'); if (!li) return;
   const i = +li.dataset.index;

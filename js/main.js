@@ -5,6 +5,7 @@ import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAUL
 import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill, syncFollowers } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
+import { icon, hydrateIcons } from './icons.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -72,7 +73,7 @@ function renderPSMode(d) {
     </div>
     <ol id="ps-seq">${seq.map((k, i) => {
       const e = PS_ELEMENTS.find(x => x.key === k);
-      return `<li data-i="${i}" class="${i === (psViewInst?.index || 0) ? 'active' : ''}" title="${escHtml(e?.desc || '')}\nClick to open this element in the 3D view"><span class="muted">${i + 1}.</span><span class="name">${escHtml(e?.name || k)}</span><button data-act="psdel" title="Remove from the list">✕</button></li>`;
+      return `<li data-i="${i}" class="${i === (psViewInst?.index || 0) ? 'active' : ''}" title="${escHtml(e?.desc || '')}\nClick to open this element in the 3D view"><span class="muted">${i + 1}.</span><span class="name">${escHtml(e?.name || k)}</span><button data-act="psdel" title="Remove from the list">${icon('x')}</button></li>`;
     }).join('')}</ol>
     ${seq.length ? '' : '<p class="muted small">No elements yet — add some above.</p>'}`;
   psView().setElements(seq, true);
@@ -1029,7 +1030,7 @@ function stopAnim() {
 
 function renderAnimBar() {
   if (isPSDrill(drill())) { // power skating mode: ▶/⏹ drive the 3D viewer; the timeline doesn't apply
-    $('#btn-play').textContent = psViewInst?.playing ? '⏸' : '▶';
+    $('#btn-play').innerHTML = icon(psViewInst?.playing ? 'pause' : 'play');
     $('#btn-play').disabled = !(drill().psElements || []).length;
     $('#timeline').disabled = true;
     $('#time-display').textContent = 'technique demo';
@@ -1038,7 +1039,7 @@ function renderAnimBar() {
   }
   $('#timeline').disabled = false;
   const T = totalDuration();
-  $('#btn-play').textContent = anim.playing ? '⏸' : '▶';
+  $('#btn-play').innerHTML = icon(anim.playing ? 'pause' : 'play');
   $('#btn-play').disabled = T <= 0;
   const tl = $('#timeline');
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
@@ -1236,21 +1237,21 @@ function renderTeamMgr() {
     <div class="ros-row" data-cid="${c.id}">
       <input placeholder="Coach name" data-field="name" value="${escHtml(c.name || '')}">
       <input placeholder="email@…" data-field="email" value="${escHtml(c.email || '')}" spellcheck="false">
-      <button data-act="delcoach" title="Remove coach">✕</button>
+      <button data-act="delcoach" title="Remove coach">${icon('x')}</button>
     </div>`).join('');
   const playerBlocks = t.players.map(p => `
     <div class="ros-player" data-pid="${p.id}">
       <div class="ros-row">
         <input placeholder="Player name" data-field="name" value="${escHtml(p.name || '')}">
         <button data-act="addcontact" title="Add a parent / grandparent contact">＋ contact</button>
-        <button data-act="delplayer" title="Remove player">✕</button>
+        <button data-act="delplayer" title="Remove player">${icon('x')}</button>
       </div>
       ${(p.contacts || []).map(k => `
       <div class="ros-row ros-contact" data-kid="${k.id}">
         <input class="ros-rel" placeholder="mom / grandpa …" data-field="rel" value="${escHtml(k.rel || '')}">
         <input placeholder="Contact name" data-field="name" value="${escHtml(k.name || '')}">
         <input placeholder="email@…" data-field="email" value="${escHtml(k.email || '')}" spellcheck="false">
-        <button data-act="delcontact" title="Remove contact">✕</button>
+        <button data-act="delcontact" title="Remove contact">${icon('x')}</button>
       </div>`).join('')}
     </div>`).join('');
   body.innerHTML = `
@@ -1331,8 +1332,8 @@ function renderPlan() {
   const list = $('#drill-list');
   if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
   const btns = d => `
-      <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">🗒</button>
-      <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>✕</button>`;
+      <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
+      <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
   list.innerHTML = p.drills.map((d, i) => {
     const row = editingDrill === d.id
       ? `<li class="${i === store.drillIndex ? 'active ' : ''}editing" data-index="${i}">
@@ -1340,8 +1341,8 @@ function renderPlan() {
           <input class="dname" value="${escHtml(d.name)}" title="Drill name" spellcheck="false">
           <input class="dmin" type="number" min="0" step="1" value="${+d.duration || 0}" title="Minutes">
           <span class="dur">min</span>
-          <button data-act="save" class="primary" title="Save (Enter)">✓</button>
-          <button data-act="cancel" title="Cancel (Esc)">✕</button>
+          <button data-act="save" class="primary" title="Save (Enter)">${icon('check')}</button>
+          <button data-act="cancel" title="Cancel (Esc)">${icon('x')}</button>
         </li>`
       : `<li class="${i === store.drillIndex ? 'active' : ''}" data-index="${i}" draggable="true" title="Drag to reorder">
           <span class="num">${i + 1}.</span>
@@ -1727,7 +1728,7 @@ function puckProps(o) {
       : `<span>${prefix}waypoint</span><input class="wp" type="number" min="0" step="1" data-ev="${i}" data-evprop="wp" value="${ev.wp ?? 0}" title="0 = skater's start, 1… = path waypoints">`;
     const canMark = !!getObj(eventSkater(o, i))?.path?.length; // only a moving skater has a path to mark
     const mark = `<button data-act="mark" data-ev="${i}" ${canMark ? '' : 'disabled'} title="Click a spot on the skater's path to mark where this happens (you can also drag the marker on the ice)">📍 ${onPath ? 'Move mark' : 'Mark on path'}</button>`
-      + (onPath ? `<button data-act="unmark" data-ev="${i}" title="Time this by waypoint instead">✕</button>` : '');
+      + (onPath ? `<button data-act="unmark" data-ev="${i}" title="Time this by waypoint instead">${icon('x')}</button>` : '');
     let body;
     if (ev.type === 'pass') {
       const rcv = getObj(ev.to);
@@ -1754,9 +1755,9 @@ function puckProps(o) {
       <div class="event-head">
         <select data-ev="${i}" data-evprop="type">${Object.entries(EV_TYPES).map(([k, v]) => `<option value="${k}" ${ev.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
         ${status}<span class="spacer"></span>
-        <button data-act="evup" data-ev="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
-        <button data-act="evdown" data-ev="${i}" ${i === evs.length - 1 ? 'disabled' : ''}>↓</button>
-        <button data-act="evdel" data-ev="${i}">✕</button>
+        <button data-act="evup" data-ev="${i}" ${i === 0 ? 'disabled' : ''}>${icon('up')}</button>
+        <button data-act="evdown" data-ev="${i}" ${i === evs.length - 1 ? 'disabled' : ''}>${icon('down')}</button>
+        <button data-act="evdel" data-ev="${i}">${icon('x')}</button>
       </div>
       <div class="event-body">${body}</div>
     </div>`;
@@ -2117,7 +2118,7 @@ function presentHTML(p) {
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
         ${standaloneSVG(d, rink, SVG_STYLE, undefined, { showPaths: d.showPaths !== false })}
         <div class="pr-animbar">
-          <button class="pr-play" title="Watch the drill">▶</button>
+          <button class="pr-play" title="Watch the drill">${icon('play')}</button>
           <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
           <span class="pr-timedisp muted small"></span>
           <select class="pr-speed" title="Playback speed">${['0.25', '0.5', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
@@ -2211,7 +2212,7 @@ function wirePresentAnims(p) {
       animateFrame(dcur, sm, svgEl, fx, a.t, a.playing);
       tl.value = Math.min(a.t, T);
       disp.textContent = `${Math.min(a.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
-      btn.textContent = a.playing ? '⏸' : '▶';
+      btn.innerHTML = icon(a.playing ? 'pause' : 'play');
     };
     const step = now => {
       if (!a.playing) return;
@@ -2362,6 +2363,7 @@ function setGate(state, detail = '') {
 // ---------- boot ----------
 // Offline support: cache the app shell so the rink works without internet (needs HTTPS or localhost).
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+hydrateIcons();
 applyRoute();
 setTool('select');
 refreshPresent();

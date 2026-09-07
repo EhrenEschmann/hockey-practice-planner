@@ -6,6 +6,10 @@
   "description": "Design and animate hockey practice drills on a rink diagram.",
   "scripts": {
     "start": "node serve.js",
-    "check": "node --check js/main.js && node --check js/render.js && node --check js/store.js && node --check js/geometry.js && node --check js/rink.js"
+    "check": "node --check js/main.js && node --check js/render.js && node --check js/store.js && node --check js/geometry.js && node --check js/rink.js",
+    "icons": "node scripts/build-icons.mjs"
+  },
+  "devDependencies": {
+    "lucide-static": "^1.42.0"
   }
 }

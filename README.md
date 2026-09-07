@@ -79,6 +79,7 @@ js/store.js      practice/drill data model, localStorage persistence, undo/redo
 js/cloud.js      Firebase auto-save & live sync (Firestore + Google sign-in); no-op without a config
 js/sim.js        skater timing and puck timeline (carry / pass / shoot / pickup)
 js/geometry.js   splines, arc-length sampling, path simplification
+js/icons.js      generated Lucide icon set (npm run icons regenerates from lucide-static)
 serve.js         zero-dependency static server
 ```
 

@@ -894,23 +894,22 @@ function knockState(dr, sm, t) {
 }
 
 /** Draw one animation frame of drill `dr` (simulated by `sm`) onto any rendered copy of it: `root` holds the objects, `fx` the impact bursts. */
-/** After the drill ends, players skate straight back to their spots at 2× speed; the phase lasts until the slowest returner is home. */
-function returnTime(dr, sm) {
-  const T = sm.duration();
+/** Players skate straight back to their spots at 2× speed, from wherever they are at time t0; the phase lasts until the slowest returner is home. */
+function returnTime(dr, sm, t0 = sm.duration()) {
   let R = 0;
   for (const o of dr.objects) {
     if (!isPlayer(o) || !o.path?.length) continue;
-    const a = sm.skaterPose(o.id, T), b = sm.skaterPose(o.id, 0);
+    const a = sm.skaterPose(o.id, t0), b = sm.skaterPose(o.id, 0);
     R = Math.max(R, Math.hypot(b.x - a.x, b.y - a.y) / (2 * sm.skater(o.id).speed));
   }
   return R;
 }
 
-/** One frame of the return phase, tr seconds after the drill ended: everyone glides home. */
-function returnFrame(dr, sm, root, fx, tr) {
+/** One frame of the skate-home phase, tr seconds after it began at drill time t0: everyone glides back to their start. */
+function returnFrame(dr, sm, root, fx, tr, t0 = sm.duration()) {
   fx.innerHTML = '';
-  const T = sm.duration();
-  const R = returnTime(dr, sm);
+  const T = t0;
+  const R = returnTime(dr, sm, t0);
   const k = R > 0 ? Math.min(1, tr / R) : 1; // pucks drift home over the whole phase
   for (const o of dr.objects) {
     let el, p;
@@ -994,16 +993,13 @@ function animateFrame(dr, sm, root, fx, t, playing) {
 
 function applyAnimation(t) { animateFrame(drill(), sim, objLayer, fxLayer, t, anim.playing); }
 
-/** Drill time plus the skate-back-to-start phase that plays after it. */
-function fullDuration() { return sim ? totalDuration() + returnTime(drill(), sim) : 0; }
-
 function tick(now) {
   if (!anim.playing) return;
   const dt = Math.min(0.1, (now - anim.last) / 1000);
   anim.last = now;
   anim.t += dt * drillSpeed();
-  const T = fullDuration();
-  if (anim.t >= T) { anim.t = T; anim.playing = false; }
+  const T = totalDuration();
+  if (anim.t >= T) { anim.t = T; anim.playing = false; } // park on the final positions — ⏹ sends everyone home
   applyAnimation(anim.t);
   renderAnimBar();
   if (anim.playing) anim.raf = requestAnimationFrame(tick);
@@ -1011,6 +1007,7 @@ function tick(now) {
 
 function togglePlay() {
   if (isPSDrill(drill())) { psView().toggle(); renderAnimBar(); return; } // power skating mode: ▶ plays the technique elements
+  if (returning) cancelReturn();
   if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); fxLayer.innerHTML = ''; }
   else {
     if (totalDuration() <= 0) return;
@@ -1018,17 +1015,40 @@ function togglePlay() {
     finishActive();
     if (pickTarget) { pickTarget = null; $('#hint').textContent = HINTS[tool] || ''; }
     if (sel) select(null);
-    if (anim.t >= fullDuration()) anim.t = 0;
+    if (anim.t >= totalDuration()) anim.t = 0;
     anim.playing = true; anim.last = performance.now();
     anim.raf = requestAnimationFrame(tick);
   }
   renderAnimBar();
 }
 
+/** Immediate reset to the start (used when switching drills, deleting, etc.). */
 function stopAnim() {
+  if (returning) cancelReturn();
   anim.playing = false; cancelAnimationFrame(anim.raf); anim.t = 0;
   if (psViewInst && isPSDrill(drill())) psViewInst.stop();
   renderCanvas(); renderAnimBar();
+}
+
+// ----- the ⏹ button: everyone skates home at 2× speed from wherever they are, then the drill resets -----
+let returning = null; // { t0, tr, last, raf } while the skate-home animation runs
+function cancelReturn() { cancelAnimationFrame(returning?.raf); returning = null; }
+function stopWithReturn() {
+  if (isPSDrill(drill())) { stopAnim(); return; }
+  if (returning) return; // already skating home
+  if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); fxLayer.innerHTML = ''; }
+  if (anim.t <= 0 || !sim || returnTime(drill(), sim, anim.t) <= 0.01) { stopAnim(); return; }
+  returning = { t0: anim.t, tr: 0, last: performance.now() };
+  $('#time-display').textContent = '↩ skating back';
+  const step = now => {
+    if (!returning) return;
+    returning.tr += Math.min(0.05, (now - returning.last) / 1000);
+    returning.last = now;
+    if (returning.tr >= returnTime(drill(), sim, returning.t0)) { cancelReturn(); stopAnim(); return; }
+    returnFrame(drill(), sim, objLayer, fxLayer, returning.tr, returning.t0);
+    returning.raf = requestAnimationFrame(step);
+  };
+  returning.raf = requestAnimationFrame(step);
 }
 
 function renderAnimBar() {
@@ -1048,7 +1068,7 @@ function renderAnimBar() {
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
   if (document.activeElement !== $('#anim-speed')) $('#anim-speed').value = String(drillSpeed());
   $('#anim-trails').checked = drillPaths();
-  $('#time-display').textContent = anim.t > T ? `↩ ${T.toFixed(1)} / ${T.toFixed(1)} s` : `${anim.t.toFixed(1)} / ${T.toFixed(1)} s`;
+  $('#time-display').textContent = returning ? '↩ skating back' : `${Math.min(anim.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
   // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
   const impacts = sim ? sim.contacts() : [];
   const linked = [...new Set(impacts.flatMap(c => [c.a, c.b]))]
@@ -1081,7 +1101,7 @@ $('#impact-loser').addEventListener('change', e => {
 });
 
 $('#btn-play').addEventListener('click', togglePlay);
-$('#btn-stop').addEventListener('click', stopAnim);
+$('#btn-stop').addEventListener('click', stopWithReturn);
 $('#timeline').addEventListener('input', e => { anim.t = +e.target.value; if (anim.t === 0) renderCanvas(); else applyAnimation(anim.t); renderAnimBar(); });
 $('#timeline').addEventListener('change', e => e.target.blur()); // scrub done → hotkeys work again
 $('#anim-speed').addEventListener('change', e => { drill().animSpeed = +e.target.value; store.save(); });
@@ -2179,7 +2199,7 @@ function wirePresentAnims(p) {
     let sm = makeSim(dcur);
     let T = sm.duration();
     if (T <= 0) { bar.remove(); continue; } // nothing moves in this drill
-    let full = T + returnTime(dcur, sm); // the drill, then everyone skates home at 2× speed
+    let full = T; // cards park on the final positions; ▶ restarts from the top
     const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svgEl.appendChild(fx);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
@@ -2204,7 +2224,7 @@ function wirePresentAnims(p) {
         dcur.impactLoser = e.target.value || null;
         sm = makeSim(dcur); // the loser's slowdown changes the drill's timing
         T = sm.duration();
-        full = T + returnTime(dcur, sm);
+        full = T;
         tl.max = T;
         a.t = Math.min(a.t, full);
         draw();

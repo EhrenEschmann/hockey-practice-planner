@@ -276,7 +276,9 @@ export function makeSim(drill) {
     if (drill.impactLoser) for (const c of objs) {
       if (c.type !== 'contact' || (c.a !== drill.impactLoser && c.b !== drill.impactLoser)) continue;
       const ci = contactSync(c.id);
-      if (ci.ok) steals.push({ t: ci.t, from: drill.impactLoser, to: c.a === drill.impactLoser ? c.b : c.a, used: false });
+      const winner = c.a === drill.impactLoser ? c.b : c.a;
+      // A coach's bump (tackle pad) rattles the carrier but doesn't take the puck.
+      if (ci.ok && byId(winner)?.type !== 'coach') steals.push({ t: ci.t, from: drill.impactLoser, to: winner, used: false });
     }
     steals.sort((x, y) => x.t - y.t);
     /** Push a carried segment up to t1, splitting it wherever a steal strips the carrier. */
@@ -378,6 +380,8 @@ export function makeSim(drill) {
   const slowCache = new Map();  // loser skater id → time of the hit that slows them
   const contactInfoCache = new Map();
   const movingSkater = o => o?.type === 'skater' && o.path?.length;
+  // A coach can apply contact too (e.g. holding a tackle pad), moving or standing still.
+  const canContact = o => movingSkater(o) || o?.type === 'coach';
   let syncing = false;
 
   /** Closest approach of a skater's path to a point: arc-length along the path and the offset distance. */
@@ -394,7 +398,8 @@ export function makeSim(drill) {
       for (const c of objs) {
         if (c.type !== 'contact') continue;
         const A = byId(c.a), B = byId(c.b);
-        if (!movingSkater(A) || !movingSkater(B) || c.a === c.b) { contactInfoCache.set(c.id, { ok: false }); continue; }
+        // Valid pairs: two moving skaters, or a moving skater + a coach — someone has to arrive at the marker.
+        if (!canContact(A) || !canContact(B) || c.a === c.b || (!movingSkater(A) && !movingSkater(B))) { contactInfoCache.set(c.id, { ok: false }); continue; }
         const ga = closestAlong(A, c), gb = closestAlong(B, c);
         // A marker nowhere near both paths is a stray (often left off-view): it must not
         // fabricate an impact or distort the skaters' timing. A sloppy-but-plausible drop

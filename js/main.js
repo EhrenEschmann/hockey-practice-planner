@@ -277,9 +277,9 @@ function makePlaceable(type, p) {
     case 'jumppad': return { type: 'jumppad', x: p.x, y: p.y, w: 6, h: 1.5, rot: 0, label: '' };
     case 'net': return { type: 'net', x: p.x, y: p.y, rot: p.x > RINK.W / 2 ? 180 : 0 };
     case 'contact': {
-      // Link the two skaters whose paths pass closest to the marker.
+      // Link the two nearest participants: skaters by their paths, coaches (tackle pad) by where they stand.
       const near = drill().objects
-        .filter(o => o.type === 'skater' && o.path?.length)
+        .filter(o => (o.type === 'skater' && o.path?.length) || o.type === 'coach')
         .map(o => ({ id: o.id, d: G.closestOnPolyline(G.smoothPath(skaterPoints(o), 4), p).dist }))
         .sort((a, b) => a.d - b.d);
       return { type: 'contact', x: p.x, y: p.y, a: near[0]?.id ?? null, b: near[1]?.id ?? null };
@@ -844,7 +844,7 @@ function totalDuration() { return sim ? sim.duration() : 0; }
 function contactOffsets(dr, sm, t) {
   const off = new Map();
   if (t <= 0) return off;
-  const mover = id => { const o = dr.objects.find(x => x.id === id); return o?.type === 'skater' && o.path?.length ? o : null; };
+  const mover = id => { const o = dr.objects.find(x => x.id === id); return (o?.type === 'skater' && o.path?.length) || o?.type === 'coach' ? o : null; };
   const pairs = [...new Set(dr.objects
     .filter(o => o.type === 'contact' && o.a && o.b && o.a !== o.b && mover(o.a) && mover(o.b))
     .map(c => [c.a, c.b].sort().join('|')))].map(k => k.split('|'));
@@ -858,7 +858,10 @@ function contactOffsets(dr, sm, t) {
       const d = Math.hypot(dx, dy);
       if (d >= CONTACT_DIST || d < 1e-6) continue;
       const loser = dr.impactLoser;
-      const [shA, shB] = loser === A ? [0.9, 0.1] : loser === B ? [0.1, 0.9] : [0.5, 0.5]; // the loser absorbs the hit
+      let [shA, shB] = loser === A ? [0.9, 0.1] : loser === B ? [0.1, 0.9] : [0.5, 0.5]; // the loser absorbs the hit
+      // A coach (planted, often braced behind a tackle pad) doesn't budge — the player takes the whole push.
+      if (mover(A).type === 'coach') { shA = 0; shB = 1; }
+      else if (mover(B).type === 'coach') { shB = 0; shA = 1; }
       const push = CONTACT_DIST - d, ux = dx / d, uy = dy / d;
       off.set(A, { x: oa.x + ux * push * shA, y: oa.y + uy * push * shA });
       off.set(B, { x: ob.x - ux * push * shB, y: ob.y - uy * push * shB });
@@ -1537,7 +1540,7 @@ const PROPS = {
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
     ['backward', 'checkbox', 'Starts skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
-  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['pad', 'checkbox', 'Tackle pad'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
   minicone: [['color', 'color', 'Color']],
   tire: [],
@@ -1614,6 +1617,7 @@ function renderProps() {
         extra.push(`<button data-act="chipcorner" title="Take a puck from the pile and chip it into the nearest corner">Chip to corner</button>`);
         extra.push(`<button data-act="chipboards" title="Take a puck from the pile and rim it around the end boards to the far corner">Chip around boards</button>`);
       }
+      if (o.pad) extra.push(`<p class="muted small">🛡 Holding a tackle pad — place a 💥 Contact marker where the pad meets a skater's path and they'll take the bump there (staggered and slowed if you pick them as "worse for", but the coach never takes their puck).</p>`);
       extra.push(`<p class="muted small">A coach can move like a skater, receive passes and pass or shoot the puck. Facing sets which way they hold it while standing.${pile ? '' : ' Stand them on a puck pile to chip pucks into play.'}</p>`);
     }
   }
@@ -1664,16 +1668,17 @@ function triggerProps(o) {
 function playerName(o) { return !o ? '?' : o.type === 'coach' ? `Coach ${escHtml(o.label)}` : `#${escHtml(o.label)}`; }
 
 function contactProps(o) {
-  const movers = drill().objects.filter(x => x.type === 'skater' && x.path?.length);
-  const opt = val => `<option value="" ${!val ? 'selected' : ''}>— pick a skater —</option>` +
-    movers.map(x => `<option value="${x.id}" ${x.id === val ? 'selected' : ''}>${playerName(x)} (${x.color})</option>`).join('');
+  // Skaters need a path to arrive at the marker; a coach (e.g. with a tackle pad) can just stand there.
+  const movers = drill().objects.filter(x => (x.type === 'skater' && x.path?.length) || x.type === 'coach');
+  const opt = val => `<option value="" ${!val ? 'selected' : ''}>— pick a player —</option>` +
+    movers.map(x => `<option value="${x.id}" ${x.id === val ? 'selected' : ''}>${playerName(x)}${x.type === 'coach' && x.pad ? ' 🛡' : ''} (${x.color})</option>`).join('');
   const info = sim.contactSync(o.id);
   const name = id => playerName(getObj(id) || {});
   let status;
-  if (!o.a || !o.b || o.a === o.b) status = `<p class="warn">⚠ pick two different skaters (each needs a path)</p>`;
+  if (!o.a || !o.b || o.a === o.b) status = `<p class="warn">⚠ pick two different players (skaters need a path; a coach can stand still)</p>`;
   else if (!info.ok) status = info.far
     ? `<p class="warn">⚠ marker is ${info.far.toFixed(0)} ft off the paths, so it is ignored — drag it onto the spot where the paths converge (or delete it)</p>`
-    : `<p class="warn">⚠ both skaters need a skating path</p>`;
+    : `<p class="warn">⚠ at least one side must be a skater with a path (or a coach)</p>`;
   else {
     const waits = [[o.a, info.aWait], [o.b, info.bWait]].filter(([, w]) => w > 0.05)
       .map(([id, w]) => `${name(id)} waits ${w.toFixed(1)} s`).join(' · ');

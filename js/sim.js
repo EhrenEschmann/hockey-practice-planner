@@ -294,6 +294,18 @@ export function makeSim(drill) {
     }
 
     for (const ev of p.events || []) {
+      // An impact that strips the carrier before this event fires hands the puck over first,
+      // so a pass or shot added after the steal belongs to — and is timed by — the winner.
+      if (carrier && (ev.type === 'pass' || ev.type === 'shoot')) {
+        for (const st of steals) {
+          if (st.used || st.from !== carrier || st.t <= t) continue;
+          const want = ev.by === 'receiver' ? st.t : evTime(carrier, ev);
+          if (want < st.t) break; // the event fires before the hit — current carrier keeps it
+          segs.push({ t0: t, t1: st.t, kind: 'carried', carrier });
+          t = st.t; carrier = st.to; st.used = true;
+          info.steal = { t: st.t, from: st.from, to: st.to };
+        }
+      }
       const rec = { type: ev.type, carrier, ok: false, t: null };
       info.push(rec);
       if (ev.type === 'pickup') {

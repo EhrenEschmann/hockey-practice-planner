@@ -10,6 +10,6 @@
     "icons": "node scripts/build-icons.mjs"
   },
   "devDependencies": {
-    "lucide-static": "^1.42.0"
+    "lucide-static": "^1.43.0"
   }
 }

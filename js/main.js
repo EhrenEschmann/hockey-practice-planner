@@ -689,6 +689,7 @@ function onPointerUp(e) {
   }
 }
 
+let canvasClipboard = null; // deep copies of the last ⌘C'd object (plus its carried puck), pasteable into any drill
 let lastDown = null;   // {t, x, y} of the previous pointerdown, for manual double-click detection
 let pendingDbl = null; // a detected double-click waiting for its release; movement cancels it (it became a drag)
 
@@ -755,6 +756,24 @@ document.addEventListener('keydown', e => {
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
+  // Copy / paste the selected object (works across drills; a carried puck rides along)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && sel && !isEditing()) {
+    const o = getObj(sel); if (!o) return;
+    e.preventDefault();
+    const group = [o, ...drill().objects.filter(pk => pk.type === 'puck' && pk.carrier === o.id)];
+    canvasClipboard = JSON.parse(JSON.stringify(group));
+    $('#hint').textContent = `Copied ${TYPE_NAMES[o.type] || o.type} — ⌘/Ctrl+V pastes (in this drill or another)`;
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && canvasClipboard && !isEditing()) {
+    e.preventDefault();
+    for (const c of canvasClipboard) translateObj(c, 4, 4); // stagger repeated pastes
+    const copies = cloneObjects(canvasClipboard);
+    commit(() => drill().objects.push(...copies));
+    select(copies[0].id);
+    renderProps();
+    return;
+  }
   if (isEditing()) { if (e.key === 'Escape') document.activeElement.blur(); return; }
   if (e.key === 'Escape') {
     if (pickTarget) { pickTarget = null; $('#hint').textContent = HINTS[tool] || ''; }

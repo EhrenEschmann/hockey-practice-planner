@@ -2,10 +2,29 @@
 
 export const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-/** Catmull-Rom spline through the given points, returned as a dense polyline. */
+/**
+ * Catmull-Rom spline through the given points, returned as a dense polyline with `seg` samples per
+ * input segment (so the sample count is uniform regardless of shape). Points flagged `stop` or
+ * `corner` are hard corners: the spline breaks there — straight in, straight out — instead of arcing,
+ * e.g. a skater who comes to a full stop and then changes direction.
+ */
 export function smoothPath(pts, seg = 8) {
-  if (pts.length < 3) return pts.map(p => ({ x: p.x, y: p.y }));
+  if (pts.length < 2) return pts.map(p => ({ x: p.x, y: p.y }));
+  const runs = [];
+  let start = 0;
+  for (let i = 1; i < pts.length - 1; i++) if (+pts[i].stop > 0 || pts[i].corner) { runs.push(pts.slice(start, i + 1)); start = i; }
+  runs.push(pts.slice(start));
   const out = [{ x: pts[0].x, y: pts[0].y }];
+  for (const r of runs) { const d = smoothRun(r, seg); for (let i = 1; i < d.length; i++) out.push(d[i]); }
+  return out;
+}
+
+function smoothRun(pts, seg) {
+  const out = [{ x: pts[0].x, y: pts[0].y }];
+  if (pts.length === 2) {
+    for (let j = 1; j <= seg; j++) out.push({ x: pts[0].x + (pts[1].x - pts[0].x) * j / seg, y: pts[0].y + (pts[1].y - pts[0].y) * j / seg });
+    return out;
+  }
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[Math.max(i - 1, 0)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(i + 2, pts.length - 1)];
     for (let j = 1; j <= seg; j++) {

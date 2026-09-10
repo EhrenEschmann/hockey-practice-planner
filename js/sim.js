@@ -257,7 +257,7 @@ export function makeSim(drill) {
   function wpTime(id, wp) {
     const tm = skater(id);
     const k = G.clamp(Math.round(+wp || 0), 0, tm.nPts - 1);
-    const idx = tm.nPts < 3 ? k : k * SEG;
+    const idx = k * SEG; // smoothPath emits SEG samples per input segment, corners included
     return timeAt(tm, tm.cum[Math.min(idx, tm.cum.length - 1)]);
   }
 

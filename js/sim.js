@@ -187,6 +187,36 @@ export function makeSim(drill) {
     return t0;
   }
 
+  /** Waypoints where this skater holds a full stop: [{d: ft along the smoothed path, dur: s}], in path order. */
+  function stopList(o, dense) {
+    const pts = skaterPoints(o);
+    const out = [];
+    for (let i = 1; i < pts.length; i++) if (+pts[i].stop > 0) out.push({ d: G.closestOnPolyline(dense, pts[i]).along, dur: +pts[i].stop });
+    return out.sort((a, b) => a.d - b.d);
+  }
+
+  /** Motion schedule as (time, distance) segments: moving stretches, zero-speed dwells at stop
+   *  waypoints, and the post-contact slowdown from `slowT` on. */
+  function buildSegs(tm, stops, slowT) {
+    const segs = [];
+    let t = tm.delay, d = 0, v = tm.speed, slowed = slowT == null;
+    const evs = stops.filter(s => s.d > 1e-6 && s.dur > 0);
+    evs.push({ d: tm.len, dur: 0 });
+    for (const e of evs) {
+      if (e.d < d - 1e-9) continue;
+      if (!slowed && slowT <= t) { v = tm.speed * SLOW_FACTOR; slowed = true; }
+      if (!slowed && slowT > t) {
+        const dAtSlow = d + (slowT - t) * v;
+        if (dAtSlow < e.d) { segs.push({ t0: t, t1: slowT, d0: d, v }); t = slowT; d = dAtSlow; v = tm.speed * SLOW_FACTOR; slowed = true; }
+      }
+      const t1 = t + (e.d - d) / v;
+      segs.push({ t0: t, t1, d0: d, v });
+      t = t1; d = e.d;
+      if (e.dur > 0) { segs.push({ t0: t, t1: t + e.dur, d0: d, v: 0 }); t += e.dur; }
+    }
+    return segs;
+  }
+
   function skater(id) {
     let t = timings.get(id);
     if (!t) {
@@ -195,11 +225,7 @@ export function makeSim(drill) {
       const dense = G.smoothPath(pts, SEG);
       const cum = G.cumulative(dense);
       t = { dense, cum, len: cum[cum.length - 1], delay: startTime(o) + syncExtra(o.id), speed: Math.max(1, +o.speed || 20), nPts: pts.length, frames: carryFrames(o, dense, cum, objs) };
-      const st = slowTime(o.id);
-      if (st != null) {
-        const d0 = G.clamp((st - t.delay) * t.speed, 0, t.len);
-        if (d0 < t.len) t.slow = { t0: st, d0 };
-      }
+      t.segs = buildSegs(t, stopList(o, dense), slowTime(o.id));
       timings.set(id, t);
     }
     return t;
@@ -396,11 +422,6 @@ export function makeSim(drill) {
   const canContact = o => movingSkater(o) || o?.type === 'coach';
   let syncing = false;
 
-  /** Closest approach of a skater's path to a point: arc-length along the path and the offset distance. */
-  function closestAlong(o, p) {
-    return G.closestOnPolyline(G.smoothPath(skaterPoints(o), SEG), p);
-  }
-
   function buildSync() {
     syncing = true;
     try {
@@ -412,14 +433,17 @@ export function makeSim(drill) {
         const A = byId(c.a), B = byId(c.b);
         // Valid pairs: two moving skaters, or a moving skater + a coach — someone has to arrive at the marker.
         if (!canContact(A) || !canContact(B) || c.a === c.b || (!movingSkater(A) && !movingSkater(B))) { contactInfoCache.set(c.id, { ok: false }); continue; }
-        const ga = closestAlong(A, c), gb = closestAlong(B, c);
+        const denseA = G.smoothPath(skaterPoints(A), SEG), denseB = G.smoothPath(skaterPoints(B), SEG);
+        const ga = G.closestOnPolyline(denseA, c), gb = G.closestOnPolyline(denseB, c);
         // A marker nowhere near both paths is a stray (often left off-view): it must not
         // fabricate an impact or distort the skaters' timing. A sloppy-but-plausible drop
         // between converging paths still counts — the sync snaps to the closest approach anyway.
         const STRAY_DIST = 12; // ft
         if (Math.max(ga.dist, gb.dist) > STRAY_DIST) { contactInfoCache.set(c.id, { ok: false, far: Math.max(ga.dist, gb.dist) }); continue; }
-        const ta = startTime(A) + (syncCache.get(c.a) || 0) + ga.along / Math.max(1, +A.speed || 20);
-        const tb = startTime(B) + (syncCache.get(c.b) || 0) + gb.along / Math.max(1, +B.speed || 20);
+        // Arrival includes any full stops held before the marker.
+        const dwell = (o, dense, d) => stopList(o, dense).reduce((a, s) => a + (s.d < d - 1e-6 ? s.dur : 0), 0);
+        const ta = startTime(A) + (syncCache.get(c.a) || 0) + ga.along / Math.max(1, +A.speed || 20) + dwell(A, denseA, ga.along);
+        const tb = startTime(B) + (syncCache.get(c.b) || 0) + gb.along / Math.max(1, +B.speed || 20) + dwell(B, denseB, gb.along);
         const t = Math.max(ta, tb);
         const aWait = t - ta, bWait = t - tb;
         if (aWait > 0) syncCache.set(c.a, (syncCache.get(c.a) || 0) + aWait);
@@ -448,19 +472,21 @@ export function makeSim(drill) {
     return slowCache.get(id) ?? null;
   }
 
-  /** Distance along the path at time t, honouring the post-contact slowdown. */
+  /** Distance along the path at time t, honouring full stops and the post-contact slowdown. */
   function distAt(tm, t) {
-    const d = tm.slow && t > tm.slow.t0
-      ? tm.slow.d0 + (t - tm.slow.t0) * tm.speed * SLOW_FACTOR
-      : (t - tm.delay) * tm.speed;
-    return G.clamp(d, 0, tm.len);
+    if (!tm.segs.length || t <= tm.segs[0].t0) return 0;
+    for (const s of tm.segs) if (t <= s.t1) return G.clamp(s.d0 + (t - s.t0) * s.v, 0, tm.len);
+    return tm.len;
   }
 
-  /** Time at which the skater reaches a distance along their path (inverse of distAt). */
+  /** Time at which the skater reaches a distance along their path (arrival — a dwell at that spot comes after). */
   function timeAt(tm, dist) {
     dist = G.clamp(dist, 0, tm.len);
-    if (tm.slow && dist > tm.slow.d0) return tm.slow.t0 + (dist - tm.slow.d0) / (tm.speed * SLOW_FACTOR);
-    return tm.delay + dist / tm.speed;
+    for (const s of tm.segs) {
+      if (s.v <= 0) continue;
+      if (dist <= s.d0 + (s.t1 - s.t0) * s.v + 1e-9) return s.t0 + Math.max(0, dist - s.d0) / s.v;
+    }
+    return tm.segs.at(-1)?.t1 ?? tm.delay;
   }
 
   /** Resolved timing of an explicit contact marker (for the properties panel). */

@@ -1615,6 +1615,8 @@ function renderProps() {
     if (o.type === 'skater' && o.path?.length && !o.follow) {
       const toggles = o.path.map((pt, i) => `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1} — click cycles: no pivot → ⟲ face swings left → ⟳ face swings right">${i + 1}${pt.pivot === 'L' ? ' ⟲' : pt.pivot ? ' ⟳' : ''}</button>`).join('');
       extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this skater is selected. A pivot turns the skater 180° (forward ⇄ backward); pick which way their face and the puck swing around.">Pivot forward ⇄ backward at waypoint</span><div class="row wp-row">${toggles}</div></div>`);
+      const stops = o.path.map((pt, i) => `<button class="wp-toggle ${+pt.stop > 0 ? 'active' : ''}" data-act="wpstop" data-wp="${i}" title="Full stop at waypoint ${i + 1} — click cycles the hold: off → 1s → 2s → 3s → 5s → off. Everything downstream (passes, contacts) waits with them.">${i + 1}${+pt.stop > 0 ? ` ⏸${+pt.stop}s` : ''}</button>`).join('');
+      extra.push(`<div class="field"><span title="The skater comes to a full stop at the waypoint, holds for the chosen seconds, then continues.">Full stop at waypoint</span><div class="row wp-row">${stops}</div></div>`);
     }
     if (o.type === 'skater') {
       const leaders = drill().objects.filter(s => s.type === 'skater' && s.id !== o.id && !s.follow && s.path?.length);
@@ -1896,6 +1898,13 @@ propsBody.addEventListener('click', e => {
       const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
       // cycle: no pivot → 'L' (face swings left) → 'R' (face swings right) → no pivot
       commit(() => { if (!pt.pivot) pt.pivot = 'L'; else if (pt.pivot === 'L') pt.pivot = 'R'; else delete pt.pivot; });
+      renderProps(); break;
+    }
+    case 'wpstop': {
+      const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
+      const cycle = [0, 1, 2, 3, 5];
+      const next = cycle[(cycle.indexOf(+pt.stop || 0) + 1) % cycle.length];
+      commit(() => { if (next > 0) pt.stop = next; else delete pt.stop; });
       renderProps(); break;
     }
     case 'fitdrill': resizeDrillInto(o); renderProps(); break;

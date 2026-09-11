@@ -2280,11 +2280,12 @@ function wirePresentAnims(p) {
     tl.max = T;
     const a = { raf: 0, t: 0, playing: false, last: 0 };
     presentAnims.push(a);
+    let shown = null; // only rewrite the icon when the state flips — replacing it every frame eats clicks
     const draw = () => {
       animateFrame(dcur, sm, svgEl, fx, a.t, a.playing);
       tl.value = Math.min(a.t, T);
       disp.textContent = `${Math.min(a.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
-      btn.innerHTML = icon(a.playing ? 'pause' : 'play');
+      if (shown !== a.playing) { shown = a.playing; btn.innerHTML = icon(a.playing ? 'pause' : 'play'); btn.title = a.playing ? 'Pause' : 'Watch the drill'; }
     };
     const step = now => {
       if (!a.playing) return;

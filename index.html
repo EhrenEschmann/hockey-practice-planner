@@ -20,9 +20,18 @@
       <label class="field"><span>Date</span><input id="practice-date" type="date"></label>
       <label class="field"><span>Start time</span><input id="practice-time" type="time"></label>
       <label class="field"><span>Coaches</span><input id="practice-coaches" placeholder="e.g. Ehren, Mike, Dante"></label>
-      <label class="field"><span>Coach emails (can view this practice)</span><input id="practice-emails" placeholder="mike@gmail.com, dante@gmail.com" spellcheck="false"></label>
-      <button id="btn-team-emails" title="Add the coach emails from this team's roster (👥 Team)">＋ from team roster</button>
-      <button id="btn-share-link" title="Copy a link coaches can open — they sign in with Google and get a read-only view of this practice">🔗 Copy coach link</button>
+      <h3>Share with coaches</h3>
+      <label class="field"><span>Coach emails — full plan, notes &amp; assignments</span><input id="practice-emails" placeholder="mike@gmail.com, dante@gmail.com" spellcheck="false"></label>
+      <div class="row">
+        <button id="btn-team-emails" title="Add the coach emails from this team's roster (👥 Team)">＋ from roster</button>
+        <button id="btn-share-link" title="Copy the coaches' link — the full practice plan including notes and assignments">🔗 Coach link</button>
+      </div>
+      <h3>Share with the team</h3>
+      <label class="field"><span>Player / family emails — schedule &amp; drills, no coaching notes</span><input id="practice-team-emails" placeholder="parent@gmail.com, grandma@gmail.com" spellcheck="false"></label>
+      <div class="row">
+        <button id="btn-family-emails" title="Add every family contact email from this team's roster (👥 Team)">＋ from roster</button>
+        <button id="btn-share-team-link" title="Copy the team's link — the practice without coaching notes or assignments">🔗 Team link</button>
+      </div>
       <button id="btn-create-practice" class="primary">＋ Create new practice</button>
     </div>
   </div>
@@ -179,6 +188,7 @@
     <div class="gate-brand">🏒 Practice Planner</div>
     <p id="gate-msg">Sign in to plan practices.</p>
     <button id="gate-signin" class="primary">Sign in with Google</button>
+    <button id="gate-signout" hidden>Sign out</button>
     <p id="gate-detail" class="muted small"></p>
   </div>
 </div>

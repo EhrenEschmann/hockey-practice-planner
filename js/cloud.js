@@ -28,7 +28,7 @@ export async function firebaseBackend(config) {
   const db = fs.getFirestore(app);
   const col = uid => fs.collection(db, 'users', uid, 'practices');
   return {
-    onUser(cb) { return auth.onAuthStateChanged(a, u => cb(u ? { uid: u.uid, name: u.displayName || u.email || 'Signed in' } : null)); },
+    onUser(cb) { return auth.onAuthStateChanged(a, u => cb(u ? { uid: u.uid, email: u.email || '', name: u.displayName || u.email || 'Signed in' } : null)); },
     async signIn() { await auth.signInWithPopup(a, new auth.GoogleAuthProvider()); },
     async signOut() { await auth.signOut(a); },
     async load(uid) { return (await fs.getDocs(col(uid))).docs.map(d => d.data()); },

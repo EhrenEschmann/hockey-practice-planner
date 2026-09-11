@@ -48,7 +48,11 @@ textarea{resize:vertical}
 .ctx-pos{font-variant-numeric:tabular-nums;color:var(--muted);min-width:32px;text-align:center}
 #practice-wrap{position:relative}
 #practice-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:250px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
-#practice-pop h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+#practice-pop{width:300px;max-height:min(78vh,700px);overflow-y:auto}
+#practice-pop h3{margin:14px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+#practice-pop h3:first-child{margin-top:0}
+#practice-pop .row{display:flex;gap:6px;margin-bottom:4px}
+#practice-pop .row button{flex:1;font-size:12px;padding:4px 6px}
 #practice-pop .field input{width:100%}
 #btn-create-practice{width:100%;margin-top:2px}
 #props{background:var(--panel);flex:1 1 0;min-height:0;overflow-y:auto}

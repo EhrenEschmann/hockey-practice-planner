@@ -151,7 +151,7 @@ function renderAll() { renderCanvas(); renderUI(); updateRoute(); }
 
 // ---------- routing: the URL tracks the open practice & drill so refresh restores them ----------
 function updateRoute() {
-  if (/view=/.test(location.hash)) return; // presentation mode owns the URL
+  if (/(view|team)=/.test(location.hash)) return; // presentation mode owns the URL
   const p = store.practice, d = store.drill;
   if (!p || !d) return;
   if ((store.data.lastDrill ||= {})[p.id] !== d.id) { store.data.lastDrill[p.id] = d.id; store.persist(); }
@@ -1215,19 +1215,23 @@ function renderPracticeProps() {
     const el = $(id);
     if (document.activeElement !== el) el.value = p[key] || '';
   }
-  const em = $('#practice-emails');
-  if (document.activeElement !== em) em.value = (p.sharedWith || []).join(', ');
+  for (const [id, key] of SHARE_FIELDS) {
+    const em = $(id);
+    if (document.activeElement !== em) em.value = (p[key] || []).join(', ');
+  }
 }
+// Two audiences: coaches get the full plan, the team gets the schedule and drills without coaching notes.
+const SHARE_FIELDS = [['#practice-emails', 'sharedWith'], ['#practice-team-emails', 'sharedTeam']];
 for (const [id, key] of PRACTICE_FIELDS) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
   el.addEventListener('input', () => { store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
   el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
-{ // coach emails: stored as a lowercased array — these people may open the practice in presentation mode
-  const el = $('#practice-emails');
+for (const [id, key] of SHARE_FIELDS) { // stored as lowercased arrays — these people may open the practice
+  const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
-  el.addEventListener('input', () => { store.practice.sharedWith = el.value.split(/[\s,;]+/).filter(Boolean).map(s => s.toLowerCase()); store.save(); });
+  el.addEventListener('input', () => { store.practice[key] = el.value.split(/[\s,;]+/).filter(Boolean).map(s => s.toLowerCase()); store.save(); });
   el.addEventListener('change', () => { store.commitPending(); renderUI(); });
 }
 
@@ -1353,16 +1357,21 @@ $('#team-body').addEventListener('click', e => {
   store.saveRoster(); renderTeamMgr();
 });
 // Practice popover: pull the roster team's coach emails into this practice's viewer list.
-$('#btn-team-emails').addEventListener('click', () => {
+/** Merge roster emails into one of the practice's share lists. */
+function addRosterEmails(key, pick, what) {
   const team = store.roster.teams.find(t => (t.name || '').toLowerCase() === (store.practice.team || '').toLowerCase()) || store.roster.teams[0];
-  const emails = (team?.coaches || []).map(c => (c.email || '').trim().toLowerCase()).filter(Boolean);
-  if (!emails.length) return alert('No coach emails in the team roster yet — add them under 👥 Team.');
+  const emails = pick(team || {}).map(e => (e || '').trim().toLowerCase()).filter(Boolean);
+  if (!emails.length) return alert(`No ${what} in the team roster yet — add them under 👥 Team.`);
   store.beginPending();
-  store.practice.sharedWith = [...new Set([...(store.practice.sharedWith || []), ...emails])];
+  store.practice[key] = [...new Set([...(store.practice[key] || []), ...emails])];
   store.commitPending();
   store.save();
   renderPracticeProps();
-});
+}
+$('#btn-team-emails').addEventListener('click', () =>
+  addRosterEmails('sharedWith', t => (t.coaches || []).map(c => c.email), 'coach emails'));
+$('#btn-family-emails').addEventListener('click', () =>
+  addRosterEmails('sharedTeam', t => (t.players || []).flatMap(p => (p.contacts || []).map(c => c.email)), 'family contact emails'));
 
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
 let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
@@ -2147,10 +2156,12 @@ $('#btn-print').addEventListener('click', () => {
 // The owner opens it with 📺 Present; coaches listed in the practice's "Coach emails" open the same
 // link, sign in with Google, and read the practice live from the owner's cloud account.
 let presenting = false;
+let presentAudience = 'coach'; // 'coach' = full plan; 'team' = families: schedule and drills, no coaching notes
 let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
 
 function presentHTML(p) {
+  const forCoaches = presentAudience === 'coach'; // the team's link leaves out coaching notes & assignments
   const rink = rinkSVG();
   const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const startMin = parseStart(p);
@@ -2158,7 +2169,7 @@ function presentHTML(p) {
   return `
     <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
     <div class="pr-meta">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
-    ${p.coaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
+    ${p.coaches && forCoaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
     <div class="pr-meta">${p.drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
     ${p.drills.map((d, i) => {
       const at = t; if (t != null) t += (+d.duration || 0);
@@ -2171,7 +2182,7 @@ function presentHTML(p) {
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
-        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+        ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </section>`;
       }
       return `
@@ -2186,14 +2197,14 @@ function presentHTML(p) {
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
           <span class="pr-impact"></span>
         </div>
-        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+        ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </section>`;
     }).join('')}
     ${startMin != null ? `<section class="pr-drill"><header><b>* Dismissal</b><span class="pr-time">${clock(startMin + total)}</span></header></section>` : ''}`;
 }
 
 function presentDoc(p) {
-  $('#present-title').textContent = practiceLabel(p);
+  $('#present-title').textContent = practiceLabel(p) + (presentAudience === 'team' ? ' · team view' : '');
   $('#present-body').innerHTML = presentHTML(p);
   wirePresentAnims(p);
   $('#present-gate').hidden = true;
@@ -2300,7 +2311,8 @@ function presentMsg(msg, canSignIn = false) {
 
 /** Show/hide presentation mode to match the URL; called at boot, on hash changes and on sign-in changes. */
 function refreshPresent() {
-  const m = location.hash.match(/view=(\w+)\/(\w+)/);
+  const m = location.hash.match(/(?:view|team)=(\w+)\/(\w+)/);
+  presentAudience = /team=/.test(location.hash) ? 'team' : 'coach';
   presenting = !!m;
   document.body.classList.toggle('presenting', presenting);
   $('#present').hidden = !presenting;
@@ -2329,7 +2341,7 @@ function refreshPresent() {
   presentUnsub = cloudBackend.subscribePractice(ownerUid, pid, (p, err) => {
     if (err) {
       const msg = err.code === 'permission-denied'
-        ? "You don't have access to this practice. Ask the coach who shared it to add your Google email in the practice details."
+        ? `You don't have access to this practice. Ask the coach who shared it to add your Google email to the practice's ${presentAudience === 'team' ? 'team' : 'coach'} list.`
         : `Could not load the practice: ${err.message || err}`;
       if (!showCached('could not reach the cloud.')) presentMsg(msg);
       return;
@@ -2347,15 +2359,17 @@ $('#btn-present').addEventListener('click', () => {
   window.open(`${location.origin}${location.pathname}#view=${store.data.ownerUid || 'local'}/${store.practice.id}`, '_blank');
 });
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, true)));
-$('#btn-share-link').addEventListener('click', async e => {
-  const b = e.currentTarget;
-  if (!store.data.ownerUid) return alert('Sign in first — coaches read the practice from your cloud account.');
-  const url = `${location.origin}${location.pathname}#view=${store.data.ownerUid}/${store.practice.id}`;
+/** Copy one of the two share links: `view` = coaches (full plan), `team` = players' families (no coaching notes). */
+async function copyShareLink(btn, route) {
+  if (!store.data.ownerUid) return alert('Sign in first — the link reads the practice from your cloud account.');
+  const url = `${location.origin}${location.pathname}#${route}=${store.data.ownerUid}/${store.practice.id}`;
   try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); return; }
-  const old = b.textContent;
-  b.textContent = '✓ Link copied';
-  setTimeout(() => { b.textContent = old; }, 1500);
-});
+  const old = btn.textContent;
+  btn.textContent = '✓ Copied';
+  setTimeout(() => { btn.textContent = old; }, 1500);
+}
+$('#btn-share-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'view'));
+$('#btn-share-team-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'team'));
 
 // ---------- cloud sync (Firebase) ----------
 const CLOUD_LABELS = { signedout: 'Not signed in (local only)', syncing: 'Syncing…', saving: 'Saving…', saved: 'Saved ✓', error: 'Cloud error' };
@@ -2370,15 +2384,26 @@ function renderCloudStatus(sync, state, detail) {
   $('#btn-signout').hidden = !u;
 }
 /** Show (state = 'checking' | 'signedout' | 'error') or hide (null) the sign-in gate that covers the app. */
+// Only these accounts get the practice-creation interface. Everyone else uses share links
+// (this is a UI gate; the real protection is Firestore's rules — nobody can write another
+// account's practices, and readers only see the practices they are listed on).
+const OWNER_EMAILS = ['ehren.eschmann@gmail.com'];
+const isOwner = u => !u?.email || OWNER_EMAILS.includes(String(u.email).toLowerCase());
+
 function setGate(state, detail = '') {
   gated = !!state;
   $('#gate').hidden = !state;
   document.body.classList.toggle('gated', gated);
+  $('#gate-signout').hidden = state !== 'noaccess';
   if (!state) return;
   finishActive(); pickTarget = null; if (anim.playing) togglePlay();
-  $('#gate-msg').textContent = state === 'checking' ? 'Checking your sign-in…' : 'Sign in to plan practices. Your practices are saved to your account and follow you between devices.';
-  $('#gate-signin').hidden = state === 'checking';
-  $('#gate-detail').textContent = state === 'error' ? `Sign-in failed: ${detail}` : '';
+  $('#gate-msg').textContent =
+    state === 'checking' ? 'Checking your sign-in…'
+    : state === 'noaccess' ? 'Practice plans are shared by link. Open the link your coach sent you — it works with this Google account.'
+    : 'Sign in to plan practices. Your practices are saved to your account and follow you between devices.';
+  $('#gate-signin').hidden = state === 'checking' || state === 'noaccess';
+  $('#gate-detail').textContent = state === 'error' ? `Sign-in failed: ${detail}`
+    : state === 'noaccess' ? `Signed in as ${detail}` : '';
 }
 
 (async () => {
@@ -2403,6 +2428,7 @@ function setGate(state, detail = '') {
       // The app is only usable while signed in.
       if (state === 'signedout') setGate('signedout');
       else if (state === 'error' && !sync.user) setGate('error', detail);
+      else if (sync.user && !isOwner(sync.user)) setGate('noaccess', sync.user.email || sync.user.name); // viewers use share links
       else if (sync.user) setGate(null);
       refreshPresent(); // presentation mode reacts to sign-in changes too
     },
@@ -2416,6 +2442,7 @@ function setGate(state, detail = '') {
   });
   cloudSync = sync; cloudBackend = backend;
   $('#gate-signin').addEventListener('click', () => sync.signIn().catch(e => setGate('error', e?.message || String(e))));
+  $('#gate-signout').addEventListener('click', () => sync.signOut().catch(() => {}));
   $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   $('#btn-signout').addEventListener('click', () => sync.signOut().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   renderCloudStatus(sync, 'signedout');

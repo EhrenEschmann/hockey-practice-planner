@@ -22,7 +22,16 @@ Practices auto-save to Firebase so they follow you between devices. Without a co
 4. `cp js/firebase-config.example.js js/firebase-config.js` and paste the config in. (The file is git-ignored; putting it at the project root as `firebase-config.js` works too.)
 5. Reload: a **Sign in** button appears in the top bar.
 
-**Presentation mode / sharing with coaches.** Open practice details (**+ Practice**) and list your assistant coaches' Google emails under **Coach emails**, then hit **🔗 Copy coach link** and send it to them. A coach who opens the link signs in with Google and gets a thin read-only view of the practice — header, each drill's diagram, timing and notes — that updates live as you edit. The **📺 Present** button in the top bar opens the same view of your own practice in a new tab (works offline too) — the presentation is its own destination, with no way through to the editor. This needs the current [firestore.rules](firestore.rules) deployed.
+**Two share audiences.** Each practice has two independent, read-only share lists in **+ Practice**, each with its own link:
+
+| | Who | Link | Sees |
+|---|---|---|---|
+| **Coaches** | assistant coaches | 🔗 Coach link (`#view=…`) | the full plan — diagrams, animations, **coaching notes and assignments** |
+| **Team** | players' parents & grandparents | 🔗 Team link (`#team=…`) | the schedule and drill diagrams/animations, **without** coaching notes or the coaches line |
+
+**＋ from roster** fills either list from 👥 Team (coach emails / family contact emails). A viewer signs in with Google and sees only the practices they are listed on. **Only accounts in `OWNER_EMAILS` (js/main.js) get the practice-creation interface** — anyone else who opens the app root is told to use their share link. That is a UI gate; the real protection is [firestore.rules](firestore.rules): nobody can write another account's practices, and readers only ever read the practices whose lists carry their email.
+
+**Presentation mode.** Open practice details (**+ Practice**) and list your assistant coaches' Google emails under **Coach emails**, then hit **🔗 Coach link** and send it to them. A coach who opens the link signs in with Google and gets a thin read-only view of the practice — header, each drill's diagram, timing and notes — that updates live as you edit. The **📺 Present** button in the top bar opens the same view of your own practice in a new tab (works offline too) — the presentation is its own destination, with no way through to the editor. This needs the current [firestore.rules](firestore.rules) deployed.
 
 **Offline at the rink.** A service worker ([sw.js](sw.js)) caches the app and the viewer keeps a local copy of the last practice it loaded, so a coach who opens the share link once with internet can reopen it cold at the rink — drills, notes and animations all work, with an "Offline copy from …" banner. The strategy is network-first: whenever there *is* connectivity, every load fetches the latest deploy and the freshest practice, so updates are never missed. (Service workers need HTTPS or localhost, so offline only arms on real hosting, not on a LAN-IP dev server.)
 

@@ -1,5 +1,35 @@
 {
   "firestore": {
     "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      ".firebaserc",
+      "firestore.rules",
+      "**/.*",
+      ".git/**",
+      ".firebase/**",
+      ".github/**",
+      "**/node_modules/**",
+      "package.json",
+      "package-lock.json",
+      "serve.js",
+      "README.md",
+      "scripts/**"
+    ],
+    "headers": [
+      {
+        "//": "The app shell must revalidate so a deploy is picked up on the next online load.",
+        "source": "/(index.html|sw.js)",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "//": "Modules and styles: revalidate too — sw.js is network-first and serves the cache only when offline.",
+        "source": "**/*.@(js|css)",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ]
   }
 }

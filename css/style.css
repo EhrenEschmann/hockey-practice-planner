@@ -154,6 +154,12 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 #drill-list li button.has-notes{color:var(--accent-2)}
 #drill-list li button.open{background:var(--accent);color:#fff}
 #drill-list li.notes-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default}
+#drill-list li.intro-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default;display:block}
+.intro-box{border:1px solid var(--border);border-radius:6px;padding:8px;background:var(--panel-2)}
+.intro-box .row{margin-top:6px}
+.intro-box .row button{font-size:12px}
+.intro-box p{margin:8px 0 0}
+#drill-list li button.has-intro{color:#f59e0b}
 #drill-list li.notes-editor textarea{width:100%;font-size:12.5px}
 .swatches{display:flex;gap:4px;flex-wrap:wrap}
 .swatch{width:22px;height:22px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}

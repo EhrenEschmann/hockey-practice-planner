@@ -44,6 +44,11 @@ export async function firebaseBackend(config) {
     subscribePractice(uid, id, cb) {
       return fs.onSnapshot(fs.doc(col(uid), id), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err));
     },
+    // Intro clips: users/{uid}/practices/{pid}/clips/{drillId} — { mime, data (base64), secs, at }.
+    // One small document per clip, so a practice's own document stays light; read rules mirror the practice's.
+    async saveClip(uid, pid, did, clip) { await fs.setDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did), clip); },
+    async loadClip(uid, pid, did) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did)); return s.exists() ? s.data() : null; },
+    async removeClip(uid, pid, did) { await fs.deleteDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did)); },
     // The team roster: one document per user at users/{uid}/meta/roster.
     async loadRoster(uid) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'meta', 'roster')); return s.exists() ? s.data() : null; },
     async saveRoster(uid, r) { await fs.setDoc(fs.doc(db, 'users', uid, 'meta', 'roster'), r); },

@@ -6,6 +6,7 @@ import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrate
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
+import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, startRecording, blobToBase64, base64ToBlob } from './clips.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -108,6 +109,7 @@ function renderCanvas() {
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
   narrator = makeNarrator(drillCues(d, sim), text => { cueCaption.textContent = text; cueCaption.hidden = !text; });
+  if (d.intro) fetchClip(ownerFor(), store.practice.id, d.id); // ready in memory so ▶ can start it inside the tap
   fxLayer.innerHTML = '';
   const selObj = getObj(sel);
   objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths: drillPaths(), sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
@@ -1064,6 +1066,7 @@ let voiceOn = true;
 try { voiceOn = localStorage.getItem('hpp.voice') !== '0'; } catch { /* storage blocked: on */ }
 let voicePrimed = false;
 const hasCues = dr => dr.objects.some(o => isPlayer(o) && (o.startCue?.trim() || (o.path || []).some(pt => pt.cue?.trim())));
+const hasVoice = dr => (canSpeak && hasCues(dr)) || !!dr.intro; // anything the 🔊 toggle would silence
 /** Every cue in the drill with the playback second it fires at, in order. */
 function drillCues(dr, sm) {
   const out = [];
@@ -1090,6 +1093,39 @@ function speak(text) {
   speechSynthesis.speak(u);
 }
 function hushVoice() { stopReading(); if (canSpeak) speechSynthesis.cancel(); }
+
+// ----- intro clips: the coach's recorded voice, played before a drill's animation (see js/clips.js) -----
+const clipMem = new Map(); // clip key → { url, mime, secs }: clips already fetched this session, ready to play on a tap
+const ownerFor = () => store.data.ownerUid || 'local';
+/** Fetch a clip into memory: this device's IndexedDB first, then the owner's cloud copy (cached locally for the rink). */
+async function fetchClip(owner, pid, did) {
+  const key = clipKey(owner, pid, did);
+  if (clipMem.has(key)) return clipMem.get(key);
+  let rec = null;
+  try { rec = await idbGetClip(key); } catch { rec = null; }
+  if (!rec && cloudBackend?.loadClip && cloudSync?.user) {
+    try {
+      const c = await cloudBackend.loadClip(owner, pid, did);
+      if (c?.data) { rec = { mime: c.mime, blob: base64ToBlob(c.data, c.mime), secs: c.secs }; idbPutClip(key, rec).catch(() => {}); }
+    } catch { rec = null; }
+  }
+  if (!rec?.blob) return null;
+  if (clipMem.has(key)) return clipMem.get(key); // a parallel fetch won the race
+  const entry = { url: URL.createObjectURL(rec.blob), mime: rec.mime, secs: rec.secs };
+  clipMem.set(key, entry);
+  return entry;
+}
+function forgetClip(key) { const e = clipMem.get(key); if (e) { URL.revokeObjectURL(e.url); clipMem.delete(key); } }
+/** Play a fetched clip; onEnd fires once when it finishes, fails or is stopped. */
+function playClip(entry, { onEnd }) {
+  const audio = new Audio(entry.url);
+  let done = false;
+  const finish = () => { if (done) return; done = true; onEnd(); };
+  audio.onended = finish; audio.onerror = finish;
+  audio.play().catch(finish);
+  return { stop() { if (done) return; audio.pause(); finish(); }, cancelled: false };
+}
+let introPlaying = null; // the Drills panel's ▶ Listen preview
 
 // ----- station rules: a zone's title and constraints, read out as a list -----
 const zoneLines = z => String(z.constraints || '').split('\n').map(x => x.trim()).filter(Boolean);
@@ -1157,6 +1193,7 @@ function tick(now) {
 function togglePlay() {
   if (isPSDrill(drill())) { psView().toggle(); renderAnimBar(); return; } // power skating mode: ▶ plays the technique elements
   if (returning) cancelReturn();
+  if (anim.intro) { cancelIntro(); renderAnimBar(); return; } // ⏸ during the intro skips it and stays parked at the start
   if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); fxLayer.innerHTML = ''; hushVoice(); }
   else {
     if (totalDuration() <= 0) return;
@@ -1166,17 +1203,23 @@ function togglePlay() {
     if (pickTarget) { pickTarget = null; $('#hint').textContent = HINTS[tool] || ''; }
     if (sel) select(null);
     if (anim.t >= totalDuration()) anim.t = 0;
-    anim.fresh = anim.t === 0;
-    anim.playing = true; anim.last = performance.now();
-    anim.raf = requestAnimationFrame(tick);
+    const go = () => { anim.fresh = anim.t === 0; anim.playing = true; anim.last = performance.now(); anim.raf = requestAnimationFrame(tick); renderAnimBar(); };
+    // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
+    const d = drill();
+    const clip = anim.t === 0 && voiceOn && d.intro ? clipMem.get(clipKey(ownerFor(), store.practice.id, d.id)) : null;
+    if (!clip) { go(); return; }
+    cueCaption.textContent = '🎙 Coach’s intro…'; cueCaption.hidden = false;
+    anim.intro = playClip(clip, { onEnd: () => { const skip = anim.intro?.cancelled; anim.intro = null; cueCaption.hidden = true; if (skip) renderAnimBar(); else go(); } });
   }
   renderAnimBar();
 }
+function cancelIntro() { if (anim.intro) { anim.intro.cancelled = true; anim.intro.stop(); } }
 
 /** Immediate reset to the start (used when switching drills, deleting, etc.). */
 function stopAnim() {
   if (returning) cancelReturn();
   anim.playing = false; cancelAnimationFrame(anim.raf); anim.t = 0;
+  cancelIntro();
   narrator.clear();
   if (psViewInst && isPSDrill(drill())) psViewInst.stop();
   renderCanvas(); renderAnimBar();
@@ -1214,15 +1257,15 @@ function renderAnimBar() {
   }
   $('#timeline').disabled = false;
   const T = totalDuration();
-  $('#btn-play').innerHTML = icon(anim.playing ? 'pause' : 'play');
+  $('#btn-play').innerHTML = icon(anim.playing || anim.intro ? 'pause' : 'play');
   $('#btn-play').disabled = T <= 0;
   const tl = $('#timeline');
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
   if (document.activeElement !== $('#anim-speed')) $('#anim-speed').value = String(drillSpeed());
   $('#anim-trails').checked = drillPaths();
-  $('#anim-voice').hidden = !canSpeak || !hasCues(drill());
+  $('#anim-voice').hidden = !hasVoice(drill());
   $('#anim-voice').classList.toggle('active', voiceOn);
-  $('#time-display').textContent = returning ? '↩ skating back' : `${Math.min(anim.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
+  $('#time-display').textContent = returning ? '↩ skating back' : anim.intro ? '🎙 intro…' : `${Math.min(anim.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
   // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
   const impacts = sim ? sim.contacts() : [];
   const linked = [...new Set(impacts.flatMap(c => [c.a, c.b]))]
@@ -1514,6 +1557,55 @@ $('#btn-family-emails').addEventListener('click', () =>
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
 let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
 
+let introOpenFor = null; // drill whose 🎙 recorder is open in the Drills panel
+let introRec = null;      // an in-progress recording: { drillId, stop(), since, timer }
+/** The recorder row's buttons: record / stop / listen / delete a drill's intro clip. */
+async function introAction(iact, li) {
+  const d = store.practice.drills.find(x => x.id === introOpenFor); if (!d) return;
+  const pid = store.practice.id, key = clipKey(ownerFor(), pid, d.id);
+  const status = msg => { const el = $('#drill-list .intro-status'); if (el) el.textContent = msg; };
+  if (iact === 'rec') {
+    if (introRec) return;
+    try { introRec = await startRecording({ maxSecs: 90 }); }
+    catch (e) { status(`Microphone not available: ${e?.message || e}`); return; }
+    introRec.drillId = d.id;
+    renderPlan();
+    introRec.timer = setInterval(() => {
+      const t = (performance.now() - introRec.since) / 1000;
+      const b = $('#drill-list [data-iact="stop"]'); if (b) b.textContent = `■ Stop (${t.toFixed(0)} s)`;
+      if (t >= 90) introAction('stop', li);
+    }, 500);
+  } else if (iact === 'stop') {
+    if (!introRec) return;
+    const r = introRec; introRec = null; clearInterval(r.timer);
+    const { blob, mime, secs } = await r.stop();
+    if (!blob.size || secs < 0.5) { renderPlan(); status('Nothing recorded.'); return; }
+    forgetClip(key);
+    try { await idbPutClip(key, { mime, blob, secs }); } catch { /* the cloud copy still serves this device */ }
+    let where = 'on this device';
+    if (cloudBackend?.saveClip && cloudSync?.user) {
+      try { await cloudBackend.saveClip(ownerFor(), pid, d.id, { mime, data: await blobToBase64(blob), secs, at: Date.now() }); where = 'to the cloud'; }
+      catch (e) { where = `on this device only — cloud save failed: ${e?.message || e}`; }
+    }
+    commit(() => { d.intro = { secs, mime, size: blob.size, at: Date.now() }; });
+    fetchClip(ownerFor(), pid, d.id);
+    renderPlan();
+    status(`Saved ${where} · ${secs.toFixed(1)} s`);
+  } else if (iact === 'play') {
+    if (introPlaying) { introPlaying.stop(); return; }
+    const entry = await fetchClip(ownerFor(), pid, d.id);
+    if (!entry) { status('No clip available on this device.'); return; }
+    introPlaying = playClip(entry, { onEnd: () => { introPlaying = null; renderPlan(); } });
+    introPlaying.drillId = d.id;
+    renderPlan();
+  } else if (iact === 'del') {
+    forgetClip(key);
+    idbDelClip(key).catch(() => {});
+    if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(ownerFor(), pid, d.id).catch(() => {});
+    commit(() => { delete d.intro; });
+    renderPlan();
+  }
+}
 function renderPlan() {
   const p = store.practice;
   const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
@@ -1521,6 +1613,7 @@ function renderPlan() {
   const list = $('#drill-list');
   if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
   const btns = d => `
+      <button data-act="intro" class="${d.intro ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="Intro in your voice — recorded here, played before the drill when ▶ is pressed">🎙</button>
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
   list.innerHTML = p.drills.map((d, i) => {
@@ -1541,7 +1634,17 @@ function renderPlan() {
     const notes = notesOpenFor === d.id
       ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea></li>`
       : '';
-    return row + notes;
+    const recording = introRec?.drillId === d.id;
+    const intro = introOpenFor === d.id ? `<li class="intro-editor"><div class="intro-box">
+      <div class="intro-status muted small">${recording ? '● Recording — speak now' : d.intro ? `Intro recorded · ${(+d.intro.secs || 0).toFixed(1)} s${canPlay(d.intro.mime) ? '' : ' · this browser can’t play that format'}` : canRecord() ? 'No intro yet — record yourself introducing this drill.' : 'This browser can’t record audio.'}</div>
+      <div class="row">
+        ${recording ? '<button data-iact="stop" class="danger">■ Stop</button>' : `<button data-iact="rec" ${canRecord() ? '' : 'disabled'}>● ${d.intro ? 'Re-record' : 'Record'}</button>`}
+        <button data-iact="play" ${d.intro && !recording ? '' : 'disabled'}>${introPlaying?.drillId === d.id ? '■ Stop' : '▶ Listen'}</button>
+        <button data-iact="del" ${d.intro && !recording ? '' : 'disabled'}>✕ Delete</button>
+      </div>
+      <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here and on the coaches’ phones — unless 🔊 voice is muted. Up to 90 s.</p>
+    </div></li>` : '';
+    return row + notes + intro;
   }).join('');
 }
 
@@ -1550,7 +1653,7 @@ let dragDrill = null; // index being dragged
 const clearDropMarks = () => $$('#drill-list li').forEach(li => li.classList.remove('dragging', 'drop-above', 'drop-below'));
 $('#drill-list').addEventListener('dragstart', e => {
   const li = e.target.closest('li');
-  if (!li || li.classList.contains('editing') || li.classList.contains('notes-editor')) { e.preventDefault(); return; }
+  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor')) { e.preventDefault(); return; }
   dragDrill = +li.dataset.index;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', ''); // Firefox requires data for a drag to start
@@ -1563,7 +1666,7 @@ $('#drill-list').addEventListener('dragover', e => {
   clearDropMarks();
   $(`#drill-list li[data-index="${dragDrill}"]:not(.notes-editor)`)?.classList.add('dragging');
   const li = e.target.closest('li');
-  if (!li || li.classList.contains('notes-editor') || +li.dataset.index === dragDrill) return;
+  if (!li || li.matches('.notes-editor, .intro-editor') || +li.dataset.index === dragDrill) return;
   const r = li.getBoundingClientRect();
   li.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
 });
@@ -1574,7 +1677,7 @@ $('#drill-list').addEventListener('drop', e => {
   const p = store.practice;
   const from = dragDrill;
   dragDrill = null; clearDropMarks();
-  if (!li || li.classList.contains('notes-editor')) return;
+  if (!li || li.matches('.notes-editor, .intro-editor')) return;
   const r = li.getBoundingClientRect();
   let to = +li.dataset.index + (e.clientY < r.top + r.height / 2 ? 0 : 1);
   if (to > from) to--;
@@ -1610,7 +1713,7 @@ $('#drill-list').addEventListener('keydown', e => {
 // Double-click a drill row: rename it inline (same as the ✎ button).
 $('#drill-list').addEventListener('dblclick', e => {
   const li = e.target.closest('li');
-  if (!li || li.classList.contains('editing') || li.classList.contains('notes-editor')) return;
+  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor')) return;
   if (e.target.closest('button,input,textarea')) return;
   const i = +li.dataset.index;
   if (!store.practice.drills[i]) return;
@@ -1628,7 +1731,9 @@ $('#drill-list').addEventListener('click', e => {
   const act = btn?.dataset.act;
   btn?.blur(); // a focused list button must not trip the "typing in the list" rebuild guard
   const p = store.practice;
-  if (li.classList.contains('notes-editor')) return;
+  if (li.matches('.intro-editor')) { introAction(btn?.dataset.iact, li); return; }
+  if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; renderPlan(); return; }
+  if (li.matches('.notes-editor, .intro-editor')) return;
   finishActive();
   if (act === 'save' || act === 'cancel') {
     const row = $('#drill-list li.editing');
@@ -1703,6 +1808,7 @@ $('#library').addEventListener('click', e => {
   if (!src) return;
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid();
+  delete copy.intro; // the recorded intro stays with the original
   copy.objects = cloneObjects(migrateDrill(copy).objects);
   const p = store.practice;
   commit(() => { p.drills.push(copy); store.drillIndex = p.drills.length - 1; });
@@ -2286,7 +2392,7 @@ $('#btn-create-practice').addEventListener('click', () => {
 $('#btn-dup-practice').addEventListener('click', () => {
   const copy = JSON.parse(JSON.stringify(store.practice));
   copy.id = uid(); copy.date = new Date().toISOString().slice(0, 10);
-  copy.drills.forEach(d => { d.id = uid(); d.objects = cloneObjects(d.objects); });
+  copy.drills.forEach(d => { d.id = uid(); delete d.intro; d.objects = cloneObjects(d.objects); });
   finishActive(); store.addPractice(copy); sel = null; stopAnim(); renderAll();
 });
 $('#btn-del-practice').addEventListener('click', () => {
@@ -2313,7 +2419,7 @@ $('#file-import').addEventListener('change', async e => {
     const list = data.practice ? [data.practice] : data.practices ? data.practices : Array.isArray(data) ? data : [data];
     for (const p of list) {
       if (!p || !Array.isArray(p.drills)) throw new Error('Not a practice file');
-      p.id = uid(); p.drills.forEach(d => { d.id = uid(); d.view = d.view || { ...VIEWS.full }; d.objects = cloneObjects(migrateDrill(d).objects); });
+      p.id = uid(); p.drills.forEach(d => { d.id = uid(); delete d.intro; d.view = d.view || { ...VIEWS.full }; d.objects = cloneObjects(migrateDrill(d).objects); });
       finishActive(); store.addPractice(p); // each import is an edit, so it is auto-saved to the cloud too
     }
     sel = null; stopAnim(); renderAll();
@@ -2381,6 +2487,7 @@ $('#btn-print').addEventListener('click', () => {
 // link, sign in with Google, and read the practice live from the owner's cloud account.
 let presenting = false;
 let presentAudience = 'coach'; // 'coach' = full plan; 'team' = families: schedule and drills, no coaching notes
+let presentOwner = 'local';    // whose account the shown practice (and its intro clips) belongs to
 let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
 
@@ -2422,7 +2529,7 @@ function presentHTML(p) {
           <span class="pr-break"></span>
           <select class="pr-speed" title="Playback speed">${['0.25', '0.5', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
-          ${canSpeak && hasCues(d) ? `<button class="pr-voice wp-toggle ${voiceOn ? 'active' : ''}" title="${voiceOn ? 'Voice cues on — click to mute' : 'Voice cues muted — click to hear them'}">🔊 voice</button>` : ''}
+          ${hasVoice(d) ? `<button class="pr-voice wp-toggle ${voiceOn ? 'active' : ''}" title="${voiceOn ? 'Voice cues on — click to mute' : 'Voice cues muted — click to hear them'}">🔊 voice</button>` : ''}
           <span class="pr-impact"></span>
         </div>
         <div class="pr-cue" hidden></div>
@@ -2479,7 +2586,7 @@ const presentPSTiles = []; // little looping 3D viewers on power skating cards
 let presentPSObserver = null; // runs a tile's loop only while it is actually on screen
 function stopPresentAnims() {
   hushVoice();
-  for (const a of presentAnims) cancelAnimationFrame(a.raf);
+  for (const a of presentAnims) { cancelAnimationFrame(a.raf); if (a.intro) { a.intro.cancelled = true; a.intro.stop(); } }
   presentAnims.length = 0;
   for (const v of presentPSTiles) v.stop();
   presentPSTiles.length = 0;
@@ -2518,6 +2625,7 @@ function wirePresentAnims(p) {
     presentPSObserver.observe(fig);
   }
   const rinkStr = rinkSVG();
+  for (const d of p.drills) if (d.intro) fetchClip(presentOwner, p.id, d.id); // intros ready in memory before the first tap
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     wireRules(sec); // rules-only stations have no animation but do have something to say
     const d = p.drills.find(x => x.id === sec.dataset.did);
@@ -2529,7 +2637,20 @@ function wirePresentAnims(p) {
     const dcur = { ...d };
     let sm = makeSim(dcur);
     let T = sm.duration();
-    if (T <= 0) { bar.remove(); continue; } // nothing moves in this drill
+    if (T <= 0) { // nothing moves in this drill — but a recorded intro still gets a play button
+      if (d.intro) {
+        bar.innerHTML = `<button class="pr-play" title="Play the coach’s intro">${icon('play')}</button><span class="muted small">🎙 coach’s intro</span>`;
+        const ib = bar.querySelector('.pr-play'); let cur = null;
+        ib.addEventListener('click', async () => {
+          if (cur) { cur.stop(); return; }
+          const entry = await fetchClip(presentOwner, p.id, d.id);
+          if (!entry) return;
+          ib.innerHTML = icon('pause');
+          cur = playClip(entry, { onEnd: () => { cur = null; ib.innerHTML = icon('play'); } });
+        });
+      } else bar.remove();
+      continue;
+    }
     let full = T; // cards park on the final positions; ▶ restarts from the top
     let fx = splitLayers(fig, svgEl);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
@@ -2573,7 +2694,8 @@ function wirePresentAnims(p) {
       animateFrame(dcur, sm, fig, fx, a.t, a.playing); // the figure spans both layers
       tl.value = Math.min(a.t, T);
       disp.textContent = `${Math.min(a.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
-      if (shown !== a.playing) { shown = a.playing; btn.innerHTML = icon(a.playing ? 'pause' : 'play'); btn.title = a.playing ? 'Pause' : 'Watch the drill'; }
+      const busy = a.playing || !!a.intro;
+      if (shown !== busy) { shown = busy; btn.innerHTML = icon(busy ? 'pause' : 'play'); btn.title = busy ? 'Pause' : 'Watch the drill'; }
     };
     const step = now => {
       if (!a.playing) return;
@@ -2586,15 +2708,22 @@ function wirePresentAnims(p) {
       if (a.playing) a.raf = requestAnimationFrame(step);
     };
     btn.addEventListener('click', () => {
-      a.playing = !a.playing;
-      if (a.playing) { primeVoice(); if (a.t >= full) a.t = 0; a.fresh = a.t === 0; a.last = performance.now(); a.raf = requestAnimationFrame(step); }
-      else { cancelAnimationFrame(a.raf); voice.clear(); }
+      if (a.intro) { a.intro.cancelled = true; a.intro.stop(); return; } // ⏸ during the intro skips it, parked at the start
+      if (a.playing) { a.playing = false; cancelAnimationFrame(a.raf); voice.clear(); draw(); return; }
+      primeVoice();
+      if (a.t >= full) a.t = 0;
+      const go = () => { a.fresh = a.t === 0; a.playing = true; a.last = performance.now(); a.raf = requestAnimationFrame(step); draw(); };
+      // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
+      const clip = a.t === 0 && voiceOn && d.intro ? clipMem.get(clipKey(presentOwner, p.id, d.id)) : null;
+      if (!clip) { go(); return; }
+      cueEl.textContent = '🎙 Coach’s intro…'; cueEl.hidden = false;
+      a.intro = playClip(clip, { onEnd: () => { const skip = a.intro?.cancelled; a.intro = null; cueEl.hidden = true; if (skip) draw(); else go(); } });
       draw();
     });
     tl.addEventListener('input', () => { a.t = +tl.value; draw(); });
     // On a phone the diagram itself is the biggest play button there is.
     fig.addEventListener('click', () => btn.click());
-    sec._pause = () => { if (a.playing) btn.click(); }; // leaving the drill in rink mode parks its animation
+    sec._pause = () => { if (a.intro) { a.intro.cancelled = true; a.intro.stop(); } if (a.playing) btn.click(); }; // leaving the drill in rink mode parks it
     draw();
   }
 }
@@ -2617,6 +2746,7 @@ function refreshPresent() {
   $('#present-user').textContent = cloudSync?.user?.name || '';
   const [, ownerUid, pid] = m;
   const mine = store.data.practices.find(x => x.id === pid);
+  presentOwner = mine ? ownerFor() : ownerUid;
   if (mine) { presentUnsub?.(); presentUnsub = null; presentKey = null; presentDoc(mine); return; } // own practice: straight from the store
   // Rink mode: a previously viewed copy is kept on this device, shown immediately, and replaced live when online.
   const key = `${ownerUid}/${pid}`;

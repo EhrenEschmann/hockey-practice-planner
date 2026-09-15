@@ -6,7 +6,7 @@ import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrate
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
-import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, startRecording, blobToBase64, base64ToBlob } from './clips.js';
+import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, phoneFriendly, startRecording, blobToBase64, base64ToBlob } from './clips.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1122,9 +1122,10 @@ function forgetClip(key) { const e = clipMem.get(key); if (e) { URL.revokeObject
 function playClip(entry, { onEnd }) {
   const audio = new Audio(entry.url);
   let done = false;
-  const finish = () => { if (done) return; done = true; onEnd(); };
-  audio.onended = finish; audio.onerror = finish;
-  audio.play().catch(finish);
+  const finish = err => { if (done) return; done = true; onEnd(err || null); };
+  audio.onended = () => finish();
+  audio.onerror = () => finish(`can’t decode ${entry.mime || 'this clip'} on this device`);
+  audio.play().catch(e => finish(e?.name === 'NotAllowedError' ? 'the browser blocked audio until you tap again' : (e?.message || 'playback failed')));
   return { stop() { if (done) return; audio.pause(); finish(); }, cancelled: false };
 }
 let introPlaying = null; // the Drills panel's ▶ Listen preview
@@ -1209,9 +1210,14 @@ function togglePlay() {
     // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
     const d = drill();
     const clip = anim.t === 0 && voiceOn && d.intro ? clipMem.get(keyFor(ownerFor(), store.practice.id, d)) : null;
-    if (!clip || !canPlay(clip.mime)) { go(); return; }
+    if (!clip) { go(); return; }
+    if (!canPlay(clip.mime)) { cueCaption.textContent = `🎙 intro can’t play here (${clip.mime})`; cueCaption.hidden = false; setTimeout(() => { cueCaption.hidden = true; }, 4000); go(); return; }
     cueCaption.textContent = '🎙 Coach’s intro…'; cueCaption.hidden = false;
-    anim.intro = playClip(clip, { onEnd: () => { const skip = anim.intro?.cancelled; anim.intro = null; cueCaption.hidden = true; if (skip) renderAnimBar(); else go(); } });
+    anim.intro = playClip(clip, { onEnd: err => {
+      const skip = anim.intro?.cancelled; anim.intro = null;
+      if (err) { cueCaption.textContent = `🎙 intro didn’t play — ${err}`; setTimeout(() => { cueCaption.hidden = true; }, 4000); } else cueCaption.hidden = true;
+      if (skip) renderAnimBar(); else go();
+    } });
   }
   renderAnimBar();
 }
@@ -1665,6 +1671,7 @@ function renderPlan() {
     const recording = introRec?.drillId === d.id;
     const intro = introOpenFor === d.id ? `<li class="intro-editor"><div class="intro-box">
       <div class="intro-status muted small">${recording ? '● Recording — speak now' : d.intro ? `Intro recorded · ${(+d.intro.secs || 0).toFixed(1)} s${d.intro.size ? ` · ${Math.max(1, Math.round(d.intro.size / 1024))} KB` : ''}${d.intro.cloud === true ? ' · ☁ in the cloud' : ''}${canPlay(d.intro.mime) ? '' : ' · this browser can’t play that format'}` : canRecord() ? 'No intro yet — record yourself introducing this drill.' : 'This browser can’t record audio.'}</div>
+      ${d.intro && !recording && !phoneFriendly(d.intro.mime) ? `<div class="intro-warn warn small">⚠ Recorded in a format iPhones can’t play (${escHtml(d.intro.mime)}) — press Re-record; this version records one that plays everywhere.</div>` : ''}
       ${d.intro && !recording && d.intro.cloud !== true ? `<div class="intro-warn warn small">⚠ ${d.intro.cloud === false ? `Not in the cloud — coaches can’t hear it${d.intro.cloudError ? ` (${escHtml(d.intro.cloudError)}${cloudHint(d.intro.cloudError)})` : ''}` : 'Cloud copy unknown — recorded before this version'}</div>` : ''}
       <div class="row">
         ${recording ? '<button data-iact="stop" class="danger">■ Stop</button>' : `<button data-iact="rec" ${canRecord() ? '' : 'disabled'}>● ${d.intro ? 'Re-record' : 'Record'}</button>`}
@@ -2755,9 +2762,13 @@ function wirePresentAnims(p) {
         if (a.t === 0 && voiceOn && d.intro) { cueEl.textContent = '🎙 intro not downloaded yet — tap ↻ to resync'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 3500); }
         go(); return;
       }
-      if (!canPlay(clip.mime)) { cueEl.textContent = '🎙 intro can’t play on this device'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 3000); go(); return; }
+      if (!canPlay(clip.mime)) { cueEl.textContent = `🎙 intro can’t play on this device (${clip.mime})`; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 4000); go(); return; }
       cueEl.textContent = '🎙 Coach’s intro…'; cueEl.hidden = false;
-      a.intro = playClip(clip, { onEnd: () => { const skip = a.intro?.cancelled; a.intro = null; cueEl.hidden = true; if (skip) draw(); else go(); } });
+      a.intro = playClip(clip, { onEnd: err => {
+        const skip = a.intro?.cancelled; a.intro = null;
+        if (err) { cueEl.textContent = `🎙 intro didn’t play — ${err}`; setTimeout(() => { cueEl.hidden = true; }, 4000); } else cueEl.hidden = true;
+        if (skip) draw(); else go();
+      } });
       draw();
     });
     tl.addEventListener('input', () => { a.t = +tl.value; draw(); });

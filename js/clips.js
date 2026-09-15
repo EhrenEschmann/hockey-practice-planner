@@ -34,11 +34,22 @@ export const canRecord = () => !!(navigator.mediaDevices?.getUserMedia && window
  * moment recording starts — so startRecording() tries each format for real and keeps the first that
  * actually delivers audio.
  */
-// Opus first: it stays clear for speech at 12 kb/s (~95 KB a minute), less than half of what AAC needs
-// (Chrome's AAC encoder floors at ~29 kb/s). AAC is the fallback where a browser can't record Opus (Safari).
-const FORMATS = ['audio/mp4;codecs=opus', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm'];
+// Opus in WebM first: clear speech at 12 kb/s (~95 KB a minute) and it plays on Chrome, Android and
+// Safari/iPhone alike. AAC (about twice the size) is the fallback where a browser can't record Opus —
+// Safari's own recorder. Opus in *MP4* is deliberately absent: Chrome writes it happily, iPhones can't play it.
+const FORMATS = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4'];
 const FORMAT_KEY = 'hpp.recmime'; // the format that worked last time on this browser
-export const canPlay = mime => !!document.createElement('audio').canPlayType(String(mime || '').split(';')[0]);
+/** Can this browser decode a clip? Asks with the real codec ("audio/mp4; codecs=\"opus\""), since a container alone tells little: Safari plays AAC in mp4 but not Opus in it. */
+/** True when the format plays on every phone we care about (WebM/Ogg Opus or AAC); Opus-in-MP4 fails on iPhones. */
+export const phoneFriendly = mime => /webm|ogg|mp4a|aac/i.test(String(mime || ''));
+export function canPlay(mime) {
+  const m = String(mime || '').trim();
+  if (!m) return false;
+  const [container, ...params] = m.split(';').map(x => x.trim());
+  const codecs = params.map(x => x.match(/^codecs=\"?([^\"]+)\"?$/i)?.[1]).find(Boolean);
+  const a = document.createElement('audio');
+  return !!(codecs ? a.canPlayType(`${container}; codecs="${codecs}"`) : a.canPlayType(container));
+}
 
 /** Start recording from the microphone; `stop()` resolves { blob, mime, secs }. Stops itself at maxSecs. */
 export async function startRecording({ maxSecs = 90 } = {}) {
@@ -46,6 +57,7 @@ export async function startRecording({ maxSecs = 90 } = {}) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   let known = null;
   try { known = localStorage.getItem(FORMAT_KEY); } catch { /* fine */ }
+  if (known && !FORMATS.includes(known)) known = null; // a format we no longer want (e.g. Opus-in-MP4 from an earlier version)
   const order = [...new Set([...(known ? [known] : []), ...FORMATS.filter(m => MediaRecorder.isTypeSupported?.(m)), ''])];
   let rec = null, chunks = [], t0 = 0;
   const tried = [];

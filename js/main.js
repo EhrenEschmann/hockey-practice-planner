@@ -1039,12 +1039,39 @@ function primeVoice() {
 }
 function speak(text) {
   if (!canSpeak || !voiceOn) return;
+  stopReading();
   speechSynthesis.cancel(); // a cue belongs to its waypoint — an earlier one still talking must not push it late
   const u = new SpeechSynthesisUtterance(text);
   u.lang = document.documentElement.lang || 'en';
   speechSynthesis.speak(u);
 }
-function hushVoice() { if (canSpeak) speechSynthesis.cancel(); }
+function hushVoice() { stopReading(); if (canSpeak) speechSynthesis.cancel(); }
+
+// ----- station rules: a zone's title and constraints, read out as a list -----
+const zoneLines = z => String(z.constraints || '').split('\n').map(x => x.trim()).filter(Boolean);
+/** Zones in a drill that carry constraints — the "stations" of a rules-only drill. */
+const zoneRules = d => d.objects.filter(o => o.type === 'zone' && zoneLines(o).length).map(o => ({ label: o.label || 'Zone', color: o.color || ZONE_COLORS[0], lines: zoneLines(o) }));
+let reading = null; // the list currently being read, so a second tap (or leaving the drill) can stop it
+function stopReading() { const r = reading; reading = null; if (r) { if (canSpeak) speechSynthesis.cancel(); r.done(); } }
+/**
+ * Read `lines` one after another (each a sentence, so the voice pauses between them).
+ * onLine(k) fires as line k starts — used to highlight it; onDone when finished or stopped.
+ */
+function readAloud(lines, { onLine = () => {}, onDone = () => {} } = {}) {
+  stopReading();
+  if (!canSpeak || !lines.length) { onDone(); return; }
+  primeVoice();
+  speechSynthesis.cancel();
+  const me = { done: onDone };
+  reading = me;
+  lines.forEach((text, k) => {
+    const u = new SpeechSynthesisUtterance(/[.!?…]$/.test(text) ? text : `${text}.`);
+    u.lang = document.documentElement.lang || 'en';
+    u.onstart = () => { if (reading === me) onLine(k); };
+    if (k === lines.length - 1) u.onend = () => { if (reading === me) { reading = null; onDone(); } };
+    speechSynthesis.speak(u);
+  });
+}
 function setVoice(on) {
   voiceOn = on;
   try { localStorage.setItem('hpp.voice', on ? '1' : '0'); } catch { /* fine */ }
@@ -1664,7 +1691,8 @@ const PROPS = {
   obstacle: [['label', 'text', 'Label'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   raisedpad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   jumppad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
-  zone: [['label', 'text', 'Label'], ['color', 'zoneswatch', 'Color'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)']],
+  zone: [['label', 'text', 'Title'], ['color', 'zoneswatch', 'Color'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)'],
+    ['constraints', 'textarea', 'Constraints — one per line. Drawn in the zone, listed under the drill, and read aloud in the viewer']],
   barricade: [],
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
@@ -1682,6 +1710,7 @@ function renderProps() {
     let input;
     const v = o[key] ?? '';
     if (kind === 'text') input = `<input data-prop="${key}" value="${escHtml(v)}">`;
+    else if (kind === 'textarea') return `<label class="field"><span>${label}</span><textarea data-prop="${key}" rows="5" placeholder="e.g. 2 touches max&#10;No passes back&#10;Score only from below the dots">${escHtml(v)}</textarea></label>`;
     else if (kind === 'number') input = `<input data-prop="${key}" type="number" step="any" value="${escHtml(v)}">`;
     else if (kind === 'checkbox') input = `<input data-prop="${key}" type="checkbox" ${v ? 'checked' : ''}>`;
     else if (kind === 'color') input = `<input data-prop="${key}" type="color" value="${escHtml(v || '#000000')}">`;
@@ -1761,6 +1790,7 @@ function renderProps() {
   }
   if (o.type === 'zone') {
     extra.push(`<button data-act="focus">Focus view on zone</button>`);
+    if (canSpeak && zoneLines(o).length) extra.push(`<button data-act="readzone" title="Hear the title and constraints the way the viewer reads them">🔊 Read aloud</button>`);
     extra.push(`<button data-act="fitdrill" title="Uniformly scale and centre everything in this drill so it fits inside this zone — paths, equipment, passes and shots included">⇲ Resize drill into zone</button>`);
   }
   if (o.type === 'net') {
@@ -2007,6 +2037,7 @@ propsBody.addEventListener('click', e => {
     case 'clearpath': commit(() => o.path = []); break;
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
+    case 'readzone': readAloud([o.label || 'Zone', ...zoneLines(o)]); break;
     case 'rot90': commit(() => o.rot = ((o.rot || 0) + 90) % 360); break;
     case 'addgoalie': { const g = { id: uid(), ...makeGoalie(o) }; commit(() => drill().objects.push(g)); select(g.id); renderProps(); break; }
     case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
@@ -2225,6 +2256,7 @@ $('#btn-print').addEventListener('click', () => {
       <div class="p-drill">
         <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clock(at)}</span>` : ''}</div>
         ${standaloneSVG(d, rink, SVG_STYLE)}
+        ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </div>`;
   }).join('');
@@ -2291,12 +2323,35 @@ function presentHTML(p) {
           <span class="pr-impact"></span>
         </div>
         <div class="pr-cue" hidden></div>
+        ${rulesHTML(d)}
         ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </section>`;
     }).join('')}
     ${startMin != null ? `<section class="pr-drill"><header><b>* Dismissal</b><span class="pr-time">${clock(startMin + total)}</span></header></section>` : ''}`;
 }
 
+/** The stations' titles and constraints under a drill card, with a button that reads them out in order. */
+function rulesHTML(d) {
+  const zones = zoneRules(d);
+  if (!zones.length) return '';
+  let k = 0;
+  return `<div class="pr-rules">
+    <div class="pr-rules-head"><b>${zones.length > 1 ? 'Stations' : 'Rules'}</b>${canSpeak ? '<button class="pr-read wp-toggle" title="Read the title and constraints aloud, one at a time">🔊 Read rules</button>' : ''}</div>
+    ${zones.map(z => `<div class="pr-rule" style="border-color:${escHtml(z.color)}"><div class="pr-rule-title" data-line="${k++}">${escHtml(z.label)}</div>
+      <ol>${z.lines.map(l => `<li data-line="${k++}">${escHtml(l)}</li>`).join('')}</ol></div>`).join('')}
+  </div>`;
+}
+function wireRules(sec) {
+  const btn = sec.querySelector('.pr-read');
+  if (!btn) return;
+  const lines = [...sec.querySelectorAll('[data-line]')];
+  const idle = () => { btn.classList.remove('reading'); btn.textContent = '🔊 Read rules'; lines.forEach(l => l.classList.remove('speaking')); };
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('reading')) { stopReading(); return; }
+    btn.classList.add('reading'); btn.textContent = '■ Stop';
+    readAloud(lines.map(l => l.textContent), { onLine: k => lines.forEach((l, i) => l.classList.toggle('speaking', i === k)), onDone: idle });
+  });
+}
 function presentDoc(p) {
   $('#present-title').textContent = practiceLabel(p) + (presentAudience === 'team' ? ' · team view' : '');
   $('#present-body').innerHTML = presentHTML(p);
@@ -2320,6 +2375,7 @@ const presentAnims = [];
 const presentPSTiles = []; // little looping 3D viewers on power skating cards
 let presentPSObserver = null; // runs a tile's loop only while it is actually on screen
 function stopPresentAnims() {
+  hushVoice();
   for (const a of presentAnims) cancelAnimationFrame(a.raf);
   presentAnims.length = 0;
   for (const v of presentPSTiles) v.stop();
@@ -2360,6 +2416,7 @@ function wirePresentAnims(p) {
   }
   const rinkStr = rinkSVG();
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
+    wireRules(sec); // rules-only stations have no animation but do have something to say
     const d = p.drills.find(x => x.id === sec.dataset.did);
     const fig = sec.querySelector('.pr-fig');
     let svgEl = fig?.querySelector(':scope > svg');
@@ -2543,6 +2600,7 @@ function showDrill(i) {
   const cards = presentCards();
   if (!cards.length) return;
   presentIndex = Math.max(0, Math.min(cards.length - 1, i));
+  if (cards[presentIndex]?.classList.contains('current') === false) stopReading(); // moving to another drill
   cards.forEach((c, k) => {
     const cur = k === presentIndex;
     if (!cur && presentMode === 'focus') c._pause?.();

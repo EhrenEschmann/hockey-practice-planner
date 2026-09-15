@@ -25,6 +25,21 @@ function arrowHead(dense, color, size = 2.2) {
 }
 
 /** Numbered waypoint badges (shown while a puck is selected, or a player is triggered by a waypoint). */
+/** A zone's constraints as bullet lines word-wrapped to its width, cut to what fits under the title. */
+function zoneRuleLines(o) {
+  const maxChars = Math.max(6, Math.floor((o.w - 2.8) / (2.1 * 0.52))); // ~0.52 em per character
+  const out = [];
+  for (const raw of String(o.constraints || '').split('\n').map(x => x.trim()).filter(Boolean)) {
+    let cur = '• ';
+    for (const w of raw.split(/\s+/)) {
+      if (cur.length > 2 && (cur + w).length > maxChars) { out.push(cur.trimEnd()); cur = '\u00a0\u00a0'; }
+      cur += w + ' ';
+    }
+    out.push(cur.trimEnd());
+  }
+  return out.slice(0, Math.max(0, Math.floor((o.h - 4.2) / 2.6)));
+}
+
 function wpLabels(o) {
   return (o.path || []).map((p, i) => `<g class="wp-label${p.cue?.trim() ? ' cued' : ''}" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.1"/><text y=".5" font-size="1.4" text-anchor="middle">${i + 1}</text></g>`).join('');
 }
@@ -135,6 +150,7 @@ const draw = {
     return `<g class="obj zone" data-id="${o.id}">
       <rect x="${n(o.x)}" y="${n(o.y)}" width="${n(o.w)}" height="${n(o.h)}" rx=".6" fill="${c}" fill-opacity=".16" stroke="${c}" stroke-width=".45" stroke-dasharray="2 1.5"/>
       <text x="${n(o.x + 1.2)}" y="${n(o.y + 3.2)}" font-size="2.8" font-weight="700" fill="${c}">${esc(o.label)}</text>
+      ${zoneRuleLines(o).map((l, i) => `<text x="${n(o.x + 1.4)}" y="${n(o.y + 3.2 + 2.6 * (i + 1))}" font-size="2.1" fill="#1f2937" paint-order="stroke" stroke="#fff" stroke-width=".55" stroke-linejoin="round">${esc(l)}</text>`).join('')}
     </g>`;
   },
 

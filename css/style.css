@@ -159,6 +159,7 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 .intro-box .row{margin-top:6px}
 .intro-box .row button{font-size:12px}
 .intro-box p{margin:8px 0 0}
+.intro-warn{margin-top:6px;line-height:1.35}
 #drill-list li button.has-intro{color:#f59e0b}
 #drill-list li.notes-editor textarea{width:100%;font-size:12.5px}
 .swatches{display:flex;gap:4px;flex-wrap:wrap}

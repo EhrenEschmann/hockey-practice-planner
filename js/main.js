@@ -1558,6 +1558,27 @@ $('#btn-family-emails').addEventListener('click', () =>
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
 let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
 
+/** Put a clip in the cloud beside its practice. Resolves { ok, error? }; ok is false when signed out or refused. */
+async function uploadClip(pid, did, { mime, blob, secs }) {
+  if (!cloudBackend?.saveClip) return { ok: false, error: 'local-only (no cloud configured)' };
+  if (!cloudSync?.user) return { ok: false, error: 'not signed in' };
+  try { await cloudBackend.saveClip(ownerFor(), pid, did, { mime, data: await blobToBase64(blob), secs, at: Date.now() }); return { ok: true }; }
+  catch (e) { return { ok: false, error: e?.message || String(e) }; }
+}
+/** After sign-in: any clip recorded while offline or refused by the rules is uploaded from this device's copy. */
+async function uploadPendingIntros() {
+  if (!cloudBackend?.saveClip || !cloudSync?.user) return;
+  for (const p of store.data.practices) for (const d of p.drills) {
+    if (!d.intro || d.intro.cloud === true) continue;
+    let rec = null;
+    try { rec = await idbGetClip(clipKey(ownerFor(), p.id, d.id)); } catch { rec = null; }
+    if (!rec?.blob) continue; // recorded on another device: nothing here to send
+    const up = await uploadClip(p.id, d.id, rec);
+    if (up.ok) { d.intro = { ...d.intro, cloud: true }; delete d.intro.cloudError; store.save(); }
+  }
+  renderPlan();
+}
+const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — deploy the latest firestore.rules, then Upload now' : '';
 let introOpenFor = null; // drill whose 🎙 recorder is open in the Drills panel
 let introRec = null;      // an in-progress recording: { drillId, stop(), since, timer }
 /** The recorder row's buttons: record / stop / listen / delete a drill's intro clip. */
@@ -1583,15 +1604,18 @@ async function introAction(iact, li) {
     if (!blob.size || secs < 0.5) { renderPlan(); status('Nothing recorded.'); return; }
     forgetClip(key);
     try { await idbPutClip(key, { mime, blob, secs }); } catch { /* the cloud copy still serves this device */ }
-    let where = 'on this device';
-    if (cloudBackend?.saveClip && cloudSync?.user) {
-      try { await cloudBackend.saveClip(ownerFor(), pid, d.id, { mime, data: await blobToBase64(blob), secs, at: Date.now() }); where = 'to the cloud'; }
-      catch (e) { where = `on this device only — cloud save failed: ${e?.message || e}`; }
-    }
-    commit(() => { d.intro = { secs, mime, size: blob.size, at: Date.now() }; });
+    const up = await uploadClip(pid, d.id, { mime, blob, secs });
+    commit(() => { d.intro = { secs, mime, size: blob.size, at: Date.now(), cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) }; });
     fetchClip(ownerFor(), pid, d.id);
     renderPlan();
-    status(`Saved ${where} · ${secs.toFixed(1)} s · ${Math.max(1, Math.round(blob.size / 1024))} KB`);
+  } else if (iact === 'upload') { // retry the cloud copy from this device's recording
+    status('Uploading…');
+    let rec = null;
+    try { rec = await idbGetClip(key); } catch { rec = null; }
+    if (!rec?.blob) { status('No recording on this device to upload — record it again here.'); return; }
+    const up = await uploadClip(pid, d.id, rec);
+    commit(() => { d.intro = { ...d.intro, cloud: up.ok }; if (up.error) d.intro.cloudError = up.error; else delete d.intro.cloudError; });
+    renderPlan();
   } else if (iact === 'play') {
     if (introPlaying) { introPlaying.stop(); return; }
     const entry = await fetchClip(ownerFor(), pid, d.id);
@@ -1637,10 +1661,12 @@ function renderPlan() {
       : '';
     const recording = introRec?.drillId === d.id;
     const intro = introOpenFor === d.id ? `<li class="intro-editor"><div class="intro-box">
-      <div class="intro-status muted small">${recording ? '● Recording — speak now' : d.intro ? `Intro recorded · ${(+d.intro.secs || 0).toFixed(1)} s${d.intro.size ? ` · ${Math.max(1, Math.round(d.intro.size / 1024))} KB` : ''}${canPlay(d.intro.mime) ? '' : ' · this browser can’t play that format'}` : canRecord() ? 'No intro yet — record yourself introducing this drill.' : 'This browser can’t record audio.'}</div>
+      <div class="intro-status muted small">${recording ? '● Recording — speak now' : d.intro ? `Intro recorded · ${(+d.intro.secs || 0).toFixed(1)} s${d.intro.size ? ` · ${Math.max(1, Math.round(d.intro.size / 1024))} KB` : ''}${d.intro.cloud === true ? ' · ☁ in the cloud' : ''}${canPlay(d.intro.mime) ? '' : ' · this browser can’t play that format'}` : canRecord() ? 'No intro yet — record yourself introducing this drill.' : 'This browser can’t record audio.'}</div>
+      ${d.intro && !recording && d.intro.cloud !== true ? `<div class="intro-warn warn small">⚠ ${d.intro.cloud === false ? `Not in the cloud — coaches can’t hear it${d.intro.cloudError ? ` (${escHtml(d.intro.cloudError)}${cloudHint(d.intro.cloudError)})` : ''}` : 'Cloud copy unknown — recorded before this version'}</div>` : ''}
       <div class="row">
         ${recording ? '<button data-iact="stop" class="danger">■ Stop</button>' : `<button data-iact="rec" ${canRecord() ? '' : 'disabled'}>● ${d.intro ? 'Re-record' : 'Record'}</button>`}
         <button data-iact="play" ${d.intro && !recording ? '' : 'disabled'}>${introPlaying?.drillId === d.id ? '■ Stop' : '▶ Listen'}</button>
+        ${d.intro && !recording && d.intro.cloud !== true && cloudBackend?.saveClip ? '<button data-iact="upload" class="primary">☁ Upload now</button>' : ''}
         <button data-iact="del" ${d.intro && !recording ? '' : 'disabled'}>✕ Delete</button>
       </div>
       <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here and on the coaches’ phones — unless 🔊 voice is muted. Up to 90 s.</p>
@@ -2491,6 +2517,7 @@ let presentAudience = 'coach'; // 'coach' = full plan; 'team' = families: schedu
 let presentOwner = 'local';    // whose account the shown practice (and its intro clips) belongs to
 let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
+let uploadsChecked = false; // pending intro uploads are retried once per session
 
 function presentHTML(p) {
   const forCoaches = presentAudience === 'coach'; // the team's link leaves out coaching notes & assignments
@@ -3132,6 +3159,7 @@ function setGate(state, detail = '') {
       else if (state === 'error' && !sync.user) setGate('error', detail);
       else if (sync.user && !isOwner(sync.user)) setGate('noaccess', sync.user.email || sync.user.name); // viewers use share links
       else if (sync.user) setGate(null);
+      if (sync.user && isOwner(sync.user) && state === 'saved' && !uploadsChecked) { uploadsChecked = true; uploadPendingIntros(); } // first quiet moment after sign-in
       refreshPresent(); // presentation mode reacts to sign-in changes too
     },
     onRemote: (ids, { full } = {}) => {

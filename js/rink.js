@@ -71,6 +71,7 @@ export const SVG_STYLE = `
   .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
   .wp-label{pointer-events:none} /* display-only badges: clicks must reach the waypoint handle beneath */
   .wp-label circle{fill:#fff;stroke:#555;stroke-width:.2}
+  .wp-label.cued circle{fill:#fde68a;stroke:#b45309} /* a spoken cue fires here */
   .wp-label text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .contact-zone{fill:#f59e0b;fill-opacity:.12;stroke:#b45309;stroke-width:.28;stroke-dasharray:.9 .7}
   .contact-t{font-family:system-ui,sans-serif;font-size:1.5px;font-weight:700;fill:#b45309}

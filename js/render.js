@@ -26,7 +26,7 @@ function arrowHead(dense, color, size = 2.2) {
 
 /** Numbered waypoint badges (shown while a puck is selected, or a player is triggered by a waypoint). */
 function wpLabels(o) {
-  return (o.path || []).map((p, i) => `<g class="wp-label" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.1"/><text y=".5" font-size="1.4" text-anchor="middle">${i + 1}</text></g>`).join('');
+  return (o.path || []).map((p, i) => `<g class="wp-label${p.cue?.trim() ? ' cued' : ''}" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.1"/><text y=".5" font-size="1.4" text-anchor="middle">${i + 1}</text></g>`).join('');
 }
 
 function handles(pts) {

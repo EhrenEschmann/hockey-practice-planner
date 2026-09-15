@@ -107,6 +107,7 @@ function renderCanvas() {
   renderPSMode(d);
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
+  narrator = makeNarrator(drillCues(d, sim), text => { cueCaption.textContent = text; cueCaption.hidden = !text; });
   fxLayer.innerHTML = '';
   const selObj = getObj(sel);
   objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths: drillPaths(), sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
@@ -1011,16 +1012,73 @@ function animateFrame(dr, sm, root, fx, t, playing) {
   }
 }
 
+// ---------- voice cues: notes typed on a player's waypoints, spoken aloud as they get there during playback ----------
+// A cue lives on the waypoint itself (`pt.cue`, or `startCue` on the player for their start), so it copies,
+// nudges and clones with the path and is timed by the same sim clock as passes and triggered starts.
+const canSpeak = 'speechSynthesis' in window;
+let voiceOn = true;
+try { voiceOn = localStorage.getItem('hpp.voice') !== '0'; } catch { /* storage blocked: on */ }
+let voicePrimed = false;
+const hasCues = dr => dr.objects.some(o => isPlayer(o) && (o.startCue?.trim() || (o.path || []).some(pt => pt.cue?.trim())));
+/** Every cue in the drill with the playback second it fires at, in order. */
+function drillCues(dr, sm) {
+  const out = [];
+  const T = sm.duration(); // rounded to 0.01 s, so a last-waypoint cue must be clamped or it would sit just past the end and never fire
+  for (const o of dr.objects) {
+    if (!isPlayer(o)) continue;
+    if (o.startCue?.trim()) out.push({ t: Math.min(T, sm.wpTime(o.id, 0)), text: o.startCue.trim() });
+    (o.path || []).forEach((pt, i) => { if (pt.cue?.trim()) out.push({ t: Math.min(T, sm.wpTime(o.id, i + 1)), text: pt.cue.trim() }); });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+/** Phones only let a page talk after a tap: call from the play button so later cues (fired from frames) are allowed. */
+function primeVoice() {
+  if (!canSpeak || voicePrimed) return;
+  voicePrimed = true;
+  try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); } catch { /* fine */ }
+}
+function speak(text) {
+  if (!canSpeak || !voiceOn) return;
+  speechSynthesis.cancel(); // a cue belongs to its waypoint — an earlier one still talking must not push it late
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = document.documentElement.lang || 'en';
+  speechSynthesis.speak(u);
+}
+function hushVoice() { if (canSpeak) speechSynthesis.cancel(); }
+function setVoice(on) {
+  voiceOn = on;
+  try { localStorage.setItem('hpp.voice', on ? '1' : '0'); } catch { /* fine */ }
+  if (!on) hushVoice();
+  for (const b of $$('#anim-voice, .pr-voice')) { b.classList.toggle('active', on); b.title = on ? 'Voice cues on — click to mute' : 'Voice cues muted — click to hear them'; }
+}
+/**
+ * Narrator for one playback: step(prev, now) speaks and captions every cue whose second falls in (prev, now].
+ * `caption(text)` shows the words on screen too — a rink is loud, and a muted phone still shows the cue.
+ */
+function makeNarrator(cues, caption) {
+  let timer = 0;
+  const show = text => { caption(text); clearTimeout(timer); if (text) timer = setTimeout(() => caption(''), 5000); };
+  return {
+    step(prev, now) { for (const c of cues) if (c.t > prev && c.t <= now) { speak(c.text); show(c.text); } },
+    clear() { hushVoice(); show(''); },
+  };
+}
+const cueCaption = $('#cue-caption');
+let narrator = makeNarrator([], () => {});
+
 function applyAnimation(t) { animateFrame(drill(), sim, objLayer, fxLayer, t, anim.playing); }
 
 function tick(now) {
   if (!anim.playing) return;
   const dt = Math.min(0.1, (now - anim.last) / 1000);
   anim.last = now;
+  const prev = anim.fresh ? -1 : anim.t; // a cue at 0.0 s fires on the first frame of a fresh start
+  anim.fresh = false;
   anim.t += dt * drillSpeed();
   const T = totalDuration();
   if (anim.t >= T) { anim.t = T; anim.playing = false; } // park on the final positions — ⏹ sends everyone home
   applyAnimation(anim.t);
+  narrator.step(prev, anim.t);
   renderAnimBar();
   if (anim.playing) anim.raf = requestAnimationFrame(tick);
 }
@@ -1028,14 +1086,16 @@ function tick(now) {
 function togglePlay() {
   if (isPSDrill(drill())) { psView().toggle(); renderAnimBar(); return; } // power skating mode: ▶ plays the technique elements
   if (returning) cancelReturn();
-  if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); fxLayer.innerHTML = ''; }
+  if (anim.playing) { anim.playing = false; cancelAnimationFrame(anim.raf); fxLayer.innerHTML = ''; hushVoice(); }
   else {
     if (totalDuration() <= 0) return;
+    primeVoice();
     // Playing is for watching, not editing: drop the selection and finish anything being drawn.
     finishActive();
     if (pickTarget) { pickTarget = null; $('#hint').textContent = HINTS[tool] || ''; }
     if (sel) select(null);
     if (anim.t >= totalDuration()) anim.t = 0;
+    anim.fresh = anim.t === 0;
     anim.playing = true; anim.last = performance.now();
     anim.raf = requestAnimationFrame(tick);
   }
@@ -1046,6 +1106,7 @@ function togglePlay() {
 function stopAnim() {
   if (returning) cancelReturn();
   anim.playing = false; cancelAnimationFrame(anim.raf); anim.t = 0;
+  narrator.clear();
   if (psViewInst && isPSDrill(drill())) psViewInst.stop();
   renderCanvas(); renderAnimBar();
 }
@@ -1088,6 +1149,8 @@ function renderAnimBar() {
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);
   if (document.activeElement !== $('#anim-speed')) $('#anim-speed').value = String(drillSpeed());
   $('#anim-trails').checked = drillPaths();
+  $('#anim-voice').hidden = !canSpeak || !hasCues(drill());
+  $('#anim-voice').classList.toggle('active', voiceOn);
   $('#time-display').textContent = returning ? '↩ skating back' : `${Math.min(anim.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
   // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
   const impacts = sim ? sim.contacts() : [];
@@ -1126,6 +1189,7 @@ $('#timeline').addEventListener('input', e => { anim.t = +e.target.value; if (an
 $('#timeline').addEventListener('change', e => e.target.blur()); // scrub done → hotkeys work again
 $('#anim-speed').addEventListener('change', e => { drill().animSpeed = +e.target.value; store.save(); });
 $('#anim-trails').addEventListener('change', e => { drill().showPaths = e.target.checked; store.save(); renderCanvas(); });
+$('#anim-voice').addEventListener('click', () => setVoice(!voiceOn));
 
 // ---------- view bar ----------
 $$('#viewbar [data-view]').forEach(b => b.addEventListener('click', () => setView(VIEWS[b.dataset.view])));
@@ -1650,6 +1714,15 @@ function renderProps() {
         if (+pt.stop > 0) extra.push(`<label class="field inline"><span>Hold at waypoint ${i + 1} (s)</span><input type="number" min="0" step="0.25" value="${+pt.stop}" data-wpstopdur="${i}" title="How long the full stop lasts — 0 removes it"></label>`);
       });
     }
+    if (canSpeak || o.startCue != null || (o.path || []).some(pt => pt.cue != null)) {
+      // Voice cues: a toggle per point (S = their start); a toggled point gets a text box below
+      const pts = [['start', 'S', o.startCue, 'their start'], ...(o.path || []).map((pt, i) => [String(i), String(i + 1), pt.cue, `waypoint ${i + 1}`])];
+      const toggles = pts.map(([k, lbl, cue, name]) => `<button class="wp-toggle ${cue != null ? 'active' : ''}" data-act="cue" data-wp="${k}" title="Say something when ${playerName(o)} reaches ${name} — click to add or remove the cue">${lbl}${cue?.trim() ? ' 🔊' : ''}</button>`).join('');
+      extra.push(`<div class="field"><span title="Type what to say; it is read aloud (and shown under the rink) during playback the moment this player reaches the point. Waypoints are numbered on the ice while the player is selected.">Voice cue at</span><div class="row wp-row">${toggles}</div></div>`);
+      pts.forEach(([k, lbl, cue, name]) => {
+        if (cue != null) extra.push(`<label class="field inline"><span>Say at ${name}</span><input data-cue="${k}" value="${escHtml(cue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
+      });
+    }
     if (o.type === 'skater') {
       const leaders = drill().objects.filter(s => s.type === 'skater' && s.id !== o.id && !s.follow && s.path?.length);
       if (leaders.length || o.follow) extra.push(`<label class="field inline"><span>Same path as</span><select data-prop="follow">
@@ -1881,6 +1954,12 @@ propsBody.addEventListener('input', e => {
     store.save(); renderCanvas(); renderAnimBar();
     return;
   }
+  if (el.dataset.cue != null) { // words spoken at a waypoint (typing keeps the panel as is; the change event re-renders)
+    if (el.dataset.cue === 'start') o.startCue = el.value;
+    else { const pt = o.path?.[+el.dataset.cue]; if (!pt) return; pt.cue = el.value; }
+    store.save(); renderCanvas(); renderAnimBar(); // the badge on the ice and the 🔊 button follow the text
+    return;
+  }
   if (!key) return;
   if (key === 'pilegive') {
     const player = getObj(el.value); el.value = '';
@@ -1943,6 +2022,15 @@ propsBody.addEventListener('click', e => {
       const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
       commit(() => { if (+pt.stop > 0) delete pt.stop; else pt.stop = 1; }); // toggle; tune the seconds in the input below
       renderProps(); break;
+    }
+    case 'cue': { // add (empty, ready to type) or remove the spoken cue at a point
+      const k = btn.dataset.wp;
+      const holder = k === 'start' ? o : o.path?.[+k]; if (!holder) break;
+      const key = k === 'start' ? 'startCue' : 'cue';
+      commit(() => { if (holder[key] != null) delete holder[key]; else holder[key] = ''; });
+      renderProps();
+      propsBody.querySelector(`input[data-cue="${k}"]`)?.focus();
+      break;
     }
     case 'fitdrill': resizeDrillInto(o); renderProps(); break;
     case 'chasepuck': {
@@ -2199,8 +2287,10 @@ function presentHTML(p) {
           <span class="pr-break"></span>
           <select class="pr-speed" title="Playback speed">${['0.25', '0.5', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
+          ${canSpeak && hasCues(d) ? `<button class="pr-voice wp-toggle ${voiceOn ? 'active' : ''}" title="${voiceOn ? 'Voice cues on — click to mute' : 'Voice cues muted — click to hear them'}">🔊 voice</button>` : ''}
           <span class="pr-impact"></span>
         </div>
+        <div class="pr-cue" hidden></div>
         ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </section>`;
     }).join('')}
@@ -2283,6 +2373,9 @@ function wirePresentAnims(p) {
     let full = T; // cards park on the final positions; ▶ restarts from the top
     let fx = splitLayers(fig, svgEl);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
+    const cueEl = sec.querySelector('.pr-cue');
+    let voice = makeNarrator(drillCues(dcur, sm), text => { cueEl.textContent = text; cueEl.hidden = !text; });
+    bar.querySelector('.pr-voice')?.addEventListener('click', () => setVoice(!voiceOn));
     let spd = +d.animSpeed || 1; // seeded from the drill's saved playback speed
     bar.querySelector('.pr-speed')?.addEventListener('change', e => spd = +e.target.value);
     bar.querySelector('.pr-paths')?.addEventListener('change', e => { // re-render this card with paths on/off
@@ -2304,6 +2397,7 @@ function wirePresentAnims(p) {
       bar.querySelector('.pr-loser').addEventListener('change', e => {
         dcur.impactLoser = e.target.value || null;
         sm = makeSim(dcur); // the loser's slowdown changes the drill's timing
+        voice = makeNarrator(drillCues(dcur, sm), text => { cueEl.textContent = text; cueEl.hidden = !text; });
         T = sm.duration();
         full = T;
         tl.max = T;
@@ -2323,15 +2417,18 @@ function wirePresentAnims(p) {
     };
     const step = now => {
       if (!a.playing) return;
+      const prev = a.fresh ? -1 : a.t; // a cue at 0.0 s fires on the first frame of a fresh start
+      a.fresh = false;
       a.t += Math.min(0.1, (now - a.last) / 1000) * spd; a.last = now;
       if (a.t >= full) { a.t = full; a.playing = false; }
       draw();
+      voice.step(prev, a.t);
       if (a.playing) a.raf = requestAnimationFrame(step);
     };
     btn.addEventListener('click', () => {
       a.playing = !a.playing;
-      if (a.playing) { if (a.t >= full) a.t = 0; a.last = performance.now(); a.raf = requestAnimationFrame(step); }
-      else cancelAnimationFrame(a.raf);
+      if (a.playing) { primeVoice(); if (a.t >= full) a.t = 0; a.fresh = a.t === 0; a.last = performance.now(); a.raf = requestAnimationFrame(step); }
+      else { cancelAnimationFrame(a.raf); voice.clear(); }
       draw();
     });
     tl.addEventListener('input', () => { a.t = +tl.value; draw(); });

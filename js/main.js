@@ -669,7 +669,14 @@ function onPointerUp(e) {
       }
       store.save(); renderAll(); break;
     }
-    case 'handle': case 'evmark': case 'bank': case 'arrive': store.save(); renderAll(); break;
+    case 'evmark': case 'arrive': {
+      // Dropped before the puck can be there? The sim already fires the event where the player has it;
+      // store that spot so the panel's feet-on-path matches the marker instead of showing an impossible value.
+      const pk = getObj(dg.id); const ev = pk?.events?.[dg.ev];
+      if (ev && ev.dist != null) { sim = makeSim(drill()); if (sim.puck(pk.id).info[dg.ev]?.late) { const eff = effectiveDist(pk, dg.ev); if (eff != null) ev.dist = eff; } }
+      store.save(); renderAll(); break;
+    }
+    case 'handle': case 'bank': store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
@@ -1928,9 +1935,12 @@ function puckProps(o) {
       else if (ev.type === 'pass' && ev.to === rec.carrier && !ev.bank) problem = `${playerName(getObj(rec.carrier))} can't pass to themselves — pick another receiver, or bank it off the boards`;
       else problem = 'pick a receiver';
     }
+    const eff = rec?.late ? effectiveDist(o, i) : null;
+    const snap = eff != null ? ` <button class="small" data-act="snapdist" data-ev="${i}" title="Re-time this event to that spot, so the number here matches the marker on the ice">Use that spot</button>` : '';
     const late = !rec?.late ? ''
-      : ev.type === 'shoot' ? ` <span class="warn" title="They reach this waypoint before the puck gets back to them, so the shot happens later, from wherever they are once they have it">⚠ no puck yet at this waypoint — shot deferred</span>`
-      : ` <span class="warn" title="The skater passes the marked spot before the puck reaches them, so this happens where they are when it arrives">⚠ puck arrives after the mark</span>`;
+      : ev.type === 'shoot' ? ` <span class="warn" title="They reach the requested spot before the puck gets back to them, so the shot happens later, from wherever they are once they have it">⚠ no puck yet there — shoots at ${rec.t.toFixed(1)} s${eff != null ? `, ${eff} ft along their path` : ''}</span>${snap}`
+      : ev.by === 'receiver' ? ` <span class="warn" title="The passer can't release early enough for the puck to get there in time, so it arrives later, where the receiver is once it lands">⚠ can't arrive that early — lands at ${rec.arrive.toFixed(1)} s${eff != null ? `, ${eff} ft along their path` : ''}</span>${snap}`
+      : ` <span class="warn" title="They pass the requested spot before the puck reaches them, so the pass waits until they have it and goes from where they are then">⚠ no puck yet there — goes at ${rec.t.toFixed(1)} s${eff != null ? `, ${eff} ft along their path` : ''}</span>${snap}`;
     const status = problem ? `<span class="warn">⚠ ${problem}</span>`
       : `<span class="muted">${ev.type === 'pass' && ev.by === 'receiver' ? `arrives t = ${rec.arrive.toFixed(1)} s` : `t = ${rec.t.toFixed(1)} s`}</span>${late}`;
     const onPath = ev.dist != null;
@@ -1993,6 +2003,17 @@ function eventSkater(pk, i) {
   const ev = pk?.events?.[i]; if (!ev) return null;
   const who = ev.type === 'pickup' ? ev.skater : (ev.type === 'pass' && ev.by === 'receiver') ? ev.to : sim.puck(pk.id).info[i]?.carrier;
   return who && isPlayer(getObj(who)) ? who : null;
+}
+/**
+ * Where a deferred event really happens, in feet along the path of the player it is timed by: the sim can't
+ * fire it before that player has the puck, so it slides to the spot they reach when they get it. Rounded up
+ * so re-timing the event there is never a hair too early (which would leave it flagged late again).
+ */
+function effectiveDist(pk, i) {
+  const rec = sim.puck(pk.id).info[i], who = eventSkater(pk, i);
+  if (!rec?.ok || !rec.mark || !who) return null;
+  const tm = sim.skater(who);
+  return Math.ceil(G.projectOnPolyline(tm.dense, tm.cum, rec.mark).d * 10) / 10;
 }
 /** Distance (ft) along a skater's path of the point nearest to p. */
 function pathDistanceAt(skaterId, p) {
@@ -2124,6 +2145,11 @@ propsBody.addEventListener('click', e => {
       const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
       commit(() => { if (+pt.stop > 0) delete pt.stop; else pt.stop = 1; }); // toggle; tune the seconds in the input below
       renderProps(); break;
+    }
+    case 'snapdist': { // re-time a deferred event to where it actually happens
+      const ev = o.events?.[evIndex]; const eff = effectiveDist(o, evIndex);
+      if (ev && eff != null) { commit(() => ev.dist = eff); renderProps(); }
+      break;
     }
     case 'ptdel': { const i = +btn.dataset.wp; if (!o.points || o.points.length <= 2 || !o.points[i]) break; commit(() => o.points.splice(i, 1)); renderProps(); break; }
     case 'wpdel': { // remove a waypoint from the list (same as double-clicking its handle on the ice)

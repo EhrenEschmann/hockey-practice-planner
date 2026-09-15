@@ -1642,11 +1642,13 @@ async function introAction(iact, li) {
 }
 function renderPlan() {
   const p = store.practice;
-  const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
-  $('#plan-total').textContent = `${total} min total`;
+  const total = activeDrills(p).reduce((a, d) => a + (+d.duration || 0), 0);
+  const hiddenCount = p.drills.length - activeDrills(p).length;
+  $('#plan-total').textContent = `${total} min total${hiddenCount ? ` · ${hiddenCount} hidden` : ''}`;
   const list = $('#drill-list');
   if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
   const btns = d => `
+      <button data-act="hide" class="${d.hidden ? 'is-hidden' : ''}" title="${d.hidden ? 'Hidden: left out of the plan, print and the coaches’ view — click to put it back' : 'Hide this drill: keep it here to come back to, but leave it out of the plan, print and the coaches’ view'}">${icon(d.hidden ? 'eyeoff' : 'eye')}</button>
       <button data-act="intro" class="${d.intro ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="Intro in your voice — recorded here, played before the drill when ▶ is pressed">🎙</button>
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
@@ -1660,9 +1662,9 @@ function renderPlan() {
           <button data-act="save" class="primary" title="Save (Enter)">${icon('check')}</button>
           <button data-act="cancel" title="Cancel (Esc)">${icon('x')}</button>
         </li>`
-      : `<li class="${i === store.drillIndex ? 'active' : ''}" data-index="${i}" draggable="true" title="Drag to reorder">
+      : `<li class="${i === store.drillIndex ? 'active' : ''}${d.hidden ? ' hidden-drill' : ''}" data-index="${i}" draggable="true" title="${d.hidden ? 'Hidden from the plan · drag to reorder' : 'Drag to reorder'}">
           <span class="num">${i + 1}.</span>
-          <span class="name">${escHtml(d.name)}</span>
+          <span class="name">${escHtml(d.name)}${d.hidden ? ' <span class="muted small">hidden</span>' : ''}</span>
           ${btns(d)}
         </li>`;
     const notes = notesOpenFor === d.id
@@ -1770,6 +1772,7 @@ $('#drill-list').addEventListener('click', e => {
   const p = store.practice;
   if (li.matches('.intro-editor')) { introAction(btn?.dataset.iact, li); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; renderPlan(); return; }
+  if (act === 'hide') { const d = p.drills[i]; commit(() => { if (d.hidden) delete d.hidden; else d.hidden = true; }); renderAll(); if (presenting) refreshPresent(); return; }
   if (li.matches('.notes-editor, .intro-editor')) return;
   finishActive();
   if (act === 'save' || act === 'cancel') {
@@ -2483,6 +2486,8 @@ $('#btn-png').addEventListener('click', async () => {
 });
 
 // ---------- practice document (shared by print & presentation mode) ----------
+/** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
+const activeDrills = p => p.drills.filter(d => !d.hidden);
 const parseStart = p => /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null;
 const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
 const ampm = m => (Math.floor(m / 60) % 24) < 12 ? 'am' : 'pm';
@@ -2492,11 +2497,12 @@ const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '')
 
 $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
+  const drills = activeDrills(p);
   const rink = rinkSVG();
-  const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const startMin = parseStart(p);
   let t = startMin;
-  const drillRows = p.drills.map((d, i) => {
+  const drillRows = drills.map((d, i) => {
     const at = t; if (t != null) t += (+d.duration || 0);
     return `
       <div class="p-drill">
@@ -2510,8 +2516,8 @@ $('#btn-print').addEventListener('click', () => {
     <div class="p-title">${escHtml(p.team || 'Practice')}</div>
     <div class="p-sub">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
     ${p.coaches ? `<div class="p-sub">Coaches: ${escHtml(p.coaches)}</div>` : ''}
-    <div class="p-overview">${p.drills.map(d => standaloneSVG(d, rink, SVG_STYLE)).join('')}</div>
-    <div class="p-sub">${startMin != null ? `Start @ ${clock(startMin)}` : ''} <span class="p-meta">${p.drills.length} drills · ${total} min</span></div>
+    <div class="p-overview">${drills.map(d => standaloneSVG(d, rink, SVG_STYLE)).join('')}</div>
+    <div class="p-sub">${startMin != null ? `Start @ ${clock(startMin)}` : ''} <span class="p-meta">${drills.length} drills · ${total} min</span></div>
     <div class="p-cols">
     ${drillRows}
     <div class="p-drill"><div class="p-head"><b>* Dismissal</b>${startMin != null ? `<span class="p-time">${clock(startMin + total)}</span>` : ''}</div></div>
@@ -2532,7 +2538,8 @@ let uploadsChecked = false; // pending intro uploads are retried once per sessio
 function presentHTML(p) {
   const forCoaches = presentAudience === 'coach'; // the team's link leaves out coaching notes & assignments
   const rink = rinkSVG();
-  const total = p.drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const drills = activeDrills(p);
+  const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const startMin = parseStart(p);
   let t = startMin;
   return `
@@ -2540,9 +2547,9 @@ function presentHTML(p) {
     <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
     <div class="pr-meta">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
     ${p.coaches && forCoaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
-    <div class="pr-meta">${p.drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
+    <div class="pr-meta">${drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
     </div>
-    ${p.drills.map((d, i) => {
+    ${drills.map((d, i) => {
       const at = t; if (t != null) t += (+d.duration || 0);
       if (isPSDrill(d)) {
         const tiles = (d.psElements || []).map(k => {
@@ -2911,9 +2918,10 @@ function drillNowIndex(p) {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   if (start == null || p.date !== today) return 0;
   const min = now.getHours() * 60 + now.getMinutes();
+  const drills = activeDrills(p);
   let t = start;
-  for (let i = 0; i < p.drills.length; i++) { t += +p.drills[i].duration || 0; if (min < t) return i; }
-  return p.drills.length; // practice is over: the dismissal card (clamped to the last drill if there is none)
+  for (let i = 0; i < drills.length; i++) { t += +drills[i].duration || 0; if (min < t) return i; }
+  return drills.length; // practice is over: the dismissal card (clamped to the last drill if there is none)
 }
 
 function applyPresentMode() {

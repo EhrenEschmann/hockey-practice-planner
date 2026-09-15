@@ -152,6 +152,10 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 #drill-list li input.dname{flex:1;min-width:0;padding:2px 6px;font-weight:600}
 #drill-list li input.dmin{width:44px;padding:2px 4px;text-align:right}
 #drill-list li button.has-notes{color:var(--accent-2)}
+#drill-list li.hidden-drill{opacity:.55;border-style:dashed}
+#drill-list li.hidden-drill .name{text-decoration:line-through;text-decoration-color:var(--muted)}
+#drill-list li.hidden-drill .name .muted{text-decoration:none;margin-left:4px}
+#drill-list li button.is-hidden{color:#f59e0b}
 #drill-list li button.open{background:var(--accent);color:#fff}
 #drill-list li.notes-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default}
 #drill-list li.intro-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default;display:block}

@@ -114,6 +114,9 @@ function renderCanvas() {
   drawSelection();
   if (anim.t > 0) applyAnimation(anim.t);
   $$('#viewbar [data-view]').forEach(b => b.classList.toggle('active', sameView(VIEWS[b.dataset.view], d.view)));
+  const off = offScreenCount(d);
+  $('#offscreen').hidden = !off;
+  $('#offscreen').textContent = `${off} off-screen`;
 }
 
 function sameView(a, b) { return a && b && ['x', 'y', 'w', 'h'].every(k => Math.abs(a[k] - b[k]) < 0.01); }
@@ -453,8 +456,14 @@ function onPointerDown(e) {
       const markEl = e.target.closest('[data-evmark]');
       const markWho = markEl && id ? eventSkater(getObj(id), +markEl.dataset.evmark) : null;
       const bankEl = e.target.closest('[data-bank]');
+      const arriveEl = e.target.closest('[data-arrive]');
+      const arriveTo = arriveEl && id ? getObj(id)?.events?.[+arriveEl.dataset.arrive]?.to : null;
       if (bankEl && id && getObj(id)?.events?.[+bankEl.dataset.bank]) {
         drag = { type: 'bank', id, ev: +bankEl.dataset.bank, pushed: false };
+        select(id);
+      } else if (arriveTo && getObj(arriveTo)?.path?.length) {
+        // the arrival end of a pass: drag it along the receiver's path
+        drag = { type: 'arrive', id, ev: +arriveEl.dataset.arrive, who: arriveTo, pushed: false };
         select(id);
       } else if (markWho) {
         drag = { type: 'evmark', id, ev: +markEl.dataset.evmark, who: markWho, pushed: false };
@@ -600,6 +609,14 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'arrive': { // the pass now arrives where the receiver's path passes the pointer (receiver-timed)
+      const ev = getObj(drag.id)?.events?.[drag.ev]; if (!ev) return;
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      ev.by = 'receiver';
+      ev.dist = pathDistanceAt(drag.who, raw);
+      renderCanvas();
+      break;
+    }
     case 'rect': {
       const o = getObj(drag.id); if (!o) return;
       const r = G.rectFromPoints(drag.start, p);
@@ -652,7 +669,7 @@ function onPointerUp(e) {
       }
       store.save(); renderAll(); break;
     }
-    case 'handle': case 'evmark': case 'bank': store.save(); renderAll(); break;
+    case 'handle': case 'evmark': case 'bank': case 'arrive': store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
@@ -806,6 +823,26 @@ document.addEventListener('keyup', e => {
     spaceDown = false;
   }
 });
+
+/** Every coordinate a drill contains — positions, waypoints, polyline points, shot targets and bank points — for view fitting and the off-screen check. */
+function drillPoints(d) {
+  const pts = [];
+  for (const o of d.objects) {
+    if (o.points) o.points.forEach(p => pts.push(p));
+    if (o.x != null && !(o.type === 'puck' && o.carrier)) pts.push({ x: o.x, y: o.y });
+    (o.path || []).forEach(p => pts.push(p));
+    if (o.type === 'zone') pts.push({ x: o.x + o.w, y: o.y + o.h });
+    for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
+  }
+  return pts;
+}
+const offScreenCount = d => drillPoints(d).filter(p => p.x < d.view.x || p.y < d.view.y || p.x > d.view.x + d.view.w || p.y > d.view.y + d.view.h).length;
+/** Zoom out so the whole rink and everything in the drill — wherever it ended up — is on the canvas. */
+function fitAll() {
+  let x0 = -3, y0 = -3, x1 = RINK.W + 3, y1 = RINK.H + 3;
+  for (const p of drillPoints(drill())) { x0 = Math.min(x0, p.x - 4); y0 = Math.min(y0, p.y - 4); x1 = Math.max(x1, p.x + 4); y1 = Math.max(y1, p.y + 4); }
+  setView({ x: G.round1(x0), y: G.round1(y0), w: G.round1(x1 - x0), h: G.round1(y1 - y0) });
+}
 
 function translateObj(o, dx, dy) {
   if (!o) return;
@@ -1220,6 +1257,8 @@ $('#anim-voice').addEventListener('click', () => setVoice(!voiceOn));
 
 // ---------- view bar ----------
 $$('#viewbar [data-view]').forEach(b => b.addEventListener('click', () => setView(VIEWS[b.dataset.view])));
+$('#btn-fit').addEventListener('click', fitAll);
+$('#offscreen').addEventListener('click', fitAll);
 $('#btn-zoom-in').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1 / 1.25); });
 $('#btn-zoom-out').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1.25); });
 $('#snap-toggle').addEventListener('change', e => snap = e.target.checked);
@@ -1739,18 +1778,19 @@ function renderProps() {
       // a waypoint buried under cones or other skaters is easier to reach here than by double-clicking on the ice.
       const own = !o.follow;
       const cueBtn = (k, cue, name) => (canSpeak || cue != null) ? `<button class="wp-toggle ${cue != null ? 'active' : ''}" data-act="cue" data-wp="${k}" title="Voice cue at ${name} — click to add or remove what is said when ${playerName(o)} gets there">🔊</button>` : '';
-      const rows = [`<div class="wp-item" data-wprow="start"><span class="wp-num">S</span><span class="wp-pos muted">(${Math.round(o.x)}, ${Math.round(o.y)})</span><span class="wp-what muted">start</span><span class="spacer"></span>${cueBtn('start', o.startCue, 'their start')}</div>`];
+      const xy = (kx, ky, pt) => `<span class="wp-pos"><input class="wp-xy" type="number" step="any" ${kx} value="${G.round1(pt.x)}" title="x (ft from the left boards)"><input class="wp-xy" type="number" step="any" ${ky} value="${G.round1(pt.y)}" title="y (ft from the top boards)"></span>`;
+      const rows = [`<div class="wp-item" data-wprow="start"><span class="wp-num">S</span>${xy('data-prop="x"', 'data-prop="y"', o)}<span class="wp-what muted">start</span><span class="spacer"></span>${cueBtn('start', o.startCue, 'their start')}</div>`];
       if (o.startCue != null) rows.push(`<label class="field inline wp-sub"><span>Say</span><input data-cue="start" value="${escHtml(o.startCue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
       o.path.forEach((pt, i) => {
         const flags = [pt.pivot === 'L' ? 'pivot ⟲' : pt.pivot ? 'pivot ⟳' : '', +pt.stop > 0 ? `stop ${+pt.stop}s` : ''].filter(Boolean).join(' · ');
-        rows.push(`<div class="wp-item" data-wprow="${i}"><span class="wp-num">${i + 1}</span><span class="wp-pos muted">(${Math.round(pt.x)}, ${Math.round(pt.y)})</span><span class="wp-what muted">${flags}</span><span class="spacer"></span>
+        rows.push(`<div class="wp-item" data-wprow="${i}"><span class="wp-num">${i + 1}</span>${own ? xy(`data-wpx="${i}"`, `data-wpy="${i}"`, pt) : `<span class="wp-pos muted">(${Math.round(pt.x)}, ${Math.round(pt.y)})</span>`}<span class="wp-what muted">${flags}</span><span class="spacer"></span>
           ${o.type === 'skater' && own ? `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1} (forward ⇄ backward) — click cycles: none → ⟲ face swings left → ⟳ face swings right">⇄</button><button class="wp-toggle ${+pt.stop > 0 ? 'active' : ''}" data-act="wpstop" data-wp="${i}" title="Full stop at waypoint ${i + 1} — a sharp turn, and everything downstream (passes, contacts) waits with them">⏸</button>` : ''}
           ${cueBtn(String(i), pt.cue, `waypoint ${i + 1}`)}
           ${own ? `<button class="wp-toggle wp-del" data-act="wpdel" data-wp="${i}" title="Remove waypoint ${i + 1}">✕</button>` : ''}</div>`);
         if (+pt.stop > 0) rows.push(`<label class="field inline wp-sub"><span>Hold (s)</span><input type="number" min="0" step="0.25" value="${+pt.stop}" data-wpstopdur="${i}" title="How long the full stop lasts — 0 removes it"></label>`);
         if (pt.cue != null) rows.push(`<label class="field inline wp-sub"><span>Say</span><input data-cue="${i}" value="${escHtml(pt.cue)}" placeholder="e.g. Head up" autocomplete="off"></label>`);
       });
-      extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this player is selected. Hover a row to light its handle up on the ice. ⇄ pivot · ⏸ full stop · 🔊 voice cue · ✕ remove.">Waypoints${own ? '' : ` — ${playerName(getObj(o.follow))}'s route`}</span><div class="wp-list">${rows.join('')}</div></div>`);
+      extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this player is selected. Hover a row to light its handle up on the ice. Type x / y (feet) to move one — even one that has drifted off the canvas. ⇄ pivot · ⏸ full stop · 🔊 voice cue · ✕ remove.">Waypoints${own ? '' : ` — ${playerName(getObj(o.follow))}'s route`}</span><div class="wp-list">${rows.join('')}</div></div>`);
     } else if (canSpeak || o.startCue != null) {
       extra.push(`<div class="field"><span>Voice cue at their start</span><div class="row wp-row"><button class="wp-toggle ${o.startCue != null ? 'active' : ''}" data-act="cue" data-wp="start" title="Say something when ${playerName(o)} starts — click to add or remove">🔊${o.startCue?.trim() ? ' set' : ''}</button></div></div>`);
       if (o.startCue != null) extra.push(`<label class="field inline"><span>Say at their start</span><input data-cue="start" value="${escHtml(o.startCue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
@@ -1808,7 +1848,13 @@ function renderProps() {
   extra.push(`<button data-act="dup">Duplicate</button>`);
   extra.push(`<button data-act="del" class="danger">Delete</button>`);
 
-  body.innerHTML = `<p><b>${TYPE_NAMES[o.type] || o.type}</b> <span class="muted">(${G.round1(o.x ?? o.points?.[0]?.x ?? 0)}, ${G.round1(o.y ?? o.points?.[0]?.y ?? 0)})</span></p>${fields}${custom}<div class="row">${extra.join('')}</div>`;
+  // Position is editable in the header (so an object off the canvas can be brought back); a carried puck rides its carrier.
+  const placed = o.x != null && !isPlayer(o) && !(o.type === 'puck' && o.carrier);
+  const head = placed
+    ? `<span class="wp-pos"><input class="wp-xy" type="number" step="any" data-prop="x" value="${G.round1(o.x)}" title="x (ft from the left boards)"><input class="wp-xy" type="number" step="any" data-prop="y" value="${G.round1(o.y)}" title="y (ft from the top boards)"></span>`
+    : `<span class="muted">(${G.round1(o.x ?? o.points?.[0]?.x ?? 0)}, ${G.round1(o.y ?? o.points?.[0]?.y ?? 0)})</span>`;
+  const ptList = o.points ? `<div class="field"><span title="Type x / y (feet) to move a point; ✕ removes it (a line keeps at least two).">Points</span><div class="wp-list">${o.points.map((pt, i) => `<div class="wp-item"><span class="wp-num">${i + 1}</span><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ptx="${i}" value="${G.round1(pt.x)}"><input class="wp-xy" type="number" step="any" data-pty="${i}" value="${G.round1(pt.y)}"></span><span class="spacer"></span>${o.points.length > 2 ? `<button class="wp-toggle wp-del" data-act="ptdel" data-wp="${i}" title="Remove point ${i + 1}">✕</button>` : ''}</div>`).join('')}</div></div>` : '';
+  body.innerHTML = `<p class="pin-row"><b>${TYPE_NAMES[o.type] || o.type}</b> ${head}</p>${fields}${custom}${ptList}<div class="row">${extra.join('')}</div>`;
 }
 
 const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
@@ -1907,13 +1953,17 @@ function puckProps(o) {
       const arrive = rec?.ok && byReceiver ? `<span class="muted">(leaves at t = ${rec.t.toFixed(1)} s, arrives ${rec.arrive.toFixed(1)} s)</span>` : '';
       // Off the boards: the receiver may then be the passer themselves.
       const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
-        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
-      body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', ev.bank ? null : rec?.carrier, rec?.carrier)}</select>${bankUI}${bySel}${where('')}${arrive}${mark}`;
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="bx" value="${G.round1(ev.bank.x)}" title="bounce x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="by" value="${G.round1(ev.bank.y)}" title="bounce y (ft)"></span>` : '');
+      const arrivesAt = rec?.ok && rec.to ? `<span class="muted" title="Where the pass arrives — drag the → marker on the ice along the receiver's path to change it">arrives at (${G.round1(rec.to.x)}, ${G.round1(rec.to.y)})</span>` : '';
+      body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', ev.bank ? null : rec?.carrier, rec?.carrier)}</select>${bankUI}${bySel}${where('')}${arrive}${arrivesAt}${mark}`;
     }
     else if (ev.type === 'shoot') {
       const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
-        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
-      body = `<span>${who}</span>${where()}<span>shoots at</span><span class="muted">${ev.target ? `(${G.round1(ev.target.x)}, ${G.round1(ev.target.y)})` : 'nearest net'}</span><button data-act="pick" data-ev="${i}">Pick target</button>${bankUI}${mark}`;
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="bx" value="${G.round1(ev.bank.x)}" title="bounce x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="by" value="${G.round1(ev.bank.y)}" title="bounce y (ft)"></span>` : '');
+      const tgt = ev.target
+        ? `<span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="tx" value="${G.round1(ev.target.x)}" title="target x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="ty" value="${G.round1(ev.target.y)}" title="target y (ft)"></span>`
+        : '<span class="muted">nearest net</span>';
+      body = `<span>${who}</span>${where()}<span>shoots at</span>${tgt}<button data-act="pick" data-ev="${i}">Pick target</button>${bankUI}${mark}`;
     }
     else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where()}${mark}`;
     return `<div class="event">
@@ -1965,6 +2015,8 @@ propsBody.addEventListener('input', e => {
     const ev = o.events?.[+el.dataset.ev]; const k = el.dataset.evprop;
     if (!ev || !k) return;
     if (k === 'wp') ev.wp = Math.max(0, Math.round(+el.value || 0));
+    else if (k === 'tx' || k === 'ty') { if (ev.target) ev.target[k[1]] = +el.value || 0; }
+    else if (k === 'bx' || k === 'by') { if (ev.bank) ev.bank[k[1]] = +el.value || 0; }
     else if (k === 'dist') ev.dist = el.value === '' ? null : Math.max(0, +el.value || 0);
     else if (k === 'bank') { if (el.checked) ev.bank = defaultBank(o, +el.dataset.ev); else delete ev.bank; }
     else if (k === 'by') {
@@ -1984,6 +2036,18 @@ propsBody.addEventListener('input', e => {
     const pt = o.path?.[+el.dataset.wpstopdur]; if (!pt) return;
     const v = +el.value;
     if (v > 0) pt.stop = v; else delete pt.stop;
+    store.save(); renderCanvas(); renderAnimBar();
+    return;
+  }
+  if (el.dataset.wpx != null || el.dataset.wpy != null) { // waypoint moved by typing its coordinates
+    const pt = o.path?.[+(el.dataset.wpx ?? el.dataset.wpy)]; if (!pt) return;
+    pt[el.dataset.wpx != null ? 'x' : 'y'] = +el.value || 0;
+    store.save(); renderCanvas(); renderAnimBar();
+    return;
+  }
+  if (el.dataset.ptx != null || el.dataset.pty != null) { // polyline point moved by typing
+    const pt = o.points?.[+(el.dataset.ptx ?? el.dataset.pty)]; if (!pt) return;
+    pt[el.dataset.ptx != null ? 'x' : 'y'] = +el.value || 0;
     store.save(); renderCanvas(); renderAnimBar();
     return;
   }
@@ -2061,6 +2125,7 @@ propsBody.addEventListener('click', e => {
       commit(() => { if (+pt.stop > 0) delete pt.stop; else pt.stop = 1; }); // toggle; tune the seconds in the input below
       renderProps(); break;
     }
+    case 'ptdel': { const i = +btn.dataset.wp; if (!o.points || o.points.length <= 2 || !o.points[i]) break; commit(() => o.points.splice(i, 1)); renderProps(); break; }
     case 'wpdel': { // remove a waypoint from the list (same as double-clicking its handle on the ice)
       const i = +btn.dataset.wp; if (!o.path?.[i]) break;
       commit(() => o.path.splice(i, 1));

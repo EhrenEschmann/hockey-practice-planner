@@ -262,9 +262,15 @@ const draw = {
         return `<polyline class="shot-line" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 2)}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;
       }
-      if (!r.bank) return `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.6)}`;
+      // The arrival end of a pass is a handle too: dragging it along the receiver's path times the pass by the
+      // receiver ("arriving as they reach…"). A receiver-timed pass already shows its R mark there instead.
+      const ev = o.events?.[i];
+      const rcvMoves = !!(opts.objs || []).find(x => x.id === ev?.to)?.path?.length;
+      const arrive = r.by !== 'receiver' && rcvMoves
+        ? `<g class="arrive-mark${sel ? ' draggable' : ''}" data-arrive="${i}" transform="translate(${n(r.to.x)} ${n(r.to.y)})"><circle r="1.25"/><text y=".55" font-size="1.4" text-anchor="middle">→</text></g>` : '';
+      if (!r.bank) return `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.6)}${arrive}`;
       return `<polyline class="pass-line" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 1.6)}
-        <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;
+        <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>${arrive}`;
     }).join('');
     const letter = { pass: 'P', shoot: 'S', pickup: 'U' };
     const marks = opts.showPaths === false ? '' : ps.info.map((r, i) => r.ok && r.mark

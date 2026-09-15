@@ -70,6 +70,10 @@ export const SVG_STYLE = `
   .ev-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .ev-mark.draggable{cursor:move}
   .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
+  .arrive-mark circle{fill:#fff;stroke:#1f9d55;stroke-width:.3}
+  .arrive-mark text{fill:#1f9d55;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
+  .arrive-mark.draggable{cursor:move}
+  .arrive-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
   .wp-label{pointer-events:none} /* display-only badges: clicks must reach the waypoint handle beneath */
   .wp-label circle{fill:#fff;stroke:#555;stroke-width:.2}
   .wp-label.cued circle{fill:#fde68a;stroke:#b45309} /* a spoken cue fires here */

@@ -926,7 +926,7 @@ function returnTime(dr, sm, t0 = sm.duration()) {
 
 /** One frame of the skate-home phase, tr seconds after it began at drill time t0: everyone glides back to their start. */
 function returnFrame(dr, sm, root, fx, tr, t0 = sm.duration()) {
-  fx.innerHTML = '';
+  if (fx.firstChild) fx.innerHTML = '';
   const T = t0;
   const R = returnTime(dr, sm, t0);
   const k = R > 0 ? Math.min(1, tr / R) : 1; // pucks drift home over the whole phase
@@ -962,11 +962,12 @@ function animateFrame(dr, sm, root, fx, t, playing) {
   const bump = contactOffsets(dr, sm, t);
   const knock = knockState(dr, sm, t);
   // impact bursts flash during playback only — a parked timeline shows just the marker
-  fx.innerHTML = (playing && t > 0 ? sm.contacts() : []).filter(c => t >= c.t && t - c.t <= FX_DUR).map(c => {
+  const bursts = (playing && t > 0 ? sm.contacts() : []).filter(c => t >= c.t && t - c.t <= FX_DUR).map(c => {
     const u = (t - c.t) / FX_DUR;
     return `<g class="fx-burst" transform="translate(${c.x.toFixed(2)} ${c.y.toFixed(2)})" opacity="${(1 - u).toFixed(2)}">` +
       `<polygon points="${starPoints(2 + 3 * u)}"/><circle r="${(1 + 5 * u).toFixed(2)}"/></g>`;
   }).join('');
+  if (bursts || fx.firstChild) fx.innerHTML = bursts; // most frames have no burst: don't dirty the DOM for nothing
   const raised = dr.objects.filter(o => o.type === 'raisedpad');
   const jumps = dr.objects.filter(o => o.type === 'jumppad');
   for (const o of dr.objects) {
@@ -2227,25 +2228,51 @@ function presentNote(text) {
 // driving animateFrame() on that card's SVG copy of the drill.
 const presentAnims = [];
 const presentPSTiles = []; // little looping 3D viewers on power skating cards
+let presentPSObserver = null; // runs a tile's loop only while it is actually on screen
 function stopPresentAnims() {
   for (const a of presentAnims) cancelAnimationFrame(a.raf);
   presentAnims.length = 0;
   for (const v of presentPSTiles) v.stop();
   presentPSTiles.length = 0;
+  presentPSObserver?.disconnect(); presentPSObserver = null;
+}
+/**
+ * Split a card's diagram into a static layer and a moving one. The rendered SVG keeps the rink, paths and
+ * equipment — painted once — while everything that moves during playback (player bodies, pucks, the pad
+ * slabs above them, the shot echoes above goalies, impact bursts) is moved into a transparent overlay SVG
+ * on top. A frame then repaints a handful of shapes instead of the whole diagram — the difference between
+ * smooth and stuttering on a phone, where inline SVG repaints in full on any change.
+ */
+function splitLayers(fig, svgEl) {
+  fig.querySelector('.pr-overlay')?.remove();
+  const overlay = svgEl.cloneNode(false); // same viewBox / size, no content
+  overlay.classList.add('pr-overlay');
+  overlay.innerHTML = `<style>${SVG_STYLE}</style>`;
+  for (const el of svgEl.querySelectorAll('.puck-disc, [data-skater], .raisedpad-top, .shot-overlay')) overlay.appendChild(el); // document order keeps their stacking
+  const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  overlay.appendChild(fx);
+  fig.appendChild(overlay);
+  return fx;
 }
 function wirePresentAnims(p) {
   stopPresentAnims();
-  // power skating cards: a looping mini 3D demo per element
+  // power skating cards: a looping mini 3D demo per element — but only while the tile is on screen
+  // (a card that is hidden or scrolled away would otherwise keep burning CPU on every frame)
+  presentPSObserver = new IntersectionObserver(entries => {
+    for (const e of entries) { const v = e.target._ps; if (v && e.isIntersecting !== v.playing) v.toggle(); }
+  }, { threshold: 0.05 });
   for (const fig of $$('#present-body .pr-pstile')) {
     const v = createPSView(fig.querySelector('canvas'), { wheel: false }); // wheel scrolls the page, drag still orbits
     v.setElements([fig.dataset.ps]);
-    v.toggle();
+    fig._ps = v;
     presentPSTiles.push(v);
+    presentPSObserver.observe(fig);
   }
   const rinkStr = rinkSVG();
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     const d = p.drills.find(x => x.id === sec.dataset.did);
-    let svgEl = sec.querySelector('.pr-fig > svg');
+    const fig = sec.querySelector('.pr-fig');
+    let svgEl = fig?.querySelector(':scope > svg');
     const bar = sec.querySelector('.pr-animbar');
     if (!d || !svgEl || !bar) continue;
     // The card animates a local view of the drill, so a coach's tweaks (impact loser) never touch the practice.
@@ -2254,8 +2281,7 @@ function wirePresentAnims(p) {
     let T = sm.duration();
     if (T <= 0) { bar.remove(); continue; } // nothing moves in this drill
     let full = T; // cards park on the final positions; ▶ restarts from the top
-    const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    svgEl.appendChild(fx);
+    let fx = splitLayers(fig, svgEl);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
     let spd = +d.animSpeed || 1; // seeded from the drill's saved playback speed
     bar.querySelector('.pr-speed')?.addEventListener('change', e => spd = +e.target.value);
@@ -2265,7 +2291,7 @@ function wirePresentAnims(p) {
       const fresh = tmp.firstElementChild;
       svgEl.replaceWith(fresh);
       svgEl = fresh;
-      svgEl.appendChild(fx);
+      fx = splitLayers(fig, svgEl);
       draw();
       layoutPresent(); // a rotated / landscape diagram is sized inline; the fresh copy needs it again
     });
@@ -2290,7 +2316,7 @@ function wirePresentAnims(p) {
     presentAnims.push(a);
     let shown = null; // only rewrite the icon when the state flips — replacing it every frame eats clicks
     const draw = () => {
-      animateFrame(dcur, sm, svgEl, fx, a.t, a.playing);
+      animateFrame(dcur, sm, fig, fx, a.t, a.playing); // the figure spans both layers
       tl.value = Math.min(a.t, T);
       disp.textContent = `${Math.min(a.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
       if (shown !== a.playing) { shown = a.playing; btn.innerHTML = icon(a.playing ? 'pause' : 'play'); btn.title = a.playing ? 'Pause' : 'Watch the drill'; }
@@ -2310,7 +2336,7 @@ function wirePresentAnims(p) {
     });
     tl.addEventListener('input', () => { a.t = +tl.value; draw(); });
     // On a phone the diagram itself is the biggest play button there is.
-    sec.querySelector('.pr-fig').addEventListener('click', () => btn.click());
+    fig.addEventListener('click', () => btn.click());
     sec._pause = () => { if (a.playing) btn.click(); }; // leaving the drill in rink mode parks its animation
     draw();
   }
@@ -2445,9 +2471,9 @@ function layoutPresent() {
   const curAr = +presentCards()[presentIndex]?.querySelector('.pr-fig')?.dataset.ar || 0;
   $('#present-rotate').hidden = !focus || landscape || curAr <= 1.05; // only offered when the diagram is wider than tall
   for (const sec of presentCards()) {
-    const fig = sec.querySelector('.pr-fig'), svgEl = fig?.querySelector('svg');
-    if (!fig || !svgEl) continue;
-    fig.style.cssText = ''; svgEl.style.cssText = ''; fig.classList.remove('rotated');
+    const fig = sec.querySelector('.pr-fig'), layers = fig ? [...fig.querySelectorAll(':scope > svg')] : [];
+    if (!layers.length) continue;
+    fig.style.cssText = ''; layers.forEach(l => { l.style.cssText = ''; }); fig.classList.remove('rotated');
     if (!focus || !sec.classList.contains('current')) continue;
     const ar = +fig.dataset.ar || 2.26;
     if (landscape) {
@@ -2460,7 +2486,7 @@ function layoutPresent() {
       const h = Math.max(220, Math.min(availH, availW * ar)), w = h / ar;
       fig.classList.add('rotated');
       fig.style.width = `${w}px`; fig.style.height = `${h}px`;
-      svgEl.style.width = `${h}px`; svgEl.style.height = `${w}px`;
+      layers.forEach(l => { l.style.width = `${h}px`; l.style.height = `${w}px`; });
     }
   }
 }

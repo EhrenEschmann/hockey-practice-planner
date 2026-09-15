@@ -255,7 +255,7 @@ export function createPSView(canvas, { onCaption = () => {}, onIndex = () => {},
 
   // ----- drawing -----
   function draw() {
-    const dpr = devicePixelRatio || 1;
+    const dpr = Math.min(devicePixelRatio || 1, 2); // 3× phone screens: 2× is plenty for a demo figure and half the pixels
     const W = canvas.clientWidth * dpr, H = canvas.clientHeight * dpr;
     if (W && (canvas.width !== W || canvas.height !== H)) { canvas.width = W; canvas.height = H; }
     ctx.clearRect(0, 0, canvas.width, canvas.height);

@@ -210,6 +210,7 @@ body.presenting #topbar,body.presenting #viewbar,body.presenting #layout{display
 .pr-time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
 .pr-fig{position:relative}
 .pr-fig > svg{width:100%;height:auto;border-radius:6px;display:block} /* the rink diagram only — not button icons */
+.pr-fig > svg.pr-overlay{position:absolute;top:0;left:0;pointer-events:none;will-change:transform} /* the moving layer: its own compositor layer, so the static diagram under it is never repainted */
 .pr-animbar .lucide{width:15px;height:15px}
 .pr-animbar{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
 .pr-animbar .pr-tl{min-width:120px}

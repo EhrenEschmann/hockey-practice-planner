@@ -21,7 +21,8 @@ async function tx(mode, fn) {
     t.onerror = () => rej(t.error);
   });
 }
-export const clipKey = (owner, pid, did) => `${owner}/${pid}/${did}`;
+/** Cache key for one recording: versioned by its record time, so a re-recorded intro replaces the old copy on every device. */
+export const clipKey = (owner, pid, did, at = 0) => `${owner}/${pid}/${did}@${+at || 0}`;
 export const idbGetClip = key => tx('readonly', s => s.get(key));
 export const idbPutClip = (key, val) => tx('readwrite', s => s.put(val, key));
 export const idbDelClip = key => tx('readwrite', s => s.delete(key));

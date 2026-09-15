@@ -109,7 +109,7 @@ function renderCanvas() {
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
   sim = makeSim(d);
   narrator = makeNarrator(drillCues(d, sim), text => { cueCaption.textContent = text; cueCaption.hidden = !text; });
-  if (d.intro) fetchClip(ownerFor(), store.practice.id, d.id); // ready in memory so ▶ can start it inside the tap
+  if (d.intro) fetchClip(ownerFor(), store.practice.id, d); // ready in memory so ▶ can start it inside the tap
   fxLayer.innerHTML = '';
   const selObj = getObj(sel);
   objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths: drillPaths(), sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
@@ -1099,8 +1099,9 @@ function hushVoice() { stopReading(); if (canSpeak) speechSynthesis.cancel(); }
 const clipMem = new Map(); // clip key → { url, mime, secs }: clips already fetched this session, ready to play on a tap
 const ownerFor = () => store.data.ownerUid || 'local';
 /** Fetch a clip into memory: this device's IndexedDB first, then the owner's cloud copy (cached locally for the rink). */
-async function fetchClip(owner, pid, did) {
-  const key = clipKey(owner, pid, did);
+const keyFor = (owner, pid, d) => clipKey(owner, pid, d.id, d.intro?.at);
+async function fetchClip(owner, pid, d) {
+  const key = keyFor(owner, pid, d), did = d.id;
   if (clipMem.has(key)) return clipMem.get(key);
   let rec = null;
   try { rec = await idbGetClip(key); } catch { rec = null; }
@@ -1207,7 +1208,7 @@ function togglePlay() {
     const go = () => { anim.fresh = anim.t === 0; anim.playing = true; anim.last = performance.now(); anim.raf = requestAnimationFrame(tick); renderAnimBar(); };
     // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
     const d = drill();
-    const clip = anim.t === 0 && voiceOn && d.intro ? clipMem.get(clipKey(ownerFor(), store.practice.id, d.id)) : null;
+    const clip = anim.t === 0 && voiceOn && d.intro ? clipMem.get(keyFor(ownerFor(), store.practice.id, d)) : null;
     if (!clip || !canPlay(clip.mime)) { go(); return; }
     cueCaption.textContent = '🎙 Coach’s intro…'; cueCaption.hidden = false;
     anim.intro = playClip(clip, { onEnd: () => { const skip = anim.intro?.cancelled; anim.intro = null; cueCaption.hidden = true; if (skip) renderAnimBar(); else go(); } });
@@ -1571,7 +1572,7 @@ async function uploadPendingIntros() {
   for (const p of store.data.practices) for (const d of p.drills) {
     if (!d.intro || d.intro.cloud === true) continue;
     let rec = null;
-    try { rec = await idbGetClip(clipKey(ownerFor(), p.id, d.id)); } catch { rec = null; }
+    try { rec = await idbGetClip(keyFor(ownerFor(), p.id, d)); } catch { rec = null; }
     if (!rec?.blob) continue; // recorded on another device: nothing here to send
     const up = await uploadClip(p.id, d.id, rec);
     if (up.ok) { d.intro = { ...d.intro, cloud: true }; delete d.intro.cloudError; store.save(); }
@@ -1584,7 +1585,7 @@ let introRec = null;      // an in-progress recording: { drillId, stop(), since,
 /** The recorder row's buttons: record / stop / listen / delete a drill's intro clip. */
 async function introAction(iact, li) {
   const d = store.practice.drills.find(x => x.id === introOpenFor); if (!d) return;
-  const pid = store.practice.id, key = clipKey(ownerFor(), pid, d.id);
+  const pid = store.practice.id, key = keyFor(ownerFor(), pid, d); // the current recording's copy on this device
   const status = msg => { const el = $('#drill-list .intro-status'); if (el) el.textContent = msg; };
   if (iact === 'rec') {
     if (introRec) return;
@@ -1602,11 +1603,13 @@ async function introAction(iact, li) {
     const r = introRec; introRec = null; clearInterval(r.timer);
     const { blob, mime, secs } = await r.stop();
     if (!blob.size || secs < 0.5) { renderPlan(); status('Nothing recorded.'); return; }
-    forgetClip(key);
-    try { await idbPutClip(key, { mime, blob, secs }); } catch { /* the cloud copy still serves this device */ }
+    const at = Date.now(); // this recording's version: keys its copies everywhere, so devices holding the old one refetch
+    forgetClip(key); idbDelClip(key).catch(() => {});
+    const newKey = clipKey(ownerFor(), pid, d.id, at);
+    try { await idbPutClip(newKey, { mime, blob, secs }); } catch { /* the cloud copy still serves this device */ }
     const up = await uploadClip(pid, d.id, { mime, blob, secs });
-    commit(() => { d.intro = { secs, mime, size: blob.size, at: Date.now(), cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) }; });
-    fetchClip(ownerFor(), pid, d.id);
+    commit(() => { d.intro = { secs, mime, size: blob.size, at, cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) }; });
+    fetchClip(ownerFor(), pid, d);
     renderPlan();
   } else if (iact === 'upload') { // retry the cloud copy from this device's recording
     status('Uploading…');
@@ -1618,7 +1621,7 @@ async function introAction(iact, li) {
     renderPlan();
   } else if (iact === 'play') {
     if (introPlaying) { introPlaying.stop(); return; }
-    const entry = await fetchClip(ownerFor(), pid, d.id);
+    const entry = await fetchClip(ownerFor(), pid, d);
     if (!entry) { status('No clip available on this device.'); return; }
     introPlaying = playClip(entry, { onEnd: () => { introPlaying = null; renderPlan(); } });
     introPlaying.drillId = d.id;
@@ -2657,7 +2660,7 @@ function wirePresentAnims(p) {
     presentPSObserver.observe(fig);
   }
   const rinkStr = rinkSVG();
-  for (const d of p.drills) if (d.intro) fetchClip(presentOwner, p.id, d.id); // intros ready in memory before the first tap
+  for (const d of p.drills) if (d.intro) fetchClip(presentOwner, p.id, d); // intros ready in memory before the first tap
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     wireRules(sec); // rules-only stations have no animation but do have something to say
     const d = p.drills.find(x => x.id === sec.dataset.did);
@@ -2675,7 +2678,7 @@ function wirePresentAnims(p) {
         const ib = bar.querySelector('.pr-play'); let cur = null;
         ib.addEventListener('click', async () => {
           if (cur) { cur.stop(); return; }
-          const entry = await fetchClip(presentOwner, p.id, d.id);
+          const entry = await fetchClip(presentOwner, p.id, d);
           if (!entry) return;
           ib.innerHTML = icon('pause');
           cur = playClip(entry, { onEnd: () => { cur = null; ib.innerHTML = icon('play'); } });
@@ -2747,8 +2750,11 @@ function wirePresentAnims(p) {
       if (a.t >= full) a.t = 0;
       const go = () => { a.fresh = a.t === 0; a.playing = true; a.last = performance.now(); a.raf = requestAnimationFrame(step); draw(); };
       // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
-      const clip = a.t === 0 && voiceOn && d.intro ? clipMem.get(clipKey(presentOwner, p.id, d.id)) : null;
-      if (!clip) { go(); return; }
+      const clip = a.t === 0 && voiceOn && d.intro ? clipMem.get(keyFor(presentOwner, p.id, d)) : null;
+      if (!clip) {
+        if (a.t === 0 && voiceOn && d.intro) { cueEl.textContent = '🎙 intro not downloaded yet — tap ↻ to resync'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 3500); }
+        go(); return;
+      }
       if (!canPlay(clip.mime)) { cueEl.textContent = '🎙 intro can’t play on this device'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 3000); go(); return; }
       cueEl.textContent = '🎙 Coach’s intro…'; cueEl.hidden = false;
       a.intro = playClip(clip, { onEnd: () => { const skip = a.intro?.cancelled; a.intro = null; cueEl.hidden = true; if (skip) draw(); else go(); } });
@@ -2987,6 +2993,14 @@ function openPicker() {
   $('#present-picker-list li.current')?.scrollIntoView({ block: 'center' });
 }
 function closePicker() { $('#present-picker').hidden = true; }
+/** ↻ Resync: drop this practice's cached intro clips and reload, so the freshest plan, clips and app version come down. */
+$('#present-sync').addEventListener('click', async () => {
+  if (!navigator.onLine) { presentNote('Offline — resync once you have a connection.'); return; }
+  const p = presentPractice;
+  if (p) for (const d of p.drills) { if (!d.intro) continue; const k = keyFor(presentOwner, p.id, d); forgetClip(k); try { await idbDelClip(k); } catch { /* fine */ } }
+  try { (await navigator.serviceWorker?.getRegistration())?.update(); } catch { /* fine */ }
+  location.reload();
+});
 $('#present-jump').addEventListener('click', openPicker);
 $('#present-picker').addEventListener('click', e => {
   const li = e.target.closest('li[data-i]');

@@ -780,6 +780,7 @@ document.addEventListener('keydown', e => {
   if (gated) return;
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
+  if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
@@ -2571,8 +2572,12 @@ function presentDoc(p) {
   // Rink mode: opening a practice lands on the drill that's happening right now (by the practice clock);
   // a live update while viewing keeps the coach on the drill they were looking at.
   if (presentShownId !== p.id) { presentShownId = p.id; presentIndex = drillNowIndex(p); }
+  presentPractice = p;
   showDrill(presentIndex);
+  watchListViews(p);
+  flushViewQueue();
 }
+let presentPractice = null; // the practice on screen, for the audit log
 /** Status line under the presentation top bar (e.g. "Offline copy from …"); '' hides it. */
 function presentNote(text) {
   $('#present-note').textContent = text;
@@ -2711,6 +2716,7 @@ function wirePresentAnims(p) {
       if (a.intro) { a.intro.cancelled = true; a.intro.stop(); return; } // ⏸ during the intro skips it, parked at the start
       if (a.playing) { a.playing = false; cancelAnimationFrame(a.raf); voice.clear(); draw(); return; }
       primeVoice();
+      logDrillView(p, d.id, 'play');
       if (a.t >= full) a.t = 0;
       const go = () => { a.fresh = a.t === 0; a.playing = true; a.last = performance.now(); a.raf = requestAnimationFrame(step); draw(); };
       // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
@@ -2733,6 +2739,61 @@ function presentMsg(msg, canSignIn = false) {
   $('#present-signin').hidden = !canSignIn;
 }
 
+// ---------- audit log: who looked at which drill, and when ----------
+// Each viewer appends records to users/{owner}/practices/{pid}/views (rules: append-only in their own name;
+// the owner alone reads them). A "view" is a drill card on screen for 2 s; a "play" is its ▶. One record per
+// drill / action / viewer per 5 minutes, so a coach flipping back and forth doesn't flood the log.
+// Records that can't be written right away (offline at the rink) wait in localStorage for the next load.
+const VIEW_GAP = 5 * 60 * 1000;
+const viewLogged = new Map(); // `${pid}:${did}:${action}` → last logged ms
+let viewTimer = 0;
+const viewQueueKey = 'hpp.viewqueue';
+function logDrillView(p, did, action) {
+  if (!cloudBackend?.logView || !cloudSync?.user) return; // nobody to log as (offline copies with no session are anonymous)
+  if (presentOwner === ownerFor()) return; // the owner's own previews aren't audience views
+  const d = p.drills.find(x => x.id === did); if (!d) return;
+  const key = `${p.id}:${did}:${action}`;
+  const now = Date.now();
+  if (now - (viewLogged.get(key) || 0) < VIEW_GAP) return;
+  viewLogged.set(key, now);
+  const u = cloudSync.user;
+  const entry = { uid: u.uid, email: (u.email || '').toLowerCase(), name: u.name || '', drillId: did, drillName: d.name, action, at: now,
+    audience: presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' };
+  sendView(presentOwner, p.id, entry);
+}
+async function sendView(owner, pid, entry) {
+  try { await cloudBackend.logView(owner, pid, entry); }
+  catch { try { const q = JSON.parse(localStorage.getItem(viewQueueKey) || '[]'); q.push({ owner, pid, entry }); localStorage.setItem(viewQueueKey, JSON.stringify(q.slice(-200))); } catch { /* full: dropped */ } }
+}
+/** Retry records queued while offline — called once a signed-in session is up. */
+async function flushViewQueue() {
+  let q = [];
+  try { q = JSON.parse(localStorage.getItem(viewQueueKey) || '[]'); } catch { q = []; }
+  if (!q.length || !cloudBackend?.logView || !cloudSync?.user) return;
+  localStorage.removeItem(viewQueueKey);
+  for (const item of q) if (item.entry?.uid === cloudSync.user.uid) await sendView(item.owner, item.pid, item.entry);
+}
+/** The card on screen counts as viewed after it has been there 2 s (focus mode: the current card). */
+function noteCurrentView(p) {
+  clearTimeout(viewTimer);
+  const sec = presentCards()[presentIndex];
+  const did = sec?.dataset.did; if (!did) return;
+  viewTimer = setTimeout(() => { if (presentCards()[presentIndex]?.dataset.did === did) logDrillView(p, did, 'view'); }, 2000);
+}
+let presentViewIO = null; // list mode: a card scrolled at least half into view for 2 s
+function watchListViews(p) {
+  presentViewIO?.disconnect();
+  const timers = new Map();
+  presentViewIO = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      const did = e.target.dataset.did; if (!did) continue;
+      clearTimeout(timers.get(did));
+      if (e.isIntersecting && presentMode === 'list') timers.set(did, setTimeout(() => logDrillView(p, did, 'view'), 2000));
+    }
+  }, { threshold: 0.5 });
+  for (const sec of $$('#present-body .pr-drill[data-did]')) presentViewIO.observe(sec);
+}
+
 /** Show/hide presentation mode to match the URL; called at boot, on hash changes and on sign-in changes. */
 function refreshPresent() {
   const m = location.hash.match(/(?:view|team)=(\w+)\/(\w+)/);
@@ -2741,7 +2802,7 @@ function refreshPresent() {
   document.body.classList.toggle('presenting', presenting);
   $('#present').hidden = !presenting;
   keepAwake(presenting);
-  if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; return; }
+  if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentViewIO?.disconnect(); clearTimeout(viewTimer); return; }
   applyPresentMode();
   $('#present-user').textContent = cloudSync?.user?.name || '';
   const [, ownerUid, pid] = m;
@@ -2847,6 +2908,7 @@ function showDrill(i) {
   $('#present-next').disabled = presentIndex === cards.length - 1;
   if (presentMode === 'focus') $('#present-scroll').scrollTop = 0;
   layoutPresent();
+  if (presentMode === 'focus' && presentPractice) noteCurrentView(presentPractice);
 }
 
 /** Inline sizing for the two cases CSS can't do alone: the sideways portrait diagram and the phone-landscape row. */
@@ -2960,6 +3022,53 @@ async function copyShareLink(btn, route) {
   btn.textContent = '✓ Copied';
   setTimeout(() => { btn.textContent = old; }, 1500);
 }
+// ----- the owner's audit log of views -----
+const fmtWhen = ms => new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+async function openViewLog() {
+  const p = store.practice;
+  if (!cloudBackend?.loadViews || !cloudSync?.user || !store.data.ownerUid) return alert('Sign in first — the log lives in your cloud account.');
+  $('#practice-pop').hidden = true;
+  $('#viewlog').hidden = false;
+  $('#viewlog-title').textContent = practiceLabel(p);
+  $('#viewlog-body').innerHTML = '<p class="vl-empty">Loading…</p>';
+  let rows;
+  try { rows = await cloudBackend.loadViews(store.data.ownerUid, p.id); }
+  catch (e) { $('#viewlog-body').innerHTML = `<p class="vl-empty">Couldn't load the log: ${escHtml(e?.message || e)} — are the latest firestore.rules deployed?</p>`; return; }
+  renderViewLog(p, rows);
+}
+function renderViewLog(p, rows) {
+  if (!rows.length) { $('#viewlog-body').innerHTML = '<p class="vl-empty">Nobody has opened this practice yet. Views and plays by the coaches and families you shared it with will show up here.</p>'; return; }
+  const who = r => r.name && r.email ? `<span class="vl-who">${escHtml(r.name)} <span class="muted">${escHtml(r.email)}</span></span>` : `<span class="vl-who">${escHtml(r.name || r.email || r.uid)}</span>`;
+  // per drill: one line per person with their view / play counts and last time
+  const byDrill = new Map();
+  for (const r of rows) {
+    const d = byDrill.get(r.drillId) || new Map(); byDrill.set(r.drillId, d);
+    const k = r.uid || r.email; const v = d.get(k) || { r, views: 0, plays: 0, last: 0, first: Infinity };
+    if (r.action === 'play') v.plays++; else v.views++;
+    v.last = Math.max(v.last, r.at || 0); v.first = Math.min(v.first, r.at || Infinity);
+    d.set(k, v);
+  }
+  const order = [...p.drills.map(d => d.id), ...[...byDrill.keys()].filter(id => !p.drills.some(d => d.id === id))]; // current drills first, deleted ones after
+  const drillName = id => p.drills.find(d => d.id === id)?.name || rows.find(r => r.drillId === id)?.drillName || id;
+  const sections = order.filter(id => byDrill.has(id)).map((id, i) => {
+    const people = [...byDrill.get(id).values()].sort((a, b) => b.last - a.last);
+    return `<h3>${p.drills.some(d => d.id === id) ? `${p.drills.findIndex(d => d.id === id) + 1}. ` : ''}${escHtml(drillName(id))}${p.drills.some(d => d.id === id) ? '' : ' <span class="muted">(drill since removed)</span>'}</h3>
+      <table class="vl-table"><tr><th>Who</th><th>Views</th><th>Plays</th><th>First</th><th>Last</th><th>Via</th></tr>
+      ${people.map(v => `<tr><td>${who(v.r)}</td><td class="num">${v.views}</td><td class="num">${v.plays}</td><td class="when">${fmtWhen(v.first)}</td><td class="when">${fmtWhen(v.last)}</td><td class="muted">${escHtml(v.r.audience === 'team' ? 'team link' : 'coach link')}${v.r.device ? ` · ${escHtml(v.r.device)}` : ''}</td></tr>`).join('')}</table>`;
+  }).join('');
+  const feed = rows.slice(0, 150).map(r => `<li><span class="when">${fmtWhen(r.at || 0)}</span><span class="act">${r.action === 'play' ? '▶ play' : '👁 view'}</span>${who(r)}<span class="muted">${escHtml(r.drillName || drillName(r.drillId))}</span></li>`).join('');
+  const people = new Set(rows.map(r => r.uid || r.email)).size;
+  $('#viewlog-body').innerHTML = `<p class="muted small">${rows.length} record${rows.length === 1 ? '' : 's'} · ${people} ${people === 1 ? 'person' : 'people'} · a view is a drill on screen for 2 s, a play is its ▶ — at most one of each per person per drill every 5 minutes.</p>${sections}<h3>Recent activity</h3><ul class="vl-feed">${feed}</ul>`;
+}
+$('#btn-views').addEventListener('click', openViewLog);
+$('#viewlog-refresh').addEventListener('click', openViewLog);
+$('#viewlog-close').addEventListener('click', () => { $('#viewlog').hidden = true; });
+$('#viewlog').addEventListener('click', e => { if (e.target === e.currentTarget) $('#viewlog').hidden = true; });
+$('#viewlog-clear').addEventListener('click', async () => {
+  if (!confirm('Delete every record in this practice\'s views log?')) return;
+  try { await cloudBackend.clearViews(store.data.ownerUid, store.practice.id); openViewLog(); }
+  catch (e) { alert(`Couldn't clear the log: ${e?.message || e}`); }
+});
 $('#btn-share-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'view'));
 $('#btn-share-team-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'team'));
 

@@ -37,6 +37,8 @@
         <button id="btn-family-emails" title="Add every family contact email from this team's roster (👥 Team)">＋ from roster</button>
         <button id="btn-share-team-link" title="Copy the team's link — the practice without coaching notes or assignments">🔗 Team link</button>
       </div>
+      <h3>Who has looked</h3>
+      <button id="btn-views" title="The audit log: every drill view and play by the coaches and families you shared this practice with, with names and times">👁 Views log</button>
       <button id="btn-create-practice" class="primary">＋ Create new practice</button>
     </div>
   </div>
@@ -190,6 +192,19 @@
       <button id="team-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
     </div>
     <div id="team-body"></div>
+  </div>
+</div>
+<div id="viewlog" hidden>
+  <div class="lib-panel">
+    <div class="lib-head">
+      <b>👁 Views log</b>
+      <span id="viewlog-title" class="muted small"></span>
+      <span class="spacer"></span>
+      <button id="viewlog-refresh" title="Reload the log">Refresh</button>
+      <button id="viewlog-clear" class="danger" title="Delete every record in this practice's log">Clear log</button>
+      <button id="viewlog-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
+    </div>
+    <div id="viewlog-body"></div>
   </div>
 </div>
 <div id="gate" hidden>

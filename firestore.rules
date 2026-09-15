@@ -18,6 +18,18 @@ service cloud.firestore {
           request.auth.token.email.lower() in resource.data.get('sharedTeam', [])
         ))
       );
+      // Audit log: anyone who may read the practice can append a record of what they viewed or played,
+      // in their own name only; just the owner can read (or clear) the log.
+      match /views/{viewId} {
+        allow create: if request.auth != null && request.resource.data.uid == request.auth.uid && (
+          request.auth.uid == uid ||
+          ('email' in request.auth.token && (
+            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedWith', []) ||
+            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedTeam', [])
+          ))
+        );
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+      }
       // A drill's recorded intro clip: owner writes; readable by whoever may read the practice.
       match /clips/{drillId} {
         allow write: if request.auth != null && request.auth.uid == uid;

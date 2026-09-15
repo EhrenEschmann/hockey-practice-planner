@@ -49,6 +49,16 @@ export async function firebaseBackend(config) {
     async saveClip(uid, pid, did, clip) { await fs.setDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did), clip); },
     async loadClip(uid, pid, did) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did)); return s.exists() ? s.data() : null; },
     async removeClip(uid, pid, did) { await fs.deleteDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did)); },
+    // Audit log: users/{uid}/practices/{pid}/views/{autoId} — one record per drill view / play by a viewer.
+    async logView(uid, pid, entry) { await fs.addDoc(fs.collection(db, 'users', uid, 'practices', pid, 'views'), entry); },
+    async loadViews(uid, pid, max = 3000) {
+      const q = fs.query(fs.collection(db, 'users', uid, 'practices', pid, 'views'), fs.orderBy('at', 'desc'), fs.limit(max));
+      return (await fs.getDocs(q)).docs.map(d => ({ id: d.id, ...d.data() }));
+    },
+    async clearViews(uid, pid) {
+      const snap = await fs.getDocs(fs.collection(db, 'users', uid, 'practices', pid, 'views'));
+      await Promise.all(snap.docs.map(d => fs.deleteDoc(d.ref)));
+    },
     // The team roster: one document per user at users/{uid}/meta/roster.
     async loadRoster(uid) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'meta', 'roster')); return s.exists() ? s.data() : null; },
     async saveRoster(uid, r) { await fs.setDoc(fs.doc(db, 'users', uid, 'meta', 'roster'), r); },

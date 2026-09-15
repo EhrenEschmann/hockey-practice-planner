@@ -50,6 +50,7 @@ export const SVG_STYLE = `
   .puck{fill:#111}
   .pile-count{font-family:system-ui,sans-serif;pointer-events:none}
   .handle{fill:#fff;stroke:#3b82f6;stroke-width:.35;cursor:move}
+  .handle.hot{fill:#fde68a;stroke:#b45309;stroke-width:.6;r:1.7} /* the waypoint row hovered in the Selection panel */
   .handle:hover{fill:#bfdbfe}
   .obj{cursor:pointer}
   .selection{fill:none;stroke:#3b82f6;stroke-width:.4;stroke-dasharray:1 .8;pointer-events:none}

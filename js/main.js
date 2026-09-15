@@ -1734,23 +1734,26 @@ function renderProps() {
     const hasPath = !!o.path?.length;
     const start = tm.delay > 0 || o.trigger ? ` · starts at ${tm.delay.toFixed(1)} s` : '';
     extra.push(`<p class="muted">Path: ${tm.len.toFixed(0)} ft · ${(tm.len / tm.speed).toFixed(1)} s${start}${hasPath ? '' : ` (no path yet — use the Skater tool on this ${o.type} to add waypoints)`}</p>`);
-    if (o.type === 'skater' && o.path?.length && !o.follow) {
-      const toggles = o.path.map((pt, i) => `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1} — click cycles: no pivot → ⟲ face swings left → ⟳ face swings right">${i + 1}${pt.pivot === 'L' ? ' ⟲' : pt.pivot ? ' ⟳' : ''}</button>`).join('');
-      extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this skater is selected. A pivot turns the skater 180° (forward ⇄ backward); pick which way their face and the puck swing around.">Pivot forward ⇄ backward at waypoint</span><div class="row wp-row">${toggles}</div></div>`);
-      const stops = o.path.map((pt, i) => `<button class="wp-toggle ${+pt.stop > 0 ? 'active' : ''}" data-act="wpstop" data-wp="${i}" title="Full stop at waypoint ${i + 1} — the path turns sharply there (no arc) and everything downstream (passes, contacts) waits with them.">${i + 1}${+pt.stop > 0 ? ` ⏸${+pt.stop}s` : ''}</button>`).join('');
-      extra.push(`<div class="field"><span title="The skater comes to a full stop at the waypoint, holds, then continues.">Full stop at waypoint</span><div class="row wp-row">${stops}</div></div>`);
+    if (hasPath) {
+      // One consolidated waypoint list: position, pivot / full stop / voice cue toggles, and ✕ to remove —
+      // a waypoint buried under cones or other skaters is easier to reach here than by double-clicking on the ice.
+      const own = !o.follow;
+      const cueBtn = (k, cue, name) => (canSpeak || cue != null) ? `<button class="wp-toggle ${cue != null ? 'active' : ''}" data-act="cue" data-wp="${k}" title="Voice cue at ${name} — click to add or remove what is said when ${playerName(o)} gets there">🔊</button>` : '';
+      const rows = [`<div class="wp-item" data-wprow="start"><span class="wp-num">S</span><span class="wp-pos muted">(${Math.round(o.x)}, ${Math.round(o.y)})</span><span class="wp-what muted">start</span><span class="spacer"></span>${cueBtn('start', o.startCue, 'their start')}</div>`];
+      if (o.startCue != null) rows.push(`<label class="field inline wp-sub"><span>Say</span><input data-cue="start" value="${escHtml(o.startCue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
       o.path.forEach((pt, i) => {
-        if (+pt.stop > 0) extra.push(`<label class="field inline"><span>Hold at waypoint ${i + 1} (s)</span><input type="number" min="0" step="0.25" value="${+pt.stop}" data-wpstopdur="${i}" title="How long the full stop lasts — 0 removes it"></label>`);
+        const flags = [pt.pivot === 'L' ? 'pivot ⟲' : pt.pivot ? 'pivot ⟳' : '', +pt.stop > 0 ? `stop ${+pt.stop}s` : ''].filter(Boolean).join(' · ');
+        rows.push(`<div class="wp-item" data-wprow="${i}"><span class="wp-num">${i + 1}</span><span class="wp-pos muted">(${Math.round(pt.x)}, ${Math.round(pt.y)})</span><span class="wp-what muted">${flags}</span><span class="spacer"></span>
+          ${o.type === 'skater' && own ? `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1} (forward ⇄ backward) — click cycles: none → ⟲ face swings left → ⟳ face swings right">⇄</button><button class="wp-toggle ${+pt.stop > 0 ? 'active' : ''}" data-act="wpstop" data-wp="${i}" title="Full stop at waypoint ${i + 1} — a sharp turn, and everything downstream (passes, contacts) waits with them">⏸</button>` : ''}
+          ${cueBtn(String(i), pt.cue, `waypoint ${i + 1}`)}
+          ${own ? `<button class="wp-toggle wp-del" data-act="wpdel" data-wp="${i}" title="Remove waypoint ${i + 1}">✕</button>` : ''}</div>`);
+        if (+pt.stop > 0) rows.push(`<label class="field inline wp-sub"><span>Hold (s)</span><input type="number" min="0" step="0.25" value="${+pt.stop}" data-wpstopdur="${i}" title="How long the full stop lasts — 0 removes it"></label>`);
+        if (pt.cue != null) rows.push(`<label class="field inline wp-sub"><span>Say</span><input data-cue="${i}" value="${escHtml(pt.cue)}" placeholder="e.g. Head up" autocomplete="off"></label>`);
       });
-    }
-    if (canSpeak || o.startCue != null || (o.path || []).some(pt => pt.cue != null)) {
-      // Voice cues: a toggle per point (S = their start); a toggled point gets a text box below
-      const pts = [['start', 'S', o.startCue, 'their start'], ...(o.path || []).map((pt, i) => [String(i), String(i + 1), pt.cue, `waypoint ${i + 1}`])];
-      const toggles = pts.map(([k, lbl, cue, name]) => `<button class="wp-toggle ${cue != null ? 'active' : ''}" data-act="cue" data-wp="${k}" title="Say something when ${playerName(o)} reaches ${name} — click to add or remove the cue">${lbl}${cue?.trim() ? ' 🔊' : ''}</button>`).join('');
-      extra.push(`<div class="field"><span title="Type what to say; it is read aloud (and shown under the rink) during playback the moment this player reaches the point. Waypoints are numbered on the ice while the player is selected.">Voice cue at</span><div class="row wp-row">${toggles}</div></div>`);
-      pts.forEach(([k, lbl, cue, name]) => {
-        if (cue != null) extra.push(`<label class="field inline"><span>Say at ${name}</span><input data-cue="${k}" value="${escHtml(cue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
-      });
+      extra.push(`<div class="field"><span title="Waypoints are numbered on the ice while this player is selected. Hover a row to light its handle up on the ice. ⇄ pivot · ⏸ full stop · 🔊 voice cue · ✕ remove.">Waypoints${own ? '' : ` — ${playerName(getObj(o.follow))}'s route`}</span><div class="wp-list">${rows.join('')}</div></div>`);
+    } else if (canSpeak || o.startCue != null) {
+      extra.push(`<div class="field"><span>Voice cue at their start</span><div class="row wp-row"><button class="wp-toggle ${o.startCue != null ? 'active' : ''}" data-act="cue" data-wp="start" title="Say something when ${playerName(o)} starts — click to add or remove">🔊${o.startCue?.trim() ? ' set' : ''}</button></div></div>`);
+      if (o.startCue != null) extra.push(`<label class="field inline"><span>Say at their start</span><input data-cue="start" value="${escHtml(o.startCue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
     }
     if (o.type === 'skater') {
       const leaders = drill().objects.filter(s => s.type === 'skater' && s.id !== o.id && !s.follow && s.path?.length);
@@ -2019,6 +2022,10 @@ propsBody.addEventListener('input', e => {
   store.save(); renderCanvas(); renderAnimBar();
 });
 propsBody.addEventListener('change', () => { store.commitPending(); renderUI(); });
+// Hovering a waypoint row lights its handle on the ice, so a buried waypoint can be found before it is removed.
+const hotHandle = (row, on) => { if (!row || !sel) return; const h = objLayer.querySelector(`[data-id="${sel}"] .handle[data-handle="${row.dataset.wprow}"]`); h?.classList.toggle('hot', on); };
+propsBody.addEventListener('mouseover', e => hotHandle(e.target.closest('.wp-item'), true));
+propsBody.addEventListener('mouseout', e => hotHandle(e.target.closest('.wp-item'), false));
 propsBody.addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn) return;
   btn.blur(); // so renderProps() isn't skipped for "focus inside panel"
@@ -2052,6 +2059,11 @@ propsBody.addEventListener('click', e => {
     case 'wpstop': {
       const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
       commit(() => { if (+pt.stop > 0) delete pt.stop; else pt.stop = 1; }); // toggle; tune the seconds in the input below
+      renderProps(); break;
+    }
+    case 'wpdel': { // remove a waypoint from the list (same as double-clicking its handle on the ice)
+      const i = +btn.dataset.wp; if (!o.path?.[i]) break;
+      commit(() => o.path.splice(i, 1));
       renderProps(); break;
     }
     case 'cue': { // add (empty, ready to type) or remove the spoken cue at a point

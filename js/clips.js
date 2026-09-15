@@ -27,31 +27,56 @@ export const idbPutClip = (key, val) => tx('readwrite', s => s.put(val, key));
 export const idbDelClip = key => tx('readwrite', s => s.delete(key));
 
 export const canRecord = () => !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
-/** Recording format: AAC in mp4 plays on every phone; Opus in WebM is the fallback where the browser can't write mp4. */
-export function pickMime() {
-  // AAC first: plain 'audio/mp4' can come back as Opus-in-MP4 (Chrome), which iPhones don't play.
-  return ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4;codecs=aac', 'audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'].find(m => MediaRecorder.isTypeSupported?.(m)) || '';
-}
+/**
+ * Recording formats, best first. AAC in mp4 plays on every phone; Opus (in mp4 or WebM) is the fallback.
+ * `isTypeSupported` is only a claim — Chrome says yes to AAC and then fails with an EncodingError the
+ * moment recording starts — so startRecording() tries each format for real and keeps the first that
+ * actually delivers audio.
+ */
+const FORMATS = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+const FORMAT_KEY = 'hpp.recmime'; // the format that worked last time on this browser
 export const canPlay = mime => !!document.createElement('audio').canPlayType(String(mime || '').split(';')[0]);
 
 /** Start recording from the microphone; `stop()` resolves { blob, mime, secs }. Stops itself at maxSecs. */
 export async function startRecording({ maxSecs = 90 } = {}) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const mime = pickMime();
-  const rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 32000 }); // speech: 32 kb/s is plenty
-  const chunks = [];
-  const t0 = performance.now();
+  let known = null;
+  try { known = localStorage.getItem(FORMAT_KEY); } catch { /* fine */ }
+  const order = [...new Set([...(known ? [known] : []), ...FORMATS.filter(m => MediaRecorder.isTypeSupported?.(m)), ''])];
+  let rec = null, chunks = [], t0 = 0;
+  const tried = [];
+  for (const mime of order) {
+    try { rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 32000 }); } catch { tried.push(mime || 'default'); continue; }
+    chunks = [];
+    // Proof of life: the first chunk with bytes in it (or 700 ms still recording) means the encoder works.
+    const alive = await new Promise(res => {
+      let settled = false;
+      const done = v => { if (!settled) { settled = true; res(v); } };
+      rec.ondataavailable = e => { if (e.data.size) { chunks.push(e.data); done(true); } };
+      rec.onerror = () => done(false);
+      rec.onstop = () => done(false);
+      t0 = performance.now();
+      try { rec.start(250); } catch { done(false); }
+      setTimeout(() => done(rec.state === 'recording'), 700);
+    });
+    if (alive) break;
+    tried.push(mime || 'default');
+    try { if (rec.state !== 'inactive') rec.stop(); } catch { /* already dead */ }
+    rec = null;
+  }
+  if (!rec) { stream.getTracks().forEach(t => t.stop()); throw new Error(`this browser couldn't encode audio (tried ${tried.join(', ')})`); }
+  const mime = rec.mimeType || order[0] || 'audio/webm';
+  try { localStorage.setItem(FORMAT_KEY, mime); } catch { /* fine */ }
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onerror = () => { try { rec.stop(); } catch { /* fine */ } };
   const done = new Promise(res => {
     rec.onstop = () => {
       stream.getTracks().forEach(t => t.stop());
-      const type = rec.mimeType || mime || 'audio/webm';
-      res({ blob: new Blob(chunks, { type }), mime: type, secs: Math.round((performance.now() - t0) / 100) / 10 });
+      res({ blob: new Blob(chunks, { type: mime }), mime, secs: Math.round((performance.now() - t0) / 100) / 10 });
     };
   });
-  rec.start(250);
   const timer = setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, maxSecs * 1000);
-  return { stop() { clearTimeout(timer); if (rec.state === 'recording') rec.stop(); return done; }, since: t0 };
+  return { stop() { clearTimeout(timer); if (rec.state === 'recording') rec.stop(); else if (rec.state === 'inactive') { /* already stopped by an error: onstop has resolved or will */ } return done; }, since: t0 };
 }
 
 export const blobToBase64 = blob => new Promise((res, rej) => {

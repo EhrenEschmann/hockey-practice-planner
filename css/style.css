@@ -192,6 +192,9 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 /* presentation mode: read-only scroll-through of a practice (own preview or a shared coach view) */
 #present{position:fixed;inset:0;z-index:600;background:var(--bg);display:flex;flex-direction:column}
+/* The editor underneath is wider than a phone; mobile browsers widen the layout viewport to fit it, which
+   would stretch this fixed overlay far past the screen. So the editor is taken out of layout while presenting. */
+body.presenting #topbar,body.presenting #viewbar,body.presenting #layout{display:none}
 #present[hidden]{display:none}
 #present-top{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
 #present-note{padding:5px 14px;background:#3a3320;color:#e6c15a;font-size:12.5px;border-bottom:1px solid var(--border);flex:none}
@@ -205,7 +208,8 @@ body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 .pr-drill header b{font-size:15px}
 .pr-min{color:var(--muted);font-size:13px}
 .pr-time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
-.pr-drill > svg{width:100%;height:auto;border-radius:6px;display:block} /* the rink diagram only — not button icons */
+.pr-fig{position:relative}
+.pr-fig > svg{width:100%;height:auto;border-radius:6px;display:block} /* the rink diagram only — not button icons */
 .pr-animbar .lucide{width:15px;height:15px}
 .pr-animbar{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
 .pr-animbar .pr-tl{min-width:120px}
@@ -223,6 +227,82 @@ body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
 .pr-pstile figcaption{font-size:12px;color:var(--muted);padding:4px 8px 6px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #present-gate{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.82)}
 #present-gate[hidden]{display:none}
+.pr-break{display:none}
+
+/* ---- rink mode: one drill at a time, sized for a phone held in a glove ----
+   #present.focus shows only the .current drill card, with a prev/next bar underneath; swipe changes drills,
+   tapping the diagram plays it, and in portrait the diagram can be turned sideways to fill the screen. */
+#present{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#present-top{padding-top:calc(8px + env(safe-area-inset-top));padding-left:calc(14px + env(safe-area-inset-left));padding-right:calc(14px + env(safe-area-inset-right))}
+#present-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.pr-top-btn{padding:6px 9px;line-height:1;flex:none}
+.pr-top-btn .lucide{width:18px;height:18px;vertical-align:-4px;display:block}
+.pr-top-btn[hidden]{display:none}
+.pr-top-btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+#present-nav{display:flex;align-items:stretch;gap:8px;padding:8px calc(10px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));background:var(--panel);border-top:1px solid var(--border);flex:none}
+#present-nav[hidden]{display:none}
+#present-nav button{min-height:54px;font-size:16px}
+#present-prev,#present-next{flex:0 0 76px}
+#present-prev .lucide,#present-next .lucide{width:30px;height:30px;vertical-align:middle}
+#present-jump{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:0;padding:4px 8px}
+.pr-nav-count{font-weight:600}
+.pr-nav-next{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#present-picker{position:absolute;inset:0;z-index:5;display:flex;align-items:flex-end;justify-content:center;background:rgba(15,17,22,.7)}
+#present-picker[hidden]{display:none}
+.pr-picker-sheet{background:var(--panel);border:1px solid var(--border);border-radius:14px 14px 0 0;width:min(560px,100%);max-height:80%;display:flex;flex-direction:column;padding:12px 12px calc(12px + env(safe-area-inset-bottom))}
+.pr-picker-sheet h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+#present-picker-list{list-style:none;margin:0;padding:0;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+#present-picker-list li{display:flex;align-items:center;gap:8px;padding:12px 10px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:15px;min-height:48px}
+#present-picker-list li.current{border-color:var(--accent);background:#1e2a44}
+#present-picker-list li .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#present-picker-list li .when{color:var(--muted);font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+#present.focus #present-body{max-width:none}
+#present.focus .pr-head{display:none} /* the practice title lives in the top bar; the card gets the whole screen */
+#present.focus #present-scroll{padding:8px calc(8px + env(safe-area-inset-right)) 8px calc(8px + env(safe-area-inset-left))}
+#present.focus .pr-drill{display:none;margin-top:0;padding:4px 4px 8px;border:none;background:transparent;border-radius:0}
+#present.focus .pr-drill.current{display:block}
+#present.focus .pr-drill header{margin-bottom:6px;flex-wrap:wrap}
+#present.focus .pr-drill header b{font-size:18px}
+#present.focus .pr-min,#present.focus .pr-time{font-size:15px}
+#present.focus .pr-drill pre{font-size:15px;line-height:1.5;margin-top:10px}
+#present.focus .pr-fig.rotated{overflow:hidden;margin:0 auto}
+#present.focus .pr-fig.rotated > svg{position:absolute;top:0;left:0;transform-origin:0 0;transform:rotate(90deg) translateY(-100%)}
+/* big, gloved-thumb controls */
+#present.focus .pr-break{display:block;flex-basis:100%;height:0}
+#present.focus .pr-animbar{gap:8px 10px;margin-top:10px}
+#present.focus .pr-animbar .pr-play{min-height:54px;min-width:80px;padding:0 20px;background:var(--accent);border-color:var(--accent);color:#fff}
+#present.focus .pr-animbar .pr-play .lucide{width:26px;height:26px}
+#present.focus .pr-animbar .pr-tl{flex:1 1 120px;height:44px;margin:0;-webkit-appearance:none;appearance:none;background:transparent;border:none}
+#present.focus .pr-tl::-webkit-slider-runnable-track{height:10px;border-radius:5px;background:var(--panel-2);border:1px solid var(--border)}
+#present.focus .pr-tl::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:30px;height:30px;border-radius:50%;background:var(--accent);border:2px solid #fff;margin-top:-11px;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+#present.focus .pr-tl::-moz-range-track{height:10px;border-radius:5px;background:var(--panel-2);border:1px solid var(--border)}
+#present.focus .pr-tl::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--accent);border:2px solid #fff}
+#present.focus .pr-timedisp{font-size:15px;min-width:92px;text-align:right}
+#present.focus .pr-animbar select{min-height:44px;font-size:15px;padding:0 10px}
+#present.focus .pr-animbar .check{min-height:44px;font-size:15px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel-2)}
+#present.focus .pr-animbar .check input[type=checkbox]{width:22px;height:22px;margin:0}
+#present.focus .pr-impact:empty{display:none}
+#present.focus .pr-psgrid{grid-template-columns:1fr}
+/* phone on its side: the diagram fills the height, the name / controls / notes stack in a column beside it */
+#present.landscape #present-top{padding-top:calc(4px + env(safe-area-inset-top));padding-bottom:4px}
+#present.landscape #present-nav{padding-top:5px;padding-bottom:calc(5px + env(safe-area-inset-bottom))}
+#present.landscape #present-nav button{min-height:42px}
+#present.landscape .pr-drill.current{display:grid;grid-template-columns:auto minmax(190px,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:12px;align-items:start}
+#present.landscape .pr-drill.current header{grid-area:1/2;margin-bottom:0}
+#present.landscape .pr-drill.current .pr-fig{grid-area:1/1/4/2}
+#present.landscape .pr-drill.current .pr-animbar{grid-area:2/2;margin-top:6px}
+#present.landscape .pr-drill.current pre{grid-area:3/2;margin-top:6px;overflow:auto}
+#present.landscape .pr-drill.current .pr-psgrid{grid-area:1/1/4/3;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+#present.landscape .pr-drill.current .pr-psgrid ~ pre{grid-area:auto;grid-column:1/-1}
+@media (max-width:640px){
+  #present-user{display:none}
+  #present-top{gap:6px}
+}
+@media (pointer:coarse){ /* the scroll-through list on a touch screen: still usable in a glove */
+  .pr-animbar .pr-play{min-height:44px;min-width:60px}
+  .pr-animbar select{min-height:40px}
+}
 
 #print-area{display:none}
 @media print{

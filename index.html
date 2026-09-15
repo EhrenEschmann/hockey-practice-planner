@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f232d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Practice">
 <title>Hockey Practice Planner</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ctext y=%2726%27 font-size=%2726%27%3E🏒%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
@@ -198,9 +203,18 @@
     <b id="present-title"></b>
     <span class="spacer"></span>
     <span id="present-user" class="muted small"></span>
+    <button id="present-rotate" class="pr-top-btn" title="Turn the diagram sideways so it fills a phone held upright" hidden><span data-icon="rotate"></span></button>
+    <button id="present-mode" class="pr-top-btn" title="Switch between one drill at a time (phone) and the whole plan as a scroll-through"><span data-icon="list"></span></button>
+    <button id="present-full" class="pr-top-btn" title="Full screen" hidden><span data-icon="fullscreen"></span></button>
   </div>
   <div id="present-note" hidden></div>
   <div id="present-scroll"><div id="present-body"></div></div>
+  <div id="present-nav" hidden>
+    <button id="present-prev" title="Previous drill (swipe right)"><span data-icon="prev"></span></button>
+    <button id="present-jump" title="Jump to a drill"><span class="pr-nav-count"></span><span class="pr-nav-next muted small"></span></button>
+    <button id="present-next" title="Next drill (swipe left)"><span data-icon="next"></span></button>
+  </div>
+  <div id="present-picker" hidden><div class="pr-picker-sheet"><h3>Jump to drill</h3><ol id="present-picker-list"></ol></div></div>
   <div id="present-gate" hidden>
     <div class="gate-card">
       <div class="gate-brand">🏒 Practice Plan</div>

@@ -749,8 +749,8 @@ function setView(v) { drill().view = { ...v }; store.save(); renderCanvas(); }
 let gated = false; // sign-in required (Firebase configured, nobody signed in): the app is read-only behind the gate
 
 document.addEventListener('keydown', e => {
+  if (presenting) { presentKeydown(e); return; } // presentation is view-only and terminal: no editor shortcuts, no way "back"
   if (gated) return;
-  if (presenting) return; // presentation is view-only and terminal: no editor shortcuts, no way "back"
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
@@ -2167,10 +2167,12 @@ function presentHTML(p) {
   const startMin = parseStart(p);
   let t = startMin;
   return `
+    <div class="pr-head">
     <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
     <div class="pr-meta">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
     ${p.coaches && forCoaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
     <div class="pr-meta">${p.drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
+    </div>
     ${p.drills.map((d, i) => {
       const at = t; if (t != null) t += (+d.duration || 0);
       if (isPSDrill(d)) {
@@ -2188,11 +2190,12 @@ function presentHTML(p) {
       return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
-        ${standaloneSVG(d, rink, SVG_STYLE, undefined, { showPaths: d.showPaths !== false })}
+        <div class="pr-fig" data-ar="${(d.view.w / d.view.h).toFixed(3)}">${standaloneSVG(d, rink, SVG_STYLE, undefined, { showPaths: d.showPaths !== false })}</div>
         <div class="pr-animbar">
           <button class="pr-play" title="Watch the drill">${icon('play')}</button>
           <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
           <span class="pr-timedisp muted small"></span>
+          <span class="pr-break"></span>
           <select class="pr-speed" title="Playback speed">${['0.25', '0.5', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
           <span class="pr-impact"></span>
@@ -2209,6 +2212,10 @@ function presentDoc(p) {
   wirePresentAnims(p);
   $('#present-gate').hidden = true;
   presentNote('');
+  // Rink mode: opening a practice lands on the drill that's happening right now (by the practice clock);
+  // a live update while viewing keeps the coach on the drill they were looking at.
+  if (presentShownId !== p.id) { presentShownId = p.id; presentIndex = drillNowIndex(p); }
+  showDrill(presentIndex);
 }
 /** Status line under the presentation top bar (e.g. "Offline copy from …"); '' hides it. */
 function presentNote(text) {
@@ -2238,7 +2245,7 @@ function wirePresentAnims(p) {
   const rinkStr = rinkSVG();
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     const d = p.drills.find(x => x.id === sec.dataset.did);
-    let svgEl = sec.querySelector('svg');
+    let svgEl = sec.querySelector('.pr-fig > svg');
     const bar = sec.querySelector('.pr-animbar');
     if (!d || !svgEl || !bar) continue;
     // The card animates a local view of the drill, so a coach's tweaks (impact loser) never touch the practice.
@@ -2260,6 +2267,7 @@ function wirePresentAnims(p) {
       svgEl = fresh;
       svgEl.appendChild(fx);
       draw();
+      layoutPresent(); // a rotated / landscape diagram is sized inline; the fresh copy needs it again
     });
     // "Impact: worse for" — same control as the editor's animation bar, when the drill has real impacts
     const impacts = sm.contacts();
@@ -2301,6 +2309,9 @@ function wirePresentAnims(p) {
       draw();
     });
     tl.addEventListener('input', () => { a.t = +tl.value; draw(); });
+    // On a phone the diagram itself is the biggest play button there is.
+    sec.querySelector('.pr-fig').addEventListener('click', () => btn.click());
+    sec._pause = () => { if (a.playing) btn.click(); }; // leaving the drill in rink mode parks its animation
     draw();
   }
 }
@@ -2317,7 +2328,9 @@ function refreshPresent() {
   presenting = !!m;
   document.body.classList.toggle('presenting', presenting);
   $('#present').hidden = !presenting;
-  if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; return; }
+  keepAwake(presenting);
+  if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; return; }
+  applyPresentMode();
   $('#present-user').textContent = cloudSync?.user?.name || '';
   const [, ownerUid, pid] = m;
   const mine = store.data.practices.find(x => x.id === pid);
@@ -2354,6 +2367,170 @@ function refreshPresent() {
     presentDoc(p);
   });
 }
+
+// ---------- rink mode: the presentation on a phone, one drill at a time ----------
+// Coaches read the plan on a phone at the bench: focus mode shows a single drill card filling the screen
+// with glove-sized controls, prev/next + swipe to move through the practice, a jump list, an optional
+// sideways diagram for a phone held upright, full screen, and a wake lock so the screen stays on.
+let presentMode = null;      // 'focus' (one drill) | 'list' (the whole plan as a scroll-through)
+let presentRotate = false;   // focus + portrait: draw the diagram turned 90° so the long side runs down the screen
+let presentIndex = 0;        // which .pr-drill card is on screen in focus mode
+let presentShownId = null;   // practice currently rendered — the "now" drill is only picked when this changes
+try {
+  presentMode = localStorage.getItem('hpp.viewmode');
+  presentRotate = localStorage.getItem('hpp.viewrot') === '1';
+} catch { /* storage blocked: defaults */ }
+if (presentMode !== 'focus' && presentMode !== 'list') presentMode = matchMedia('(pointer: coarse)').matches ? 'focus' : 'list';
+
+const presentCards = () => $$('#present-body .pr-drill');
+const inLandscape = () => matchMedia('(orientation: landscape) and (max-height: 560px)').matches; // a phone on its side
+
+/** Index of the drill that should be on screen right now: by the wall clock when the practice is today, else the first. */
+function drillNowIndex(p) {
+  const start = parseStart(p);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (start == null || p.date !== today) return 0;
+  const min = now.getHours() * 60 + now.getMinutes();
+  let t = start;
+  for (let i = 0; i < p.drills.length; i++) { t += +p.drills[i].duration || 0; if (min < t) return i; }
+  return p.drills.length; // practice is over: the dismissal card (clamped to the last drill if there is none)
+}
+
+function applyPresentMode() {
+  const focus = presentMode === 'focus';
+  $('#present').classList.toggle('focus', focus);
+  $('#present-nav').hidden = !focus;
+  $('#present-mode').innerHTML = icon(focus ? 'list' : 'focus');
+  $('#present-mode').title = focus ? 'Show the whole plan as a scroll-through' : 'One drill at a time (phone / rink mode)';
+  $('#present-full').hidden = !document.documentElement.requestFullscreen; // iPhone Safari has no page fullscreen — add to Home Screen instead
+  $('#present-rotate').classList.toggle('on', presentRotate);
+  layoutPresent();
+}
+function setPresentMode(m) {
+  presentMode = m;
+  try { localStorage.setItem('hpp.viewmode', m); } catch { /* fine */ }
+  applyPresentMode();
+  if (m === 'focus') showDrill(presentIndex);
+  else $('#present-scroll').scrollTop = 0;
+}
+
+/** Put card i on screen (focus mode); in list mode it just records the index and refreshes the nav. */
+function showDrill(i) {
+  const cards = presentCards();
+  if (!cards.length) return;
+  presentIndex = Math.max(0, Math.min(cards.length - 1, i));
+  cards.forEach((c, k) => {
+    const cur = k === presentIndex;
+    if (!cur && presentMode === 'focus') c._pause?.();
+    c.classList.toggle('current', cur);
+  });
+  const nameOf = c => c.querySelector('header b')?.textContent || '';
+  $('.pr-nav-count').textContent = `${presentIndex + 1} / ${cards.length}`;
+  const next = cards[presentIndex + 1];
+  $('.pr-nav-next').textContent = next ? `Next: ${nameOf(next)}` : 'End of practice';
+  $('#present-prev').disabled = presentIndex === 0;
+  $('#present-next').disabled = presentIndex === cards.length - 1;
+  if (presentMode === 'focus') $('#present-scroll').scrollTop = 0;
+  layoutPresent();
+}
+
+/** Inline sizing for the two cases CSS can't do alone: the sideways portrait diagram and the phone-landscape row. */
+function layoutPresent() {
+  if (!presenting) return;
+  const focus = presentMode === 'focus';
+  const landscape = focus && inLandscape();
+  $('#present').classList.toggle('landscape', landscape);
+  const scroll = $('#present-scroll');
+  const curAr = +presentCards()[presentIndex]?.querySelector('.pr-fig')?.dataset.ar || 0;
+  $('#present-rotate').hidden = !focus || landscape || curAr <= 1.05; // only offered when the diagram is wider than tall
+  for (const sec of presentCards()) {
+    const fig = sec.querySelector('.pr-fig'), svgEl = fig?.querySelector('svg');
+    if (!fig || !svgEl) continue;
+    fig.style.cssText = ''; svgEl.style.cssText = ''; fig.classList.remove('rotated');
+    if (!focus || !sec.classList.contains('current')) continue;
+    const ar = +fig.dataset.ar || 2.26;
+    if (landscape) {
+      // diagram fills the height, capped so the header / controls column beside it keeps ~200px
+      const availH = scroll.clientHeight - 24, availW = scroll.clientWidth - 24 - 200;
+      fig.style.width = `${Math.max(160, Math.min(availW, availH * ar))}px`;
+    } else if (presentRotate && ar > 1.05) {
+      // turned 90°: the rink's long side runs down the phone. Box on screen is w × h; the svg is laid out h × w then rotated.
+      const availH = scroll.clientHeight - 24 - 120, availW = scroll.clientWidth - 24; // leave room for the name and the play row
+      const h = Math.max(220, Math.min(availH, availW * ar)), w = h / ar;
+      fig.classList.add('rotated');
+      fig.style.width = `${w}px`; fig.style.height = `${h}px`;
+      svgEl.style.width = `${h}px`; svgEl.style.height = `${w}px`;
+    }
+  }
+}
+
+function presentKeydown(e) {
+  if (isEditing()) return;
+  if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); showDrill(presentIndex + 1); }
+  else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); showDrill(presentIndex - 1); }
+  else if (e.key === ' ' && presentMode === 'focus') { e.preventDefault(); presentCards()[presentIndex]?.querySelector('.pr-play')?.click(); }
+  else if (e.key === 'Escape') closePicker();
+}
+
+// jump list: every drill with its clock time
+function openPicker() {
+  const cards = presentCards();
+  $('#present-picker-list').innerHTML = cards.map((c, i) => `<li class="${i === presentIndex ? 'current' : ''}" data-i="${i}">
+    <span class="name">${escHtml(c.querySelector('header b')?.textContent || '')}</span>
+    <span class="when">${escHtml([c.querySelector('.pr-min')?.textContent, c.querySelector('.pr-time')?.textContent].filter(Boolean).join(' · '))}</span></li>`).join('');
+  $('#present-picker').hidden = false;
+  $('#present-picker-list li.current')?.scrollIntoView({ block: 'center' });
+}
+function closePicker() { $('#present-picker').hidden = true; }
+$('#present-jump').addEventListener('click', openPicker);
+$('#present-picker').addEventListener('click', e => {
+  const li = e.target.closest('li[data-i]');
+  if (li) showDrill(+li.dataset.i);
+  closePicker();
+});
+$('#present-prev').addEventListener('click', () => showDrill(presentIndex - 1));
+$('#present-next').addEventListener('click', () => showDrill(presentIndex + 1));
+$('#present-mode').addEventListener('click', () => setPresentMode(presentMode === 'focus' ? 'list' : 'focus'));
+$('#present-rotate').addEventListener('click', () => {
+  presentRotate = !presentRotate;
+  try { localStorage.setItem('hpp.viewrot', presentRotate ? '1' : '0'); } catch { /* fine */ }
+  $('#present-rotate').classList.toggle('on', presentRotate);
+  layoutPresent();
+});
+$('#present-full').addEventListener('click', () => {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+});
+document.addEventListener('fullscreenchange', () => { $('#present-full').innerHTML = icon(document.fullscreenElement ? 'unfullscreen' : 'fullscreen'); });
+
+// swipe left / right across the card changes drills (a drag on the scrubber or a 3D tile is not a swipe)
+let swipe = null;
+$('#present-scroll').addEventListener('touchstart', e => {
+  swipe = null;
+  if (presentMode !== 'focus' || e.touches.length !== 1 || e.target.closest('input,select,button,canvas')) return;
+  swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now() };
+}, { passive: true });
+$('#present-scroll').addEventListener('touchend', e => {
+  if (!swipe) return;
+  const dx = e.changedTouches[0].clientX - swipe.x, dy = e.changedTouches[0].clientY - swipe.y, dt = Date.now() - swipe.at;
+  swipe = null;
+  if (dt < 800 && Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) showDrill(presentIndex + (dx < 0 ? 1 : -1));
+}, { passive: true });
+window.addEventListener('resize', layoutPresent);
+
+// Keep the screen on while the plan is up at the bench (Screen Wake Lock: Chrome/Android, iOS 16.4+ Safari).
+let wakeLock = null;
+async function keepAwake(on) {
+  if (!('wakeLock' in navigator)) return;
+  if (!on) { wakeLock?.release().catch(() => {}); wakeLock = null; return; }
+  if (wakeLock || document.visibilityState !== 'visible') return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch { wakeLock = null; } // low battery / not allowed: the plan still works, the screen just times out
+}
+document.addEventListener('visibilitychange', () => { if (presenting && document.visibilityState === 'visible') keepAwake(true); });
 
 $('#btn-present').addEventListener('click', () => {
   // Presentation is its own destination (same URL coaches get) — a new tab, so the editor stays put.

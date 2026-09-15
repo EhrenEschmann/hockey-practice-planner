@@ -12,6 +12,8 @@ const WANTED = {
   undo: ['undo-2'], redo: ['redo-2'], play: ['play'], pause: ['pause'], stop: ['square'],
   notes: ['sticky-note'], edit: ['pencil'], up: ['chevron-up'], down: ['chevron-down'],
   copy: ['copy'], x: ['x'], check: ['check'], library: ['library', 'library-big'],
+  prev: ['chevron-left'], next: ['chevron-right'], rotate: ['rotate-cw'], fullscreen: ['maximize'], unfullscreen: ['minimize'],
+  list: ['rows-3', 'list'], focus: ['smartphone'],
 };
 
 const out = {};

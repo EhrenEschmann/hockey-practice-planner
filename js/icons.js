@@ -33,6 +33,13 @@ const ICONS = {
   "x": "<path d=\"M18 6 6 18\" /><path d=\"m6 6 12 12\" />", // lucide: x
   "check": "<path d=\"M20 6 9 17l-5-5\" />", // lucide: check
   "library": "<path d=\"m16 6 4 14\" /><path d=\"M12 6v14\" /><path d=\"M8 8v12\" /><path d=\"M4 4v16\" />", // lucide: library
+  "prev": "<path d=\"m15 18-6-6 6-6\" />", // lucide: chevron-left
+  "next": "<path d=\"m9 18 6-6-6-6\" />", // lucide: chevron-right
+  "rotate": "<path d=\"M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8\" /><path d=\"M21 3v5h-5\" />", // lucide: rotate-cw
+  "fullscreen": "<path d=\"M8 3H5a2 2 0 0 0-2 2v3\" /><path d=\"M21 8V5a2 2 0 0 0-2-2h-3\" /><path d=\"M3 16v3a2 2 0 0 0 2 2h3\" /><path d=\"M16 21h3a2 2 0 0 0 2-2v-3\" />", // lucide: maximize
+  "unfullscreen": "<path d=\"M8 3v3a2 2 0 0 1-2 2H3\" /><path d=\"M21 8h-3a2 2 0 0 1-2-2V3\" /><path d=\"M3 16h3a2 2 0 0 1 2 2v3\" /><path d=\"M16 21v-3a2 2 0 0 1 2-2h3\" />", // lucide: minimize
+  "list": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" /><path d=\"M21 9H3\" /><path d=\"M21 15H3\" />", // lucide: rows-3
+  "focus": "<rect width=\"14\" height=\"20\" x=\"5\" y=\"2\" rx=\"2\" ry=\"2\" /><path d=\"M12 18h.01\" />", // lucide: smartphone
 };
 
 /** Inline SVG markup for a named icon (24×24 viewBox, stroked with currentColor). */

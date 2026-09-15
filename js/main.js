@@ -2553,7 +2553,7 @@ function presentHTML(p) {
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
-        ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+        <div class="pr-text">${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}</div>
       </section>`;
       }
       return `
@@ -2570,9 +2570,9 @@ function presentHTML(p) {
           ${hasVoice(d) ? `<button class="pr-voice wp-toggle ${voiceOn ? 'active' : ''}" title="${voiceOn ? 'Voice cues on — click to mute' : 'Voice cues muted — click to hear them'}">🔊 voice</button>` : ''}
           <span class="pr-impact"></span>
         </div>
-        <div class="pr-cue" hidden></div>
+        <div class="pr-text"><div class="pr-cue" hidden></div>
         ${rulesHTML(d)}
-        ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+        ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}</div>
       </section>`;
     }).join('')}
     ${startMin != null ? `<section class="pr-drill"><header><b>* Dismissal</b><span class="pr-time">${clock(startMin + total)}</span></header></section>` : ''}`;
@@ -2975,13 +2975,23 @@ function layoutPresent() {
       // diagram fills the height, capped so the header / controls column beside it keeps ~200px
       const availH = scroll.clientHeight - 24, availW = scroll.clientWidth - 24 - 200;
       fig.style.width = `${Math.max(160, Math.min(availW, availH * ar))}px`;
-    } else if (presentRotate && ar > 1.05) {
+      continue;
+    }
+    // Portrait: everything fits the screen with no scrolling. The name, play bar and nav keep their height;
+    // the text box (cue, rules, notes) keeps a few lines and scrolls inside itself; the diagram gets the rest.
+    const text = sec.querySelector('.pr-text');
+    let used = 0;
+    for (const el of sec.children) if (el !== fig && el !== text) used += el.offsetHeight;
+    const textWant = text ? Math.min(text.scrollHeight, 88) : 0;
+    const availH = Math.max(110, scroll.clientHeight - 16 - used - textWant - 28), availW = scroll.clientWidth - 24;
+    if (presentRotate && ar > 1.05) {
       // turned 90°: the rink's long side runs down the phone. Box on screen is w × h; the svg is laid out h × w then rotated.
-      const availH = scroll.clientHeight - 24 - 120, availW = scroll.clientWidth - 24; // leave room for the name and the play row
-      const h = Math.max(220, Math.min(availH, availW * ar)), w = h / ar;
+      const h = Math.min(availH, availW * ar), w = h / ar;
       fig.classList.add('rotated');
       fig.style.width = `${w}px`; fig.style.height = `${h}px`;
       layers.forEach(l => { l.style.width = `${h}px`; l.style.height = `${w}px`; });
+    } else {
+      fig.style.width = `${Math.min(availW, availH * ar)}px`;
     }
   }
 }

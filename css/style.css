@@ -217,6 +217,19 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 .vl-feed li{display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--border)}
 .vl-feed .when{flex:0 0 150px}
 .vl-feed .act{flex:0 0 64px;color:var(--muted);white-space:nowrap}
+.vl-tally{display:flex;gap:16px;margin:0 0 8px;font-size:14px}
+.vl-tally-item{display:inline-flex;align-items:center;gap:4px}
+.vl-emoji{font-size:20px;line-height:1}
+/* the dismissal card's four emoji: big enough for a glove */
+.pr-react{margin-top:14px;text-align:center}
+.pr-react-q{font-size:17px;font-weight:600;margin-bottom:10px}
+.pr-react-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.pr-react-btn{font-size:40px;line-height:1;padding:10px 14px;border-radius:14px;background:var(--panel-2);border:2px solid var(--border);min-width:68px;min-height:68px;transition:transform .1s}
+.pr-react-btn:hover{background:#313747}
+.pr-react-btn.picked{border-color:var(--accent);background:#1e2a44;transform:scale(1.1)}
+.pr-react-note{margin-top:10px;min-height:1.2em}
+#present.focus .pr-react-q{font-size:20px}
+#present.focus .pr-react-btn{font-size:52px;min-width:78px;min-height:78px}
 #gate{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.82);backdrop-filter:blur(3px)}
 #gate[hidden]{display:none}
 .gate-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:28px 32px;width:min(380px,90vw);text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)}

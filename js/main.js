@@ -2535,6 +2535,28 @@ let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
 let uploadsChecked = false; // pending intro uploads are retried once per session
 
+const REACTIONS = [['😀', 'Good'], ['🏒', 'Great hockey'], ['😍', 'Loved it'], ['🤩', 'Amazing']];
+/** After practice: a tap on one of the four emoji is remembered on this phone and logged for the coach. */
+function wireReactions(p) {
+  const box = $('#present-body .pr-react'); if (!box) return;
+  const key = `hpp.react.${p.id}`;
+  let picked = null;
+  try { picked = localStorage.getItem(key); } catch { /* fine */ }
+  const btns = [...box.querySelectorAll('.pr-react-btn')];
+  const note = box.querySelector('.pr-react-note');
+  const show = () => btns.forEach(b => b.classList.toggle('picked', b.dataset.emoji === picked));
+  show();
+  if (picked) note.textContent = 'Thanks — tap another to change your pick.';
+  box.addEventListener('click', e => {
+    const b = e.target.closest('.pr-react-btn'); if (!b) return;
+    picked = b.dataset.emoji;
+    try { localStorage.setItem(key, picked); } catch { /* fine */ }
+    show();
+    const sent = logReaction(p, picked);
+    note.textContent = sent === 'owner' ? 'That’s your own practice — coaches’ and families’ picks show up in your Views log.'
+      : sent ? 'Thanks! Sent to the coach.' : 'Thanks! Sign in when you’re online to send it to the coach.';
+  });
+}
 function presentHTML(p) {
   const forCoaches = presentAudience === 'coach'; // the team's link leaves out coaching notes & assignments
   const rink = rinkSVG();
@@ -2582,7 +2604,14 @@ function presentHTML(p) {
         ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}</div>
       </section>`;
     }).join('')}
-    ${startMin != null ? `<section class="pr-drill"><header><b>* Dismissal</b><span class="pr-time">${clock(startMin + total)}</span></header></section>` : ''}`;
+    <section class="pr-drill pr-dismissal">
+      <header><b>* Dismissal</b>${startMin != null ? `<span class="pr-time">${clock(startMin + total)}</span>` : ''}</header>
+      <div class="pr-react">
+        <div class="pr-react-q">How was practice?</div>
+        <div class="pr-react-row">${REACTIONS.map(([e, name]) => `<button class="pr-react-btn" data-emoji="${e}" title="${name}" aria-label="${name}">${e}</button>`).join('')}</div>
+        <div class="pr-react-note muted small"></div>
+      </div>
+    </section>`;
 }
 
 /** The stations' titles and constraints under a drill card, with a button that reads them out in order. */
@@ -2618,6 +2647,7 @@ function presentDoc(p) {
   if (presentShownId !== p.id) { presentShownId = p.id; presentIndex = drillNowIndex(p); }
   presentPractice = p;
   showDrill(presentIndex);
+  wireReactions(p);
   watchListViews(p);
   flushViewQueue();
 }
@@ -2812,6 +2842,18 @@ function logDrillView(p, did, action) {
   const entry = { uid: u.uid, email: (u.email || '').toLowerCase(), name: u.name || '', drillId: did, drillName: d.name, action, at: now,
     audience: presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' };
   sendView(presentOwner, p.id, entry);
+}
+function logReaction(p, emoji) {
+  if (!cloudBackend?.logView || !cloudSync?.user) return false;
+  if (presentOwner === ownerFor()) return 'owner';
+  const key = `${p.id}:react:${emoji}`;
+  const now = Date.now();
+  if (now - (viewLogged.get(key) || 0) < VIEW_GAP) return true;
+  viewLogged.set(key, now);
+  const u = cloudSync.user;
+  sendView(presentOwner, p.id, { uid: u.uid, email: (u.email || '').toLowerCase(), name: u.name || '', drillId: null, drillName: 'Dismissal', action: 'react', emoji, at: now,
+    audience: presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' });
+  return true;
 }
 async function sendView(owner, pid, entry) {
   try { await cloudBackend.logView(owner, pid, entry); }
@@ -3111,8 +3153,17 @@ function renderViewLog(p, rows) {
   if (!rows.length) { $('#viewlog-body').innerHTML = '<p class="vl-empty">Nobody has opened this practice yet. Views and plays by the coaches and families you shared it with will show up here.</p>'; return; }
   const who = r => r.name && r.email ? `<span class="vl-who">${escHtml(r.name)} <span class="muted">${escHtml(r.email)}</span></span>` : `<span class="vl-who">${escHtml(r.name || r.email || r.uid)}</span>`;
   // per drill: one line per person with their view / play counts and last time
+  // reactions after practice: the latest pick per person, and how many times they changed it
+  const reacts = rows.filter(r => r.action === 'react');
+  const latest = new Map();
+  for (const r of [...reacts].sort((a, b) => (a.at || 0) - (b.at || 0))) { const k = r.uid || r.email; const v = latest.get(k) || { r, n: 0 }; v.r = r; v.n++; latest.set(k, v); }
+  const reactHTML = reacts.length ? `<h3>Reactions after practice</h3>
+    <div class="vl-tally">${REACTIONS.map(([e]) => `<span class="vl-tally-item"><span class="vl-emoji">${e}</span> ${[...latest.values()].filter(v => v.r.emoji === e).length}</span>`).join('')}</div>
+    <table class="vl-table"><tr><th>Who</th><th>Pick</th><th>When</th><th>Via</th></tr>
+    ${[...latest.values()].sort((a, b) => (b.r.at || 0) - (a.r.at || 0)).map(v => `<tr><td>${who(v.r)}</td><td><span class="vl-emoji">${escHtml(v.r.emoji || '')}</span>${v.n > 1 ? ` <span class="muted small">changed ${v.n - 1}×</span>` : ''}</td><td class="when">${fmtWhen(v.r.at || 0)}</td><td class="muted">${escHtml(v.r.audience === 'team' ? 'team link' : 'coach link')}${v.r.device ? ` · ${escHtml(v.r.device)}` : ''}</td></tr>`).join('')}</table>` : '';
   const byDrill = new Map();
   for (const r of rows) {
+    if (r.action === 'react') continue;
     const d = byDrill.get(r.drillId) || new Map(); byDrill.set(r.drillId, d);
     const k = r.uid || r.email; const v = d.get(k) || { r, views: 0, plays: 0, last: 0, first: Infinity };
     if (r.action === 'play') v.plays++; else v.views++;
@@ -3127,9 +3178,9 @@ function renderViewLog(p, rows) {
       <table class="vl-table"><tr><th>Who</th><th>Views</th><th>Plays</th><th>First</th><th>Last</th><th>Via</th></tr>
       ${people.map(v => `<tr><td>${who(v.r)}</td><td class="num">${v.views}</td><td class="num">${v.plays}</td><td class="when">${fmtWhen(v.first)}</td><td class="when">${fmtWhen(v.last)}</td><td class="muted">${escHtml(v.r.audience === 'team' ? 'team link' : 'coach link')}${v.r.device ? ` · ${escHtml(v.r.device)}` : ''}</td></tr>`).join('')}</table>`;
   }).join('');
-  const feed = rows.slice(0, 150).map(r => `<li><span class="when">${fmtWhen(r.at || 0)}</span><span class="act">${r.action === 'play' ? '▶ play' : '👁 view'}</span>${who(r)}<span class="muted">${escHtml(r.drillName || drillName(r.drillId))}</span></li>`).join('');
+  const feed = rows.slice(0, 150).map(r => `<li><span class="when">${fmtWhen(r.at || 0)}</span><span class="act">${r.action === 'react' ? `${escHtml(r.emoji || '')} pick` : r.action === 'play' ? '▶ play' : '👁 view'}</span>${who(r)}<span class="muted">${r.action === 'react' ? 'after practice' : escHtml(r.drillName || drillName(r.drillId))}</span></li>`).join('');
   const people = new Set(rows.map(r => r.uid || r.email)).size;
-  $('#viewlog-body').innerHTML = `<p class="muted small">${rows.length} record${rows.length === 1 ? '' : 's'} · ${people} ${people === 1 ? 'person' : 'people'} · a view is a drill on screen for 2 s, a play is its ▶ — at most one of each per person per drill every 5 minutes.</p>${sections}<h3>Recent activity</h3><ul class="vl-feed">${feed}</ul>`;
+  $('#viewlog-body').innerHTML = `<p class="muted small">${rows.length} record${rows.length === 1 ? '' : 's'} · ${people} ${people === 1 ? 'person' : 'people'} · a view is a drill on screen for 2 s, a play is its ▶ — at most one of each per person per drill every 5 minutes; a pick is the emoji tapped on the dismissal card.</p>${reactHTML}${sections}<h3>Recent activity</h3><ul class="vl-feed">${feed}</ul>`;
 }
 $('#btn-views').addEventListener('click', openViewLog);
 $('#viewlog-refresh').addEventListener('click', openViewLog);

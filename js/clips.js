@@ -33,20 +33,25 @@ export const canRecord = () => !!(navigator.mediaDevices?.getUserMedia && window
  * moment recording starts — so startRecording() tries each format for real and keeps the first that
  * actually delivers audio.
  */
-const FORMATS = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+// Opus first: it stays clear for speech at 12 kb/s (~95 KB a minute), less than half of what AAC needs
+// (Chrome's AAC encoder floors at ~29 kb/s). AAC is the fallback where a browser can't record Opus (Safari).
+const FORMATS = ['audio/mp4;codecs=opus', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm'];
 const FORMAT_KEY = 'hpp.recmime'; // the format that worked last time on this browser
 export const canPlay = mime => !!document.createElement('audio').canPlayType(String(mime || '').split(';')[0]);
 
 /** Start recording from the microphone; `stop()` resolves { blob, mime, secs }. Stops itself at maxSecs. */
 export async function startRecording({ maxSecs = 90 } = {}) {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  // Speech only: one channel at a speech sample rate, with the browser's noise suppression on.
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   let known = null;
   try { known = localStorage.getItem(FORMAT_KEY); } catch { /* fine */ }
   const order = [...new Set([...(known ? [known] : []), ...FORMATS.filter(m => MediaRecorder.isTypeSupported?.(m)), ''])];
   let rec = null, chunks = [], t0 = 0;
   const tried = [];
   for (const mime of order) {
-    try { rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 32000 }); } catch { tried.push(mime || 'default'); continue; }
+    // Bandwidth is the cost that matters (every coach's phone downloads each clip once).
+    const bps = /opus/i.test(mime) ? 12000 : 24000;
+    try { rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: bps }); } catch { tried.push(mime || 'default'); continue; }
     chunks = [];
     // Proof of life: the first chunk with bytes in it (or 700 ms still recording) means the encoder works.
     const alive = await new Promise(res => {

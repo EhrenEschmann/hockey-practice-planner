@@ -1208,7 +1208,7 @@ function togglePlay() {
     // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
     const d = drill();
     const clip = anim.t === 0 && voiceOn && d.intro ? clipMem.get(clipKey(ownerFor(), store.practice.id, d.id)) : null;
-    if (!clip) { go(); return; }
+    if (!clip || !canPlay(clip.mime)) { go(); return; }
     cueCaption.textContent = '🎙 Coach’s intro…'; cueCaption.hidden = false;
     anim.intro = playClip(clip, { onEnd: () => { const skip = anim.intro?.cancelled; anim.intro = null; cueCaption.hidden = true; if (skip) renderAnimBar(); else go(); } });
   }
@@ -1591,7 +1591,7 @@ async function introAction(iact, li) {
     commit(() => { d.intro = { secs, mime, size: blob.size, at: Date.now() }; });
     fetchClip(ownerFor(), pid, d.id);
     renderPlan();
-    status(`Saved ${where} · ${secs.toFixed(1)} s`);
+    status(`Saved ${where} · ${secs.toFixed(1)} s · ${Math.max(1, Math.round(blob.size / 1024))} KB`);
   } else if (iact === 'play') {
     if (introPlaying) { introPlaying.stop(); return; }
     const entry = await fetchClip(ownerFor(), pid, d.id);
@@ -1637,7 +1637,7 @@ function renderPlan() {
       : '';
     const recording = introRec?.drillId === d.id;
     const intro = introOpenFor === d.id ? `<li class="intro-editor"><div class="intro-box">
-      <div class="intro-status muted small">${recording ? '● Recording — speak now' : d.intro ? `Intro recorded · ${(+d.intro.secs || 0).toFixed(1)} s${canPlay(d.intro.mime) ? '' : ' · this browser can’t play that format'}` : canRecord() ? 'No intro yet — record yourself introducing this drill.' : 'This browser can’t record audio.'}</div>
+      <div class="intro-status muted small">${recording ? '● Recording — speak now' : d.intro ? `Intro recorded · ${(+d.intro.secs || 0).toFixed(1)} s${d.intro.size ? ` · ${Math.max(1, Math.round(d.intro.size / 1024))} KB` : ''}${canPlay(d.intro.mime) ? '' : ' · this browser can’t play that format'}` : canRecord() ? 'No intro yet — record yourself introducing this drill.' : 'This browser can’t record audio.'}</div>
       <div class="row">
         ${recording ? '<button data-iact="stop" class="danger">■ Stop</button>' : `<button data-iact="rec" ${canRecord() ? '' : 'disabled'}>● ${d.intro ? 'Re-record' : 'Record'}</button>`}
         <button data-iact="play" ${d.intro && !recording ? '' : 'disabled'}>${introPlaying?.drillId === d.id ? '■ Stop' : '▶ Listen'}</button>
@@ -2722,6 +2722,7 @@ function wirePresentAnims(p) {
       // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
       const clip = a.t === 0 && voiceOn && d.intro ? clipMem.get(clipKey(presentOwner, p.id, d.id)) : null;
       if (!clip) { go(); return; }
+      if (!canPlay(clip.mime)) { cueEl.textContent = '🎙 intro can’t play on this device'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 3000); go(); return; }
       cueEl.textContent = '🎙 Coach’s intro…'; cueEl.hidden = false;
       a.intro = playClip(clip, { onEnd: () => { const skip = a.intro?.cancelled; a.intro = null; cueEl.hidden = true; if (skip) draw(); else go(); } });
       draw();

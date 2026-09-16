@@ -1159,7 +1159,7 @@ function setVoice(on) {
   voiceOn = on;
   try { localStorage.setItem('hpp.voice', on ? '1' : '0'); } catch { /* fine */ }
   if (!on) hushVoice();
-  for (const b of $$('#anim-voice, .pr-voice')) { b.classList.toggle('active', on); b.title = on ? 'Voice cues on — click to mute' : 'Voice cues muted — click to hear them'; }
+  for (const b of $$('#anim-voice, .pr-voice')) { b.classList.toggle('active', on); b.textContent = on ? '🔊 voice' : '🔇 muted'; b.title = on ? 'Voice on — click to mute intros and cues' : 'Voice muted on this device — click to hear intros and cues'; }
 }
 /**
  * Narrator for one playback: step(prev, now) speaks and captions every cue whose second falls in (prev, now].
@@ -1209,6 +1209,7 @@ function togglePlay() {
     const go = () => { anim.fresh = anim.t === 0; anim.playing = true; anim.last = performance.now(); anim.raf = requestAnimationFrame(tick); renderAnimBar(); };
     // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
     const d = drill();
+    if (anim.t === 0 && !voiceOn && hasVoice(d)) { cueCaption.textContent = '🔇 voice is muted on this device — click 🔇 muted to hear the intro and cues'; cueCaption.hidden = false; setTimeout(() => { cueCaption.hidden = true; }, 4000); }
     const clip = anim.t === 0 && voiceOn && d.intro ? clipMem.get(keyFor(ownerFor(), store.practice.id, d)) : null;
     if (!clip) { go(); return; }
     if (!canPlay(clip.mime)) { cueCaption.textContent = `🎙 intro can’t play here (${clip.mime})`; cueCaption.hidden = false; setTimeout(() => { cueCaption.hidden = true; }, 4000); go(); return; }
@@ -1273,6 +1274,7 @@ function renderAnimBar() {
   $('#anim-trails').checked = drillPaths();
   $('#anim-voice').hidden = !hasVoice(drill());
   $('#anim-voice').classList.toggle('active', voiceOn);
+  $('#anim-voice').textContent = voiceOn ? '🔊 voice' : '🔇 muted';
   $('#time-display').textContent = returning ? '↩ skating back' : anim.intro ? '🎙 intro…' : `${Math.min(anim.t, T).toFixed(1)} / ${T.toFixed(1)} s`;
   // "worse for" selector: skaters that actually collide — a marker that never resolves into an impact doesn't count
   const impacts = sim ? sim.contacts() : [];
@@ -2596,7 +2598,7 @@ function presentHTML(p) {
           <span class="pr-break"></span>
           <select class="pr-speed" title="Playback speed">${['0.25', '0.5', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
-          ${hasVoice(d) ? `<button class="pr-voice wp-toggle ${voiceOn ? 'active' : ''}" title="${voiceOn ? 'Voice cues on — click to mute' : 'Voice cues muted — click to hear them'}">🔊 voice</button>` : ''}
+          ${hasVoice(d) ? `<button class="pr-voice wp-toggle ${voiceOn ? 'active' : ''}" title="${voiceOn ? 'Voice on — click to mute intros and cues' : 'Voice muted on this device — click to hear intros and cues'}">${voiceOn ? '🔊 voice' : '🔇 muted'}</button>` : ''}
           <span class="pr-impact"></span>
         </div>
         <div class="pr-text"><div class="pr-cue" hidden></div>
@@ -2794,6 +2796,7 @@ function wirePresentAnims(p) {
       if (a.t >= full) a.t = 0;
       const go = () => { a.fresh = a.t === 0; a.playing = true; a.last = performance.now(); a.raf = requestAnimationFrame(step); draw(); };
       // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
+      if (a.t === 0 && !voiceOn && hasVoice(d)) { cueEl.textContent = '🔇 voice is muted on this phone — tap 🔇 muted to hear the intro and cues'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 4000); }
       const clip = a.t === 0 && voiceOn && d.intro ? clipMem.get(keyFor(presentOwner, p.id, d)) : null;
       if (!clip) {
         if (a.t === 0 && voiceOn && d.intro) { cueEl.textContent = '🎙 intro not downloaded yet — tap ↻ to resync'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 3500); }

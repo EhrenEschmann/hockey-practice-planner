@@ -6,6 +6,7 @@ import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrate
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
+import { videoEmbed, videoPlayerHTML } from './video.js';
 import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, phoneFriendly, startRecording, blobToBase64, base64ToBlob } from './clips.js';
 
 const $ = s => document.querySelector(s);
@@ -1588,6 +1589,7 @@ async function uploadPendingIntros() {
   renderPlan();
 }
 const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — deploy the latest firestore.rules, then Upload now' : '';
+let videoOpenFor = null; // drill whose 🎬 video link row is open in the Drills panel
 let introOpenFor = null; // drill whose 🎙 recorder is open in the Drills panel
 let introRec = null;      // an in-progress recording: { drillId, stop(), since, timer }
 /** The recorder row's buttons: record / stop / listen / delete a drill's intro clip. */
@@ -1651,6 +1653,7 @@ function renderPlan() {
   if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
   const btns = d => `
       <button data-act="hide" class="${d.hidden ? 'is-hidden' : ''}" title="${d.hidden ? 'Hidden: left out of the plan, print and the coaches’ view — click to put it back' : 'Hide this drill: keep it here to come back to, but leave it out of the plan, print and the coaches’ view'}">${icon(d.hidden ? 'eyeoff' : 'eye')}</button>
+      <button data-act="video" class="${d.video ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — a YouTube, Vimeo or Cloudflare Stream link, embedded in the coaches’ view">🎬</button>
       <button data-act="intro" class="${d.intro ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="Intro in your voice — recorded here, played before the drill when ▶ is pressed">🎙</button>
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
@@ -1685,7 +1688,13 @@ function renderPlan() {
       </div>
       <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here and on the coaches’ phones — unless 🔊 voice is muted. Up to 90 s.</p>
     </div></li>` : '';
-    return row + notes + intro;
+    const v = d.video ? videoEmbed(d.video) : null;
+    const video = videoOpenFor === d.id ? `<li class="video-editor"><div class="intro-box">
+      <input class="video-url" data-video="${d.id}" value="${escHtml(d.video || '')}" placeholder="Paste a YouTube, Vimeo or Cloudflare Stream link" spellcheck="false" autocomplete="off">
+      <div class="intro-status muted small">${!d.video ? 'Coaches get a ▶ Watch video button on the drill; the diagram stays.' : v ? `${v.host} · ${escHtml(v.id)}` : '⚠ Not a link this app can embed — use a YouTube, Vimeo or Cloudflare Stream page link (or a direct .mp4 link).'}</div>
+      ${v ? videoPlayerHTML(v) : ''}
+    </div></li>` : '';
+    return row + notes + intro + video;
   }).join('');
 }
 
@@ -1694,7 +1703,7 @@ let dragDrill = null; // index being dragged
 const clearDropMarks = () => $$('#drill-list li').forEach(li => li.classList.remove('dragging', 'drop-above', 'drop-below'));
 $('#drill-list').addEventListener('dragstart', e => {
   const li = e.target.closest('li');
-  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor')) { e.preventDefault(); return; }
+  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor, .video-editor')) { e.preventDefault(); return; }
   dragDrill = +li.dataset.index;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', ''); // Firefox requires data for a drag to start
@@ -1707,7 +1716,7 @@ $('#drill-list').addEventListener('dragover', e => {
   clearDropMarks();
   $(`#drill-list li[data-index="${dragDrill}"]:not(.notes-editor)`)?.classList.add('dragging');
   const li = e.target.closest('li');
-  if (!li || li.matches('.notes-editor, .intro-editor') || +li.dataset.index === dragDrill) return;
+  if (!li || li.matches('.notes-editor, .intro-editor, .video-editor') || +li.dataset.index === dragDrill) return;
   const r = li.getBoundingClientRect();
   li.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
 });
@@ -1718,7 +1727,7 @@ $('#drill-list').addEventListener('drop', e => {
   const p = store.practice;
   const from = dragDrill;
   dragDrill = null; clearDropMarks();
-  if (!li || li.matches('.notes-editor, .intro-editor')) return;
+  if (!li || li.matches('.notes-editor, .intro-editor, .video-editor')) return;
   const r = li.getBoundingClientRect();
   let to = +li.dataset.index + (e.clientY < r.top + r.height / 2 ? 0 : 1);
   if (to > from) to--;
@@ -1733,7 +1742,16 @@ $('#drill-list').addEventListener('drop', e => {
 $('#drill-list').addEventListener('dragend', () => { dragDrill = null; clearDropMarks(); });
 
 // Inline notes editing (live) — name/minutes only commit via the edit row's Save button.
-$('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea')) store.beginPending(); });
+$('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea, .video-url')) store.beginPending(); });
+$('#drill-list').addEventListener('input', e => {
+  if (!e.target.matches('.video-url')) return;
+  const d = store.practice.drills.find(x => x.id === e.target.dataset.video); if (!d) return;
+  const v = e.target.value.trim();
+  if (v) d.video = v; else delete d.video;
+  store.save();
+});
+$('#drill-list').addEventListener('change', e => { if (e.target.matches('.video-url')) { store.commitPending(); e.target.blur(); renderPlan(); } }); // blur: the list won't rebuild under a focused input
+$('#drill-list').addEventListener('keydown', e => { if (e.target.matches('.video-url') && e.key === 'Enter') { e.preventDefault(); e.target.blur(); renderPlan(); } });
 $('#drill-list').addEventListener('input', e => {
   const el = e.target;
   if (el.dataset.notes != null) {
@@ -1754,7 +1772,7 @@ $('#drill-list').addEventListener('keydown', e => {
 // Double-click a drill row: rename it inline (same as the ✎ button).
 $('#drill-list').addEventListener('dblclick', e => {
   const li = e.target.closest('li');
-  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor')) return;
+  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor, .video-editor')) return;
   if (e.target.closest('button,input,textarea')) return;
   const i = +li.dataset.index;
   if (!store.practice.drills[i]) return;
@@ -1773,9 +1791,11 @@ $('#drill-list').addEventListener('click', e => {
   btn?.blur(); // a focused list button must not trip the "typing in the list" rebuild guard
   const p = store.practice;
   if (li.matches('.intro-editor')) { introAction(btn?.dataset.iact, li); return; }
-  if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; renderPlan(); return; }
+  if (li.matches('.video-editor')) return;
+  if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#drill-list .video-url')?.focus(); return; }
+  if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
   if (act === 'hide') { const d = p.drills[i]; commit(() => { if (d.hidden) delete d.hidden; else d.hidden = true; }); renderAll(); if (presenting) refreshPresent(); return; }
-  if (li.matches('.notes-editor, .intro-editor')) return;
+  if (li.matches('.notes-editor, .intro-editor, .video-editor')) return;
   finishActive();
   if (act === 'save' || act === 'cancel') {
     const row = $('#drill-list li.editing');
@@ -2511,6 +2531,7 @@ $('#btn-print').addEventListener('click', () => {
         <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clock(at)}</span>` : ''}</div>
         ${standaloneSVG(d, rink, SVG_STYLE)}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
+        ${d.video && videoEmbed(d.video) ? `<div class="p-meta">Video: ${escHtml(d.video)}</div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </div>`;
   }).join('');
@@ -2537,6 +2558,27 @@ let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
 let uploadsChecked = false; // pending intro uploads are retried once per session
 
+/** A drill's video, collapsed to a button: the player only loads when tapped (data, and it takes the diagram's place on a phone). */
+function videoBlockHTML(d) {
+  const v = d.video ? videoEmbed(d.video) : null;
+  return v ? `<div class="pr-video" data-src="${escHtml(v.src)}" data-kind="${v.kind}" data-host="${escHtml(v.host)}"><button class="pr-video-btn wp-toggle">🎬 Watch video <span class="muted small">(${escHtml(v.host)})</span></button></div>` : '';
+}
+function wireVideos() {
+  for (const box of $$('#present-body .pr-video')) {
+    const sec = box.closest('.pr-drill');
+    box.querySelector('.pr-video-btn').addEventListener('click', () => {
+      const open = !sec.classList.contains('video-open');
+      sec.classList.toggle('video-open', open);
+      box.querySelector('.video-box')?.remove();
+      if (open) {
+        box.insertAdjacentHTML('beforeend', videoPlayerHTML({ kind: box.dataset.kind, src: box.dataset.src, host: box.dataset.host }));
+        sec._pause?.(); // the drill animation stops while the video is up
+      }
+      box.querySelector('.pr-video-btn').innerHTML = open ? '✕ Close video' : `🎬 Watch video <span class="muted small">(${escHtml(box.dataset.host)})</span>`;
+      layoutPresent();
+    });
+  }
+}
 const REACTIONS = [['😀', 'Good'], ['🏒', 'Great hockey'], ['😍', 'Loved it'], ['🤩', 'Amazing']];
 /** After practice: a tap on one of the four emoji is remembered on this phone and logged for the coach. */
 function wireReactions(p) {
@@ -2584,6 +2626,7 @@ function presentHTML(p) {
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
+        ${videoBlockHTML(d)}
         <div class="pr-text">${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}</div>
       </section>`;
       }
@@ -2591,6 +2634,7 @@ function presentHTML(p) {
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
         <div class="pr-fig" data-ar="${(d.view.w / d.view.h).toFixed(3)}">${standaloneSVG(d, rink, SVG_STYLE, undefined, { showPaths: d.showPaths !== false })}</div>
+        ${videoBlockHTML(d)}
         <div class="pr-animbar">
           <button class="pr-play" title="Watch the drill">${icon('play')}</button>
           <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
@@ -2650,6 +2694,7 @@ function presentDoc(p) {
   presentPractice = p;
   showDrill(presentIndex);
   wireReactions(p);
+  wireVideos();
   watchListViews(p);
   flushViewQueue();
 }
@@ -3020,9 +3065,19 @@ function layoutPresent() {
   $('#present-rotate').hidden = !focus || landscape || curAr <= 1.05; // only offered when the diagram is wider than tall
   for (const sec of presentCards()) {
     const fig = sec.querySelector('.pr-fig'), layers = fig ? [...fig.querySelectorAll(':scope > svg')] : [];
-    if (!layers.length) continue;
+    const player = sec.querySelector('.pr-video .video-box');
+    if (player) player.style.cssText = '';
+    if (!layers.length) {
+      if (player && focus && sec.classList.contains('current') && !landscape) sizeMedia(sec, player, 16 / 9, scroll);
+      continue;
+    }
     fig.style.cssText = ''; layers.forEach(l => { l.style.cssText = ''; }); fig.classList.remove('rotated');
     if (!focus || !sec.classList.contains('current')) continue;
+    if (player && sec.classList.contains('video-open')) { // the video takes the diagram's place
+      if (landscape) player.style.width = `${Math.max(160, Math.min(scroll.clientWidth - 24 - 200, (scroll.clientHeight - 24) * 16 / 9))}px`;
+      else sizeMedia(sec, player, 16 / 9, scroll);
+      continue;
+    }
     const ar = +fig.dataset.ar || 2.26;
     if (landscape) {
       // diagram fills the height, capped so the header / controls column beside it keeps ~200px
@@ -3049,6 +3104,16 @@ function layoutPresent() {
   }
 }
 
+/** Portrait focus mode: give one media box (an open video) the height left under the title and controls. */
+function sizeMedia(sec, el, ar, scroll) {
+  const text = sec.querySelector('.pr-text');
+  let used = 0;
+  for (const c of sec.children) if (c !== text && !c.contains(el) && c !== sec.querySelector('.pr-fig')) used += c.offsetHeight;
+  used += el.parentElement.offsetHeight - el.offsetHeight; // the Close button above the player
+  const textWant = text ? Math.min(text.scrollHeight, 88) : 0;
+  const availH = Math.max(110, scroll.clientHeight - 16 - used - textWant - 28), availW = scroll.clientWidth - 24;
+  el.style.width = `${Math.min(availW, availH * ar)}px`;
+}
 function presentKeydown(e) {
   if (isEditing()) return;
   if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); showDrill(presentIndex + 1); }

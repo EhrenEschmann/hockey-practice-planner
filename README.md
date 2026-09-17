@@ -69,6 +69,7 @@ With a config in place the app is **gated**: a sign-in screen covers the planner
 - **Animation**: play/pause/stop, scrub timeline, playback speed, loop. Total drill time is derived from each skater's path length ÷ speed + delay.
 - **Arrows & text** for annotations (skate / pass / shot / backward styles).
 - **Drill library**: *📚 From library…* in the Drills panel opens every drill from all of your practices — searchable, with a rink thumbnail and the practice it came from — and adds a copy of any drill to the practice you're on. To build a practice from existing drills: *+ Practice*, then add from the library.
+- **Video on a drill**: the 🎬 button on a drill row takes a YouTube, Vimeo or Cloudflare Stream link (a page link, an embed link, or a pasted embed snippet — or a direct .mp4). Coaches get a **🎬 Watch video** button on the drill card; on a phone the player takes the diagram's place and ✕ brings the diagram back. Only those hosts are ever embedded; the printed sheet lists the link.
 - **Hide a drill**: the 👁 button on a drill row hides it — it stays in your list (dimmed, struck through) to come back to, but drops out of the coaches' and team's view, the printed sheet, the clock times and the total minutes. Click again to put it back.
 - **Practice plan**: several drills per practice with duration and coaching notes; reorder, duplicate, delete. Practice library with team/date; everything autosaves to the browser (localStorage).
 - **Undo/redo**, snap-to-1ft grid, keyboard nudging.

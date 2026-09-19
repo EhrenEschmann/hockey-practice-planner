@@ -471,7 +471,14 @@ function onPointerDown(e) {
       const bankEl = e.target.closest('[data-bank]');
       const arriveEl = e.target.closest('[data-arrive]');
       const arriveTo = arriveEl && id ? getObj(id)?.events?.[+arriveEl.dataset.arrive]?.to : null;
-      if (bankEl && id && getObj(id)?.events?.[+bankEl.dataset.bank]) {
+      const cornerEl = e.target.closest('[data-corner]');
+      if (cornerEl && id && getObj(id)) {
+        // resize a zone / focus box: the opposite corner stays put
+        const o = getObj(id), c = cornerEl.dataset.corner;
+        const anchor = { x: c.includes('w') ? o.x + o.w : o.x, y: c.includes('n') ? o.y + o.h : o.y };
+        drag = { type: 'resize', id, anchor, pushed: false };
+        select(id);
+      } else if (bankEl && id && getObj(id)?.events?.[+bankEl.dataset.bank]) {
         drag = { type: 'bank', id, ev: +bankEl.dataset.bank, pushed: false };
         select(id);
       } else if (arriveTo && getObj(arriveTo)?.path?.length) {
@@ -632,6 +639,15 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'resize': {
+      const o = getObj(drag.id); if (!o) return;
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      const r = G.rectFromPoints(drag.anchor, p);
+      Object.assign(o, { x: r.x, y: r.y, w: Math.max(1.5, r.w), h: Math.max(1.5, r.h) });
+      renderCanvas();
+      if (!propsBody.contains(document.activeElement)) renderProps(); // width / height fields follow the drag
+      break;
+    }
     case 'rect': {
       const o = getObj(drag.id); if (!o) return;
       const r = G.rectFromPoints(drag.start, p);
@@ -691,7 +707,7 @@ function onPointerUp(e) {
       if (ev && ev.dist != null) { sim = makeSim(drill()); if (sim.puck(pk.id).info[dg.ev]?.late) { const eff = effectiveDist(pk, dg.ev); if (eff != null) ev.dist = eff; } }
       store.save(); renderAll(); break;
     }
-    case 'handle': case 'bank': store.save(); renderAll(); break;
+    case 'handle': case 'bank': case 'resize': store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {

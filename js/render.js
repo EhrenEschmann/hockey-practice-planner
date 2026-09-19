@@ -44,6 +44,11 @@ function wpLabels(o) {
   return (o.path || []).map((p, i) => `<g class="wp-label${p.cue?.trim() ? ' cued' : ''}" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.1"/><text y=".5" font-size="1.4" text-anchor="middle">${i + 1}</text></g>`).join('');
 }
 
+/** Corner handles for resizing a box (zone, focus area); which corner is in data-corner. */
+function cornerHandles(o) {
+  const cs = [['nw', o.x, o.y], ['ne', o.x + o.w, o.y], ['sw', o.x, o.y + o.h], ['se', o.x + o.w, o.y + o.h]];
+  return cs.map(([c, x, y]) => `<rect class="rhandle ${c}" data-corner="${c}" x="${n(x - 1.1)}" y="${n(y - 1.1)}" width="2.2" height="2.2" rx=".3"/>`).join('');
+}
 function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
@@ -157,6 +162,7 @@ const draw = {
       ${sel ? `<rect class="focus-sel" x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-opacity=".45" pointer-events="none"/>` : ''}
       <rect class="focus-edge core" x="${x}" y="${y}" width="${w}" height="${h}" pointer-events="none"/>
       <rect class="stripe" x="${x}" y="${y}" width="${w}" height="${h}" pointer-events="none"/>
+      ${sel ? cornerHandles(o) : ''}
     </g>`;
   },
 
@@ -166,6 +172,7 @@ const draw = {
       <rect x="${n(o.x)}" y="${n(o.y)}" width="${n(o.w)}" height="${n(o.h)}" rx=".6" fill="${c}" fill-opacity=".16" stroke="${c}" stroke-width=".45" stroke-dasharray="2 1.5"/>
       <text x="${n(o.x + 1.2)}" y="${n(o.y + 3.2)}" font-size="2.8" font-weight="700" fill="${c}">${esc(o.label)}</text>
       ${zoneRuleLines(o).map((l, i) => `<text x="${n(o.x + 1.4)}" y="${n(o.y + 3.2 + 2.6 * (i + 1))}" font-size="2.1" fill="#1f2937" paint-order="stroke" stroke="#fff" stroke-width=".55" stroke-linejoin="round">${esc(l)}</text>`).join('')}
+      ${sel ? cornerHandles(o) : ''}
     </g>`;
   },
 

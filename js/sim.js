@@ -177,6 +177,7 @@ export function makeSim(drill) {
    * moment that player reaches the trigger waypoint. (A cycle of triggers falls back to the plain delay.)
    */
   const starting = new Set();
+  const meets = new Map(); // follower id → { wp, at, travel, late } once "meet them there" has been resolved
   function startTime(o) {
     let t0 = +o.delay || 0;
     const tr = o.trigger;
@@ -184,8 +185,24 @@ export function makeSim(drill) {
       starting.add(o.id);
       try { t0 += evTime(tr.player, { wp: tr.wp ?? 0, dist: tr.dist }); } finally { starting.delete(o.id); }
     }
+    // A follower who should meet the leader at the join point: start so both get there together.
+    // If the follower can't cover the distance in time they start at once and the panel says how far behind they'll be.
+    if (o.follow && o.followMeet && isSkater(o.follow) && o.path?.length && !starting.has(o.id)) {
+      starting.add(o.id);
+      try {
+        const wp = Math.round(+o.followWp || 0);
+        const at = wpTime(o.follow, wp);
+        const pts = skaterPoints(o), dense = G.smoothPath(pts, SEG);
+        const travel = G.closestOnPolyline(dense, pts[1]).along / Math.max(1, +o.speed || 20);
+        const late = Math.max(0, travel - at);
+        meets.set(o.id, { wp, at, travel, late });
+        t0 += Math.max(0, at - travel);
+      } finally { starting.delete(o.id); }
+    }
     return t0;
   }
+  /** Resolved "meet them there" timing for a follower (after their timing has been built), or null. */
+  function meetInfo(id) { skater(id); return meets.get(id) || null; }
 
   /** Waypoints where this skater holds a full stop: [{d: ft along the smoothed path, dur: s}], in path order. */
   function stopList(o, dense) {
@@ -522,5 +539,5 @@ export function makeSim(drill) {
     return Math.round(T * 100) / 100;
   }
 
-  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, evTime, puck, puckPos, puckCarrierAt, contacts, contactSync, duration };
+  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, evTime, puck, puckPos, puckCarrierAt, contacts, contactSync, duration, meetInfo };
 }

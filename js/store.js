@@ -31,7 +31,11 @@ export function syncFollowers(d) {
     const lead = d.objects.find(x => x.id === o.follow);
     // Leader gone, no longer routed, or itself a follower (chains would cycle): keep the copied path, stop following.
     if (!lead || lead.type !== 'skater' || lead.id === o.id || lead.follow || !lead.path?.length) { delete o.follow; continue; }
-    o.path = [{ x: lead.x, y: lead.y }, ...lead.path.map(p => ({ ...p }))]; // spread keeps waypoint flags (e.g. pivot)
+    // Join the route at the leader's start (default) or at one of their waypoints: from their own spot the
+    // follower skates to that point, then the rest of the leader's route. Spread keeps waypoint flags (e.g. pivot).
+    const route = [{ x: lead.x, y: lead.y }, ...lead.path];
+    const k = Math.max(0, Math.min(route.length - 1, Math.round(+o.followWp || 0)));
+    o.path = route.slice(k).map(p => ({ ...p }));
   }
 }
 

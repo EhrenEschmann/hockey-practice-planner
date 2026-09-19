@@ -1988,7 +1988,18 @@ function renderProps() {
       if (leaders.length || o.follow) extra.push(`<label class="field inline"><span>Same path as</span><select data-prop="follow">
         <option value="">— their own path —</option>
         ${leaders.map(s => `<option value="${s.id}" ${o.follow === s.id ? 'selected' : ''}>${playerName(s)} (${s.color})</option>`).join('')}</select></label>`);
-      if (o.follow) extra.push(`<p class="muted small">Skates ${playerName(getObj(o.follow))}'s route from their own spot in line. Edit that skater's path to reroute everyone; stagger the line with each skater's Delay.</p>`);
+      if (o.follow) {
+        const lead = getObj(o.follow), n = lead?.path?.length || 0, k = Math.max(0, Math.min(n, Math.round(+o.followWp || 0)));
+        extra.push(`<label class="field inline"><span>Join their route at</span><select data-prop="followWp">
+          <option value="0" ${k === 0 ? 'selected' : ''}>their start</option>
+          ${Array.from({ length: n }, (_, i) => `<option value="${i + 1}" ${k === i + 1 ? 'selected' : ''}>waypoint ${i + 1}</option>`).join('')}</select></label>`);
+        extra.push(`<label class="field inline"><span>Meet them there — start so both arrive together</span><input data-prop="followMeet" type="checkbox" ${o.followMeet ? 'checked' : ''}></label>`);
+        const mi = o.followMeet ? sim.meetInfo(o.id) : null;
+        if (mi) extra.push(mi.late > 0.05
+          ? `<p class="warn small">⚠ Can't get there in time: ${playerName(lead)} reaches ${k ? `waypoint ${k}` : 'their start'} at ${mi.at.toFixed(1)} s, and it takes ${playerName(o)} ${mi.travel.toFixed(1)} s to skate there — they arrive ${mi.late.toFixed(1)} s behind. Move them closer, speed them up, or join later.</p>`
+          : `<p class="muted small">Starts at ${(sim.skater(o.id).delay).toFixed(1)} s and reaches ${k ? `waypoint ${k}` : 'the start'} with ${playerName(lead)} at ${mi.at.toFixed(1)} s${+o.delay ? ` (your ${+o.delay} s delay is added on top)` : ''}.</p>`);
+        else extra.push(`<p class="muted small">Skates ${playerName(lead)}'s route from their own spot${k ? `, joining it at waypoint ${k}` : ''}. Edit that skater's path to reroute everyone; stagger the line with each skater's Delay.</p>`);
+      }
     }
     const myPuck = drill().objects.find(pk => pk.type === 'puck' && pk.carrier === o.id);
     extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
@@ -2290,6 +2301,8 @@ propsBody.addEventListener('input', e => {
   if (o.type === 'contact' && (key === 'a' || key === 'b')) { o[key] = el.value || null; el.blur(); }
   if (o.type === 'skater' && key === 'color') lastSkaterColor = o.color;
   if (key === 'side') { if (SIDES[o.side]) o.color = SIDES[o.side].color; else delete o.side; el.blur(); }
+  if (key === 'followWp') { o.followWp = Math.max(0, Math.round(+el.value || 0)); syncFollowers(drill()); el.blur(); }
+  if (key === 'followMeet' && !o.followMeet) delete o.followMeet;
   store.save(); renderCanvas(); renderAnimBar();
 });
 propsBody.addEventListener('change', () => { store.commitPending(); renderUI(); });

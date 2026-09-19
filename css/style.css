@@ -147,7 +147,10 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 #drill-list li.dragging{opacity:.45}
 #drill-list li.drop-above{box-shadow:0 -3px 0 var(--accent)}
 #drill-list li.drop-below{box-shadow:0 3px 0 var(--accent)}
-#drill-list li .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#drill-list li .name{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+#drill-list li .dname-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#drill-list li .dwhen{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#drill-list li.active .dwhen{color:#b9c6e4}
 #drill-list li .dur{color:var(--muted);font-size:12px;white-space:nowrap}
 #drill-list li button{padding:1px 6px;font-size:12px;background:transparent;border-color:transparent}
 #drill-list li button:hover{background:var(--panel)}
@@ -156,8 +159,7 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 #drill-list li input.dmin{width:44px;padding:2px 4px;text-align:right}
 #drill-list li button.has-notes{color:var(--accent-2)}
 #drill-list li.hidden-drill{opacity:.55;border-style:dashed}
-#drill-list li.hidden-drill .name{text-decoration:line-through;text-decoration-color:var(--muted)}
-#drill-list li.hidden-drill .name .muted{text-decoration:none;margin-left:4px}
+#drill-list li.hidden-drill .dname-text{text-decoration:line-through;text-decoration-color:var(--muted)}
 #drill-list li button.is-hidden{color:#f59e0b}
 #drill-list li button.open{background:var(--accent);color:#fff}
 #drill-list li.notes-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default}

@@ -1676,7 +1676,18 @@ function renderPlan() {
   const p = store.practice;
   const total = activeDrills(p).reduce((a, d) => a + (+d.duration || 0), 0);
   const hiddenCount = p.drills.length - activeDrills(p).length;
-  $('#plan-total').textContent = `${total} min total${hiddenCount ? ` · ${hiddenCount} hidden` : ''}`;
+  const startMin = parseStart(p);
+  $('#plan-total').textContent = `${total} min total${startMin != null ? ` · ${clock(startMin)}–${clock(startMin + total)}` : ''}${hiddenCount ? ` · ${hiddenCount} hidden` : ''}`;
+  $('#plan-total').title = startMin != null ? 'Set the start time in + Practice to change the clock' : 'Set a start time in + Practice to see clock times on each drill';
+  // running time: where each (unhidden) drill starts — as a clock time when the practice has one, else minutes in
+  let running = 0;
+  const startOf = new Map();
+  for (const d of p.drills) { if (d.hidden) continue; startOf.set(d.id, running); running += +d.duration || 0; }
+  const when = d => {
+    if (d.hidden) return 'hidden';
+    const at = startOf.get(d.id);
+    return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clock(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}`;
+  };
   const list = $('#drill-list');
   if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
   const btns = d => `
@@ -1697,7 +1708,7 @@ function renderPlan() {
         </li>`
       : `<li class="${i === store.drillIndex ? 'active' : ''}${d.hidden ? ' hidden-drill' : ''}" data-index="${i}" draggable="true" title="${d.hidden ? 'Hidden from the plan · drag to reorder' : 'Drag to reorder'}">
           <span class="num">${i + 1}.</span>
-          <span class="name">${escHtml(d.name)}${d.hidden ? ' <span class="muted small">hidden</span>' : ''}</span>
+          <span class="name"><span class="dname-text">${escHtml(d.name)}</span><span class="dwhen">${when(d)}</span></span>
           ${btns(d)}
         </li>`;
     const notes = notesOpenFor === d.id

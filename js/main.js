@@ -129,7 +129,7 @@ function drawSelection() {
   if (!sel) return;
   const el = objLayer.querySelector(`[data-id="${sel}"]:not(.path-under)`);
   if (!el) { sel = null; return; }
-  const target = el.querySelector('.skater-body, .coach-body, .puck-disc') || el;
+  const target = el.querySelector('.skater-body, .coach-body, .puck-disc, .focus-edge') || el;
   const handlesToHide = Array.from(el.querySelectorAll('.handle'));
   handlesToHide.forEach(h => h.style.display = 'none');
   const bb = target.getBBox();
@@ -210,6 +210,7 @@ const HINTS = {
   jumppad: 'Click to place a low pad · skaters whose path runs over it jump it',
   barricade: 'Click points to lay a barricade · double-click or Enter to finish',
   zone: 'Drag a box to mark a section / station',
+  focusarea: 'Drag a box around the space to work in — the rest of the ice grays out',
   text: 'Click to place a text label',
   erase: 'Click an object to remove it',
 };
@@ -527,9 +528,11 @@ function onPointerDown(e) {
     case 'net': placed(addObject(makePlaceable('net', p)).id); break;
     case 'text': { const t = addObject({ type: 'text', x: p.x, y: p.y, text: 'Label', size: 3, color: '#111' }); placed(t.id); focusProp('text'); break; }
     case 'obstacle':
+    case 'focusarea':
     case 'zone': {
       const o = tool === 'zone'
         ? { id: uid(), type: 'zone', x: p.x, y: p.y, w: 0, h: 0, label: `Station ${drill().objects.filter(x => x.type === 'zone').length + 1}`, color: ZONE_COLORS[lastZoneColor++ % ZONE_COLORS.length] }
+        : tool === 'focusarea' ? { id: uid(), type: 'focus', x: p.x, y: p.y, w: 0, h: 0, dim: '0.55' }
         : { id: uid(), type: 'obstacle', x: p.x, y: p.y, w: 0, h: 0, rot: 0, label: '' };
       store.pushUndo();
       drill().objects.push(o);
@@ -623,7 +626,7 @@ function onPointerMove(e) {
     case 'rect': {
       const o = getObj(drag.id); if (!o) return;
       const r = G.rectFromPoints(drag.start, p);
-      if (o.type === 'zone') Object.assign(o, r);
+      if (o.type === 'zone' || o.type === 'focus') Object.assign(o, r);
       else Object.assign(o, { x: G.round1(r.x + r.w / 2), y: G.round1(r.y + r.h / 2), w: G.round1(r.w), h: G.round1(r.h) });
       renderCanvas();
       break;
@@ -823,7 +826,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', i: 'contact', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', i: 'contact', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', f: 'focusarea', x: 'text', e: 'erase' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });
@@ -842,7 +845,7 @@ function drillPoints(d) {
     if (o.points) o.points.forEach(p => pts.push(p));
     if (o.x != null && !(o.type === 'puck' && o.carrier)) pts.push({ x: o.x, y: o.y });
     (o.path || []).forEach(p => pts.push(p));
-    if (o.type === 'zone') pts.push({ x: o.x + o.w, y: o.y + o.h });
+    if (o.type === 'zone' || o.type === 'focus') pts.push({ x: o.x + o.w, y: o.y + o.h });
     for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
   }
   return pts;
@@ -871,7 +874,7 @@ function resizeDrillInto(zone) {
     if (o.points) o.points.forEach(p => grow(p.x, p.y));
     if (o.x != null) grow(o.x, o.y);
     (o.path || []).forEach(p => grow(p.x, p.y));
-    if (o.type === 'zone') { grow(o.x, o.y); grow(o.x + o.w, o.y + o.h); }
+    if (o.type === 'zone' || o.type === 'focus') { grow(o.x, o.y); grow(o.x + o.w, o.y + o.h); }
   }
   if (!isFinite(minX)) return;
   const m = 2; // ft of breathing room inside the zone
@@ -1905,13 +1908,14 @@ const PROPS = {
   obstacle: [['label', 'text', 'Label'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   raisedpad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   jumppad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
+  focus: [['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)'], ['dim', 'select:0.35=Light,0.55=Medium,0.8=Dark', 'Gray-out outside the box']],
   zone: [['label', 'text', 'Title'], ['color', 'zoneswatch', 'Color'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)'],
     ['constraints', 'textarea', 'Constraints — one per line. Drawn in the zone, listed under the drill, and read aloud in the viewer']],
   barricade: [],
   arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { contact: 'Contact', skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { focus: 'Focus area', contact: 'Contact', skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');
@@ -2005,6 +2009,11 @@ function renderProps() {
       extra.push(`<button data-act="chipcorner" title="The coach takes a puck and chips it into the nearest corner">Chip to corner</button>`);
       extra.push(`<button data-act="chipboards" title="The coach takes a puck and rims it around the end boards to the far corner">Chip around boards</button>`);
     }
+  }
+  if (o.type === 'focus') {
+    extra.push(`<button data-act="focus">Zoom the view to this box</button>`);
+    extra.push(`<button data-act="fitdrill" title="Uniformly scale and centre everything in this drill so it fits inside the box">⇲ Resize drill into box</button>`);
+    extra.push(`<p class="muted small">Everything outside the box is grayed out — on the ice, on the printed sheet and in the coaches’ view. Grab the dashed edge to move it; objects inside stay clickable.</p>`);
   }
   if (o.type === 'zone') {
     extra.push(`<button data-act="focus">Focus view on zone</button>`);
@@ -2730,7 +2739,7 @@ function splitLayers(fig, svgEl) {
   const overlay = svgEl.cloneNode(false); // same viewBox / size, no content
   overlay.classList.add('pr-overlay');
   overlay.innerHTML = `<style>${SVG_STYLE}</style>`;
-  for (const el of svgEl.querySelectorAll('.puck-disc, [data-skater], .raisedpad-top, .shot-overlay')) overlay.appendChild(el); // document order keeps their stacking
+  for (const el of svgEl.querySelectorAll('.puck-disc, [data-skater], .raisedpad-top, .shot-overlay, .obj.focus')) overlay.appendChild(el); // document order keeps their stacking; the focus mask dims moving skaters outside its box too
   const fx = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   overlay.appendChild(fx);
   fig.appendChild(overlay);

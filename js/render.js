@@ -49,7 +49,7 @@ function handles(pts) {
 }
 
 // Goalies draw as pseudo-type 'goalie': above pucks so shot lines pass under them.
-const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'goalie', 'contact'];
+const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'goalie', 'contact', 'focus'];
 const zType = o => (o.type === 'skater' && o.role === 'G' ? 'goalie' : o.type);
 
 /** A player's skating path (line + arrowhead), or '' if there is none to draw. Backward stretches (from `backward` / waypoint pivots) draw dotted, with a ⇄ marker at each pivot. */
@@ -98,9 +98,10 @@ export function renderObjects(drill, selId, opts = {}) {
   // skaters visibly slide underneath it.
   return below.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
     + pathLayer
-    + above.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
+    + above.filter(o => o.type !== 'focus').map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
     + objs.filter(o => o.type === 'raisedpad').map(raisedPadTop).join('')
-    + shotOverlay(o2);
+    + shotOverlay(o2)
+    + objs.filter(o => o.type === 'focus').map(o => draw.focus(o, o.id === selId, o2)).join(''); // the gray-out sits above everything
 }
 
 /**
@@ -142,6 +143,20 @@ const draw = {
       <circle r="2.7" class="contact-zone"/>
       <polygon class="contact-star" points="${starPoints(1.9)}"/>
       ${info.ok ? `<text class="contact-t" y="4.6" text-anchor="middle">${info.t.toFixed(1)}s</text>` : `<text class="contact-t warn-t" y="4.6" text-anchor="middle">?</text>`}
+    </g>`;
+  },
+
+  // Focus area: thin barricades around the box, and everything outside it grayed out. The mask is one even-odd
+  // path (the whole view minus the box) that ignores the pointer, so objects under it stay clickable; the box is grabbed by its edge.
+  focus(o, sel) {
+    const d = Math.min(0.95, Math.max(0.1, +o.dim || 0.55));
+    const x = n(o.x), y = n(o.y), w = n(o.w), h = n(o.h);
+    return `<g class="obj focus" data-id="${o.id}">
+      <path class="focus-mask" fill-rule="evenodd" d="M-300,-300 H500 V400 H-300 Z M${x},${y} h${w} v${h} h${n(-o.w)} Z" fill="#0f1116" fill-opacity="${d}" pointer-events="none"/>
+      <rect class="focus-hit" x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="transparent" stroke-width="2.6" pointer-events="stroke"/>
+      ${sel ? `<rect class="focus-sel" x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-opacity=".45" pointer-events="none"/>` : ''}
+      <rect class="focus-edge core" x="${x}" y="${y}" width="${w}" height="${h}" pointer-events="none"/>
+      <rect class="stripe" x="${x}" y="${y}" width="${w}" height="${h}" pointer-events="none"/>
     </g>`;
   },
 

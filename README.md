@@ -55,6 +55,7 @@ With a config in place the app is **gated**: a sign-in screen covers the planner
 - **Goalies**: the Goalie tool (or dragging its button) near a net puts a goalie in that net's crease facing out — it follows the net's rotation; a net's panel also has *Add goalie*. Goalies are skaters with role G (square marker) and can be given paths, pucks and passes like anyone else.
 - **Coaches**: a labelled diamond marker (label and colour editable). Drag the Coach button straight from the toolbar onto the ice to drop one where you want it — the same drag-and-drop works for skaters, cones, tires, pucks and nets. Coaches take part in puck play like a skater: they can receive passes, carry a puck (Puck tool on a coach, drop a puck on them, or *Give puck*), and pass or shoot it; **Facing** sets which way they hold it while standing. They can also move — use the Skater tool on a coach to give them a path (speed defaults to 10 ft/s).
 - **Triggered starts**: any skater or coach can be set to start moving *when another player reaches a given waypoint* (their panel → "Starts moving"), with the start delay added on top — e.g. a coach who skates in once #1 reaches the blue line, or #2 who goes when #1 hits waypoint 2.
+- **Focus area**: the Focus tool (F) drags a box around the space a drill uses: thin barricades go around it and the rest of the ice grays out — on the canvas, on the printed sheet and in the coaches' view, where skaters outside the box stay dimmed even while the animation runs. Objects inside stay clickable; grab the dashed edge to move the box, set its size and how dark the gray-out is in its panel, and *Zoom the view to this box* or *Resize drill into box* like a zone.
 - **Barricades**: click points to lay dividers across the ice; **Zones** mark labelled stations (drag a box, pick a colour, "Focus view on zone" to plan a drill in just that section).
 - **Offense / defense**: an **O / D** switch under the Skater tool makes new skaters blue (offense) or red (defense), numbered separately per side; a skater's **Side** can be changed in its panel (which recolours it), and the colour swatch is still there for anything custom.
 - **Skaters with paths**: click to place a skater, keep clicking to add waypoints (or drag to draw freehand). Paths are smoothed splines. Each skater has a label, colour, role (F/D/G), speed (ft/s), start delay, puck-carrier flag and backward-skating flag.
@@ -82,7 +83,7 @@ With a config in place the app is **gated**: a sign-in screen covers the planner
 | V / H | Select / Pan |
 | S, K, G, A | Skater, Coach, Goalie, Arrow |
 | C, M, T, P, L, N, O, R, J | Cone, Small cone, Tire, Puck, Puck pile, Net, Obstacle, Raised pad, Jump pad |
-| B, Z, X, E | Barricade, Zone, Text, Erase |
+| B, Z, F, X, E | Barricade, Zone, Focus area, Text, Erase |
 | Enter / Esc | Finish current path or polyline |
 | Delete | Remove selection |
 | Arrows (+Shift) | Nudge selection 1 ft (5 ft) |

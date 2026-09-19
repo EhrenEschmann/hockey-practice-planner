@@ -40,6 +40,9 @@ textarea{resize:vertical}
 #toolbar .tool:hover{background:var(--panel-2)}
 #toolbar .tool.active{background:var(--accent);border-color:var(--accent);color:#fff}
 #toolbar .tool-sep{grid-column:1/-1;height:1px;background:var(--border);margin:4px 6px}
+#toolbar .tool-opt{grid-column:1/-1;display:flex;align-items:center;gap:4px;margin:0 4px 2px;padding:2px 4px;font-size:10.5px;color:var(--muted);cursor:pointer;white-space:nowrap}
+#toolbar .tool-opt input{margin:0;width:12px;height:12px}
+#toolbar .tool-opt:hover{color:var(--text)}
 
 #stage{display:flex;flex-direction:column;min-width:0;min-height:0}
 .pin-row{display:flex;align-items:center;gap:5px}

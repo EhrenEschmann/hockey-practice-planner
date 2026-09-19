@@ -48,7 +48,7 @@ With a config in place the app is **gated**: a sign-in screen covers the planner
 ## Features
 
 - **Rink canvas** in real feet (200 × 85 NHL rink) with view presets — full ice, either half, either end zone, neutral zone — plus wheel zoom and Space/middle-mouse pan so you can plan on any piece of the ice.
-- **Equipment tools**: cones, tires, pucks, nets (rotatable), and obstacle pads (drag a box, any size/rotation).
+- **Equipment tools**: cones, tires, pucks, nets (rotatable), and obstacle pads (drag a box, any size/rotation). **Tires: keep placing** under the Tire tool keeps the tool selected after each tire, so a row is one click per tire; press V (or click Select) when done. The choice is remembered on that device.
 - **Raised pad on tires**: a pad resting on two tires (click to place; length/depth/rotation editable). It's drawn above the players, and a skater whose path runs through it slides under during animation — body stretched flat along their heading, puck pushed straight ahead of them.
 - **Jump pad**: a low striped pad (click to place; length/depth/rotation editable). A skater whose path crosses it jumps over during animation — the figure rises and lands in an arc timed across the pad along their direction of travel, with a shadow falling away beneath — and the puck is pushed straight ahead first.
 - **Small cones for stickhandling**: click to place one, or drag to lay a row about 3 ft apart. When a puck carrier's path runs along the row, the animation stickhandles the puck through them — alternately left and right of each cone — while the skater glides along the line.

@@ -221,7 +221,7 @@ function setTool(t) {
   tool = t;
   document.body.dataset.tool = t;
   $$('#toolbar .tool').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
-  $('#hint').textContent = HINTS[t] || '';
+  $('#hint').textContent = (HINTS[t] || '') + (keepTool[t] ? ' · keeps placing until you press V' : '');
   renderCanvas();
 }
 
@@ -400,9 +400,18 @@ function deleteObject(id) {
 function select(id) { sel = id; renderCanvas(); renderProps(); }
 
 /** A placement is done: hand control back to the Select tool with the new object selected. */
+// Tools that stay selected after a placement ("keep placing"), so a row of tires takes one click each.
+const keepTool = { tire: false };
+try { keepTool.tire = localStorage.getItem('hpp.keep.tire') === '1'; } catch { /* fine */ }
+$('#tire-keep').checked = keepTool.tire;
+$('#tire-keep').addEventListener('change', e => {
+  keepTool.tire = e.target.checked;
+  try { localStorage.setItem('hpp.keep.tire', keepTool.tire ? '1' : '0'); } catch { /* fine */ }
+  if (tool === 'tire') $('#hint').textContent = HINTS.tire + (keepTool.tire ? ' · keeps placing until you press V' : '');
+});
 function placed(id) {
   select(id);
-  if (tool !== 'select') setTool('select');
+  if (tool !== 'select' && !keepTool[tool]) setTool('select');
 }
 
 // ---------- pointer handling ----------

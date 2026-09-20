@@ -278,6 +278,10 @@ body.no-editor #topbar,body.no-editor #viewbar,body.no-editor #layout{display:no
    would stretch this fixed overlay far past the screen. So the editor is taken out of layout while presenting. */
 body.presenting #topbar,body.presenting #viewbar,body.presenting #layout{display:none}
 #present[hidden]{display:none}
+/* pull-down-to-reload tip (viewer + sign-in gate; see main.js) */
+#pull-tip{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) - 8px);z-index:900;transform:translate(-50%,0);padding:7px 16px;border-radius:999px;background:var(--panel-2);border:1px solid var(--border);color:var(--muted);font-size:14px;font-weight:600;white-space:nowrap;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+#pull-tip.armed{color:#fff;background:var(--accent);border-color:var(--accent)}
+#pull-tip[hidden]{display:none}
 #present-top{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
 #present-note{padding:5px 14px;background:#3a3320;color:#e6c15a;font-size:12.5px;border-bottom:1px solid var(--border);flex:none}
 #present-note[hidden]{display:none}

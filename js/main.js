@@ -3603,6 +3603,38 @@ $('#present-scroll').addEventListener('touchend', e => {
 }, { passive: true });
 window.addEventListener('resize', layoutPresent);
 
+// Pull down to reload. The viewer is a fixed, non-scrolling page (and an installed home-screen app has no
+// browser chrome at all), so the browser's own pull-to-refresh never fires — this stands in for it on the
+// share link and the sign-in gate. Never in the practice creator, where a drag means something else.
+const PULL_ARM = 110; // px of pull before letting go reloads
+let pull = null;
+const pullTip = document.body.appendChild(Object.assign(document.createElement('div'), { id: 'pull-tip', hidden: true }));
+const atTop = el => { for (; el && el !== document.body; el = el.parentElement) if (el.scrollTop > 0) return false; return true; };
+const endPull = () => { pull = null; pullTip.hidden = true; };
+document.addEventListener('touchstart', e => {
+  pull = null;
+  if (editorOn || e.touches.length !== 1 || e.target.closest('input,select,textarea,canvas,video,.pr-fig.zoomed,#present-picker') || !atTop(e.target)) return;
+  pull = { x: e.touches[0].clientX, y: e.touches[0].clientY, el: e.target, armed: false };
+}, { passive: true });
+document.addEventListener('touchmove', e => {
+  if (!pull) return;
+  const dx = e.touches[0].clientX - pull.x, dy = e.touches[0].clientY - pull.y;
+  if (e.touches.length !== 1 || !atTop(pull.el) || (Math.abs(dx) > 30 && Math.abs(dx) > dy)) return endPull(); // a pinch, a scroll or a sideways swipe
+  if (dy < 24) { pullTip.hidden = true; pull.armed = false; return; }
+  pull.armed = dy >= PULL_ARM;
+  pullTip.hidden = false;
+  pullTip.textContent = pull.armed ? '↻ Release to reload' : '↓ Pull to reload';
+  pullTip.classList.toggle('armed', pull.armed);
+  pullTip.style.transform = `translate(-50%, ${Math.min(dy, PULL_ARM + 30) * 0.5}px)`;
+}, { passive: true });
+document.addEventListener('touchend', () => {
+  if (!pull?.armed) return endPull();
+  pull = null;
+  pullTip.textContent = 'Reloading…';
+  location.reload();
+}, { passive: true });
+document.addEventListener('touchcancel', endPull, { passive: true });
+
 // Keep the screen on while the plan is up at the bench (Screen Wake Lock: Chrome/Android, iOS 16.4+ Safari).
 let wakeLock = null;
 async function keepAwake(on) {

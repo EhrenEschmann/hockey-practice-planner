@@ -2898,6 +2898,7 @@ let presentAudience = 'coach'; // 'coach' = full plan; 'team' = families: schedu
 let presentOwner = 'local';    // whose account the shown practice (and its intro clips) belongs to
 let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
+let cloudBoot = 'loading', cloudBootError = ''; // 'loading' → 'ready' | 'failed' (SDK/config didn't load) | 'none' (no config: local-only)
 let uploadsChecked = false; // pending intro uploads are retried once per session
 
 /** A drill's video, collapsed to a button: the player only loads when tapped (data, and it takes the diagram's place on a phone). */
@@ -3223,10 +3224,11 @@ function wirePresentAnims(p) {
     draw();
   }
 }
-function presentMsg(msg, canSignIn = false) {
+function presentMsg(msg, canSignIn = false, canReload = false) {
   $('#present-gate').hidden = false;
   $('#present-msg').textContent = msg;
   $('#present-signin').hidden = !canSignIn;
+  $('#present-reload').hidden = !canReload;
 }
 
 // ---------- audit log: who looked at which drill, and when ----------
@@ -3322,7 +3324,15 @@ function refreshPresent() {
     presentNote(`Offline copy from ${new Date(cached.at).toLocaleString()} — ${note}`);
     return true;
   };
-  if (!cloudBackend) { if (!showCached('reconnect to get updates.')) presentMsg('This practice is not available on this device.'); return; }
+  if (!cloudBackend) {
+    if (showCached('reconnect to get updates.')) return;
+    // Still booting: say so. Failed: the cloud service never loaded on this device (no connection, a content
+    // blocker or a filtered network stopping gstatic.com) — say why and offer another go, not a dead end.
+    if (cloudBoot === 'loading') presentMsg('Loading…');
+    else if (cloudBoot === 'failed') presentMsg(`Couldn't connect to load this practice. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again.${cloudBootError ? ` (${cloudBootError})` : ''}`, false, true);
+    else presentMsg('This practice is not available on this device.');
+    return;
+  }
   if (!cloudSync?.user) { if (!showCached('sign in when online to get updates.')) presentMsg('This practice plan is shared with specific coaches. Sign in to view it.', true); return; }
   if (presentKey === key) return; // already watching this practice
   presentUnsub?.();
@@ -3607,6 +3617,7 @@ $('#btn-present').addEventListener('click', () => {
   window.open(`${location.origin}${location.pathname}#view=${store.data.ownerUid || 'local'}/${store.practice.id}`, '_blank');
 });
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, true)));
+$('#present-reload').addEventListener('click', () => location.reload()); // a failed module import stays failed for the page's lifetime: start over
 /** Copy one of the two share links: `view` = coaches (full plan), `team` = players' families (no coaching notes). */
 async function copyShareLink(btn, route) {
   if (!store.data.ownerUid) return alert('Sign in first — the link reads the practice from your cloud account.');
@@ -3715,14 +3726,19 @@ function setGate(state, detail = '') {
   let backend = globalThis.__hppBackend || null;
   let cfg = null;
   if (!backend) {
-    cfg = await loadConfig();
-    if (cfg) {
-      setGate('checking');
-      try { backend = await firebaseBackend(cfg); }
-      catch { setGate(null); } // offline and the SDK isn't cached yet: run local-only rather than hang the gate
+    try {
+      cfg = await loadConfig();
+      if (cfg) { setGate('checking'); backend = await firebaseBackend(cfg); }
+    } catch (e) {
+      // Offline and the SDK isn't cached yet, or something on this device blocks it: run local-only rather
+      // than hang the gate. A share link says what went wrong and tries again once the connection is back.
+      setGate(null);
+      cloudBoot = 'failed'; cloudBootError = e?.message || String(e);
+      console.warn('Cloud service did not load:', e);
+      addEventListener('online', () => { if (presenting) location.reload(); }, { once: true });
     }
   }
-  if (!backend) { refreshPresent(); return; } // no config (or offline boot): local-only; presentation falls back to its offline copy
+  if (!backend) { if (cloudBoot === 'loading') cloudBoot = 'none'; refreshPresent(); return; } // no config (or failed boot): local-only; presentation falls back to its offline copy
   setGate('checking');
   $('#cloud').hidden = false;
   const sync = createSync({
@@ -3745,7 +3761,7 @@ function setGate(state, detail = '') {
     },
     onRoster: () => { if (!$('#teammgr').hidden) renderTeamMgr(); }, // roster edited on another device
   });
-  cloudSync = sync; cloudBackend = backend;
+  cloudSync = sync; cloudBackend = backend; cloudBoot = 'ready';
   $('#gate-signin').addEventListener('click', () => sync.signIn().catch(e => setGate('error', e?.message || String(e))));
   $('#gate-signout').addEventListener('click', () => sync.signOut().catch(() => {}));
   $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));

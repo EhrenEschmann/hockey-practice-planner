@@ -9,9 +9,17 @@ export const SAVE_DELAY = 800; // ms of quiet after an edit before it is written
 
 /** The Firebase web config from js/firebase-config.js (or firebase-config.js in the project root), or null when local-only. */
 export async function loadConfig() {
+  let unreachable = null;
   for (const path of ['./firebase-config.js', '../firebase-config.js']) {
-    try { const cfg = (await import(path)).firebaseConfig; if (cfg?.projectId) return cfg; } catch { /* not there — try the next location */ }
+    try { const cfg = (await import(path)).firebaseConfig; if (cfg?.projectId) return cfg; }
+    catch (e) {
+      // Not there (404) — try the next location. Anything else means the file couldn't be fetched
+      // (offline, blocked): that is a failed boot, not a local-only install.
+      try { const r = await fetch(new URL(path, import.meta.url), { method: 'HEAD', cache: 'no-store' }); if (r.status !== 404) unreachable = e; }
+      catch { unreachable = e; }
+    }
   }
+  if (unreachable) throw unreachable;
   return null;
 }
 

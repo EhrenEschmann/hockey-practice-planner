@@ -132,6 +132,7 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 #sidebar.plan-unpinned #plan>.row{display:none}
 #sidebar.plan-unpinned #drill-list{margin-bottom:0}
 .panel{padding:10px 12px;border-bottom:1px solid var(--border)}
+.props-h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:14px 0 6px;font-weight:600}
 .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px;display:flex;justify-content:space-between}
 .field{display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
 .field>span{font-size:12px;color:var(--muted)}

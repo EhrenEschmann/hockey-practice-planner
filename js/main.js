@@ -883,6 +883,41 @@ function fitAll() {
   setView({ x: G.round1(x0), y: G.round1(y0), w: G.round1(x1 - x0), h: G.round1(y1 - y0) });
 }
 
+/**
+ * Mirror an object across the rink's centre line (axis 'x': left ↔ right) or its long axis ('y': top ↔ bottom).
+ * Any reflection flips handedness, so pivots swap sides and rotations / facings are reflected too.
+ */
+function mirrorObj(o, axis = 'x') {
+  const W = RINK.W, H = RINK.H;
+  const mp = q => ({ ...q, x: axis === 'x' ? G.round1(W - q.x) : q.x, y: axis === 'y' ? G.round1(H - q.y) : q.y });
+  const ang = a => (a == null || a === '' ? a : ((axis === 'x' ? 180 - +a : -+a) % 360 + 360) % 360);
+  if (o.points) o.points = o.points.map(mp);
+  if (o.type === 'zone' || o.type === 'focus') { // boxes are anchored top-left: reflect the far edge
+    if (axis === 'x') o.x = G.round1(W - o.x - o.w); else o.y = G.round1(H - o.y - o.h);
+  } else if (o.x != null) Object.assign(o, mp(o));
+  if (o.path) o.path = o.path.map(pt => { const q = mp(pt); if (q.pivot) q.pivot = q.pivot === 'L' ? 'R' : 'L'; return q; });
+  if (o.rot != null) o.rot = ang(o.rot);
+  if (o.facing != null) o.facing = ang(o.facing);
+  if (o.trigger?.dist == null && o.trigger) { /* waypoint-timed: unchanged */ }
+  for (const ev of o.events || []) { if (ev.target) ev.target = mp(ev.target); if (ev.bank) ev.bank = mp(ev.bank); }
+  return o;
+}
+function mirrorView(v, axis) { return axis === 'x' ? { ...v, x: G.round1(RINK.W - v.x - v.w) } : { ...v, y: G.round1(RINK.H - v.y - v.h) }; }
+/** Flip the whole drill (and its view) across an axis. */
+function mirrorDrill(axis) {
+  finishActive();
+  commit(() => { const d = drill(); d.objects.forEach(o => mirrorObj(o, axis)); d.view = mirrorView(d.view, axis); });
+  select(null);
+}
+/** Add a mirrored copy of everything in the drill, so the same drill runs at both ends (or both sides) at once. */
+function copyDrillMirrored(axis) {
+  finishActive();
+  const src = drill().objects.filter(o => o.type !== 'focus'); // one gray-out is enough
+  const copies = cloneObjects(src).map(o => mirrorObj(o, axis));
+  commit(() => { const d = drill(); d.objects.push(...copies); d.view = { ...VIEWS.full }; });
+  select(null);
+}
+
 function translateObj(o, dx, dy) {
   if (!o) return;
   const tr = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) }); // spread keeps waypoint flags (e.g. pivot)
@@ -1957,7 +1992,20 @@ function renderProps() {
   const body = $('#props-body');
   if (body.contains(document.activeElement)) return; // don't clobber an input being edited
   const o = sel && getObj(sel);
-  if (!o) { body.innerHTML = '<p class="muted">Nothing selected. Click an object with the Select tool.</p>'; return; }
+  if (!o) {
+    body.innerHTML = `<p class="muted">Nothing selected. Click an object with the Select tool.</p>
+      <h3 class="props-h3">Whole drill</h3>
+      <div class="row">
+        <button data-dact="mirrorX" title="Flip the drill left ↔ right across the centre line: a drill drawn in the left zone becomes the same drill in the right zone (paths, passes, shots, equipment and the view all move)">⇄ Mirror left ↔ right</button>
+        <button data-dact="mirrorY" title="Flip the drill top ↔ bottom across the long axis of the rink">⇅ Mirror top ↔ bottom</button>
+      </div>
+      <div class="row">
+        <button data-dact="copyX" title="Keep this drill and add a mirrored copy at the other end, so it runs at both ends at once">⧉ Copy to the other end</button>
+        <button data-dact="copyY" title="Keep this drill and add a mirrored copy on the other side of the rink">⧉ Copy to the other side</button>
+      </div>
+      <p class="muted small">Mirroring flips handedness too: a turn to the left becomes a turn to the right, and nets, obstacles and facings turn with it.</p>`;
+    return;
+  }
   const fields = (PROPS[o.type] || [])
     .filter(([key]) => !(key === 'facing' && o.path?.length)) // a moving skater faces along its path; facing only places a stationary skater's puck
     .map(([key, kind, label]) => {
@@ -2340,6 +2388,13 @@ propsBody.addEventListener('mouseout', e => hotHandle(e.target.closest('.wp-item
 propsBody.addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn) return;
   btn.blur(); // so renderProps() isn't skipped for "focus inside panel"
+  if (btn.dataset.dact) { // whole-drill transforms (shown when nothing is selected)
+    const a = btn.dataset.dact;
+    if (a === 'mirrorX') mirrorDrill('x'); else if (a === 'mirrorY') mirrorDrill('y');
+    else if (a === 'copyX') copyDrillMirrored('x'); else if (a === 'copyY') copyDrillMirrored('y');
+    renderProps();
+    return;
+  }
   const o = sel && getObj(sel); if (!o) return;
   const evIndex = +btn.dataset.ev;
   if (btn.classList.contains('swatch')) {

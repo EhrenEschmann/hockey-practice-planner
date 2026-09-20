@@ -102,10 +102,11 @@ export async function firebaseBackend(config) {
  *  - on sign-in, merges cloud practices with local ones (newest wins, missing ones copied both ways)
  *  - auto-saves a practice SAVE_DELAY ms after it last changed (store.save → onSave hook)
  *  - deletes propagate; changes from other devices are applied live
- * `onStatus(state, detail)` reports: signedout | syncing | saving | saved | error.
+ * `onStatus(state, detail)` reports: signedout | viewer | syncing | saving | saved | error.
+ * `canSync(user)` false → that account is signed in (`sync.user`) but nothing is synced for it ('viewer').
  * `onRemote(ids)` fires after cloud changes were applied to those practices.
  */
-export function createSync({ store, backend, onStatus = () => {}, onRemote = () => {}, onRoster = () => {} }) {
+export function createSync({ store, backend, onStatus = () => {}, onRemote = () => {}, onRoster = () => {}, canSync = () => true }) {
   let uid = null, user = null, unsub = null, unsubRoster = null, applying = false;
   const timers = new Map();
   let rosterTimer = null;
@@ -208,8 +209,9 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
   backend.onUser(async u => {
     unsub?.(); unsub = null;
     unsubRoster?.(); unsubRoster = null;
-    user = u; uid = u?.uid || null;
-    if (!uid) { status('signedout'); return; }
+    user = u; uid = u && canSync(u) ? u.uid : null;
+    if (!u) { status('signedout'); return; }
+    if (!uid) { status('viewer'); return; } // a share link's viewer: the store and their account are left alone
     try {
       // The local cache belongs to whoever signed in last; another account must not inherit it.
       if (store.data.ownerUid && store.data.ownerUid !== uid) store.reset();

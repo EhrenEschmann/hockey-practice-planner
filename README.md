@@ -18,7 +18,7 @@ Practices auto-save to Firebase so they follow you between devices. Without a co
 
 1. Create a Firebase project, add a **Web app**, and copy its config.
 2. Enable **Authentication → Sign-in method → Google**.
-3. Create a **Firestore** database and paste [firestore.rules](firestore.rules) as its rules (each user can only read/write their own practices; a practice can additionally be *read* by the Google accounts listed in its **Coach emails** — presentation mode).
+3. Create a **Firestore** database and paste [firestore.rules](firestore.rules) as its rules (only the planner emails listed in `isPlanner()` can write, and only their own practices; a practice can additionally be *read* by the Google accounts listed in its **Coach emails** — presentation mode).
 4. `cp js/firebase-config.example.js js/firebase-config.js` and paste the config in. (The file is git-ignored; putting it at the project root as `firebase-config.js` works too.)
 5. Reload: a **Sign in** button appears in the top bar.
 
@@ -29,7 +29,7 @@ Practices auto-save to Firebase so they follow you between devices. Without a co
 | **Coaches** | assistant coaches | 🔗 Coach link (`#view=…`) | the full plan — diagrams, animations, **coaching notes and assignments** |
 | **Team** | players' parents & grandparents | 🔗 Team link (`#team=…`) | the schedule and drill diagrams/animations, **without** coaching notes or the coaches line |
 
-**＋ from roster** fills either list from 👥 Team (coach emails / family contact emails). A viewer signs in with Google and sees only the practices they are listed on. **Only accounts in `OWNER_EMAILS` (js/main.js) get the practice-creation interface** — anyone else who opens the app root is told to use their share link. That is a UI gate; the real protection is [firestore.rules](firestore.rules): nobody can write another account's practices, and readers only ever read the practices whose lists carry their email.
+**＋ from roster** fills either list from 👥 Team (coach emails / family contact emails). A viewer signs in with Google and sees only the practices they are listed on. **Only accounts in `OWNER_EMAILS` (js/main.js) get the practice-creation interface** — it is not brought up at all on a coach / team link (whoever opens it) or for any other account, which is told to use its share link and has nothing pulled into or saved from its account. The matching server-side protection is [firestore.rules](firestore.rules): only the emails in its `isPlanner()` list can write anything (keep the two lists in step), and readers only ever read the practices whose lists carry their email.
 
 **Presentation mode.** Open practice details (**+ Practice**) and list your assistant coaches' Google emails under **Coach emails**, then hit **🔗 Coach link** and send it to them. A coach who opens the link signs in with Google and gets a thin read-only view of the practice — header, each drill's diagram, timing and notes — that updates live as you edit. The **📺 Present** button in the top bar opens the same view of your own practice in a new tab (works offline too) — the presentation is its own destination, with no way through to the editor. This needs the current [firestore.rules](firestore.rules) deployed.
 

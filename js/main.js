@@ -154,7 +154,10 @@ function renderUI() {
   $('#btn-redo').disabled = !store.redoStack.length;
 }
 
-function renderAll() { renderCanvas(); renderUI(); updateRoute(); }
+// The practice creator is only brought up for the planner (see syncEditor): share links and other
+// accounts never get it — until then it stays out of the page and nothing in it is rendered.
+let editorOn = false;
+function renderAll() { if (!editorOn) return; renderCanvas(); renderUI(); updateRoute(); }
 
 // ---------- routing: the URL tracks the open practice & drill so refresh restores them ----------
 function updateRoute() {
@@ -806,7 +809,7 @@ let gated = false; // sign-in required (Firebase configured, nobody signed in): 
 
 document.addEventListener('keydown', e => {
   if (presenting) { presentKeydown(e); return; } // presentation is view-only and terminal: no editor shortcuts, no way "back"
-  if (gated) return;
+  if (gated || !editorOn) return;
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
   if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
@@ -856,7 +859,7 @@ document.addEventListener('keydown', e => {
   if (t) setTool(t);
 });
 document.addEventListener('keyup', e => {
-  if (gated || presenting) return;
+  if (gated || presenting || !editorOn) return;
   if (e.key === ' ') {
     if (spaceDown && !isEditing() && !drag) togglePlay();
     spaceDown = false;
@@ -3304,6 +3307,7 @@ function refreshPresent() {
   presentAudience = /team=/.test(location.hash) ? 'team' : 'coach';
   presenting = !!m;
   document.body.classList.toggle('presenting', presenting);
+  syncEditor();
   $('#present').hidden = !presenting;
   keepAwake(presenting);
   if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentViewIO?.disconnect(); clearTimeout(viewTimer); return; }
@@ -3617,6 +3621,7 @@ $('#btn-present').addEventListener('click', () => {
   window.open(`${location.origin}${location.pathname}#view=${store.data.ownerUid || 'local'}/${store.practice.id}`, '_blank');
 });
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, true)));
+$('#gate-reload').addEventListener('click', () => location.reload());
 $('#present-reload').addEventListener('click', () => location.reload()); // a failed module import stays failed for the page's lifetime: start over
 /** Copy one of the two share links: `view` = coaches (full plan), `team` = players' families (no coaching notes). */
 async function copyShareLink(btn, route) {
@@ -3698,26 +3703,46 @@ function renderCloudStatus(sync, state, detail) {
   $('#btn-signin').hidden = !!u;
   $('#btn-signout').hidden = !u;
 }
-/** Show (state = 'checking' | 'signedout' | 'error') or hide (null) the sign-in gate that covers the app. */
+/** Show (state = 'checking' | 'signedout' | 'noaccess' | 'offline' | 'error') or hide (null) the sign-in gate that covers the app. */
 // Only these accounts get the practice-creation interface. Everyone else uses share links
 // (this is a UI gate; the real protection is Firestore's rules — nobody can write another
 // account's practices, and readers only see the practices they are listed on).
 const OWNER_EMAILS = ['ehren.eschmann@gmail.com'];
 const isOwner = u => !u?.email || OWNER_EMAILS.includes(String(u.email).toLowerCase());
 
+/** May this session use the practice creator? Only the planner's account — never a share link's viewer. */
+function editorAllowed() {
+  if (cloudBoot === 'none') return true; // local-only install (no Firebase config): nothing to sign in to
+  if (cloudBoot === 'ready') return !!cloudSync?.user && isOwner(cloudSync.user);
+  // Cloud didn't load (the planner offline at the rink): only on a device where the planner has signed in before.
+  if (cloudBoot === 'failed') { try { return localStorage.getItem('hpp.owner') === '1'; } catch { return false; } }
+  return false; // still booting
+}
+/** Bring the practice creator up or take it away to match who is signed in and what the URL shows. */
+function syncEditor() {
+  const on = editorAllowed() && !presenting; // a #view= / #team= page is a viewer, whoever opens it
+  if (on === editorOn) return;
+  editorOn = on;
+  document.body.classList.toggle('no-editor', !on);
+  if (on) { applyRoute(); sel = null; renderAll(); }
+}
+
 function setGate(state, detail = '') {
   gated = !!state;
   $('#gate').hidden = !state;
   document.body.classList.toggle('gated', gated);
   $('#gate-signout').hidden = state !== 'noaccess';
-  if (!state) return;
+  if (!state) { $('#gate-reload').hidden = true; return; }
   finishActive(); pickTarget = null; if (anim.playing) togglePlay();
   $('#gate-msg').textContent =
     state === 'checking' ? 'Checking your sign-in…'
     : state === 'noaccess' ? 'Practice plans are shared by link. Open the link your coach sent you — it works with this Google account.'
+    : state === 'offline' ? "Couldn't connect to the sign-in service. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again."
     : 'Sign in to plan practices. Your practices are saved to your account and follow you between devices.';
-  $('#gate-signin').hidden = state === 'checking' || state === 'noaccess';
+  $('#gate-signin').hidden = state === 'checking' || state === 'noaccess' || state === 'offline';
+  $('#gate-reload').hidden = state !== 'offline';
   $('#gate-detail').textContent = state === 'error' ? `Sign-in failed: ${detail}`
+    : state === 'offline' ? detail
     : state === 'noaccess' ? `Signed in as ${detail}` : '';
 }
 
@@ -3732,10 +3757,10 @@ function setGate(state, detail = '') {
     } catch (e) {
       // Offline and the SDK isn't cached yet, or something on this device blocks it: run local-only rather
       // than hang the gate. A share link says what went wrong and tries again once the connection is back.
-      setGate(null);
       cloudBoot = 'failed'; cloudBootError = e?.message || String(e);
+      setGate(editorAllowed() ? null : 'offline', cloudBootError); // the planner's own device still works offline; anyone else has nothing to open
       console.warn('Cloud service did not load:', e);
-      addEventListener('online', () => { if (presenting) location.reload(); }, { once: true });
+      addEventListener('online', () => { if (presenting || gated) location.reload(); }, { once: true });
     }
   }
   if (!backend) { if (cloudBoot === 'loading') cloudBoot = 'none'; refreshPresent(); return; } // no config (or failed boot): local-only; presentation falls back to its offline copy
@@ -3743,6 +3768,7 @@ function setGate(state, detail = '') {
   $('#cloud').hidden = false;
   const sync = createSync({
     store, backend,
+    canSync: isOwner, // viewers only read what is shared with them: no practices are pulled into or saved from their account
     onStatus: (state, detail) => {
       renderCloudStatus(sync, state, detail);
       // The app is only usable while signed in.
@@ -3750,6 +3776,7 @@ function setGate(state, detail = '') {
       else if (state === 'error' && !sync.user) setGate('error', detail);
       else if (sync.user && !isOwner(sync.user)) setGate('noaccess', sync.user.email || sync.user.name); // viewers use share links
       else if (sync.user) setGate(null);
+      if (sync.user) { try { if (isOwner(sync.user)) localStorage.setItem('hpp.owner', '1'); else localStorage.removeItem('hpp.owner'); } catch { /* storage blocked */ } }
       if (sync.user && isOwner(sync.user) && state === 'saved' && !uploadsChecked) { uploadsChecked = true; uploadPendingIntros(); } // first quiet moment after sign-in
       refreshPresent(); // presentation mode reacts to sign-in changes too
     },

@@ -270,6 +270,8 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 .gate-card button.primary{font-size:15px;padding:8px 18px}
 .gate-card #gate-detail{margin:12px 0 0;min-height:1em}
 body.gated #layout,body.gated #topbar{pointer-events:none;user-select:none}
+/* the practice creator exists only for the planner's signed-in session (syncEditor in main.js) */
+body.no-editor #topbar,body.no-editor #viewbar,body.no-editor #layout{display:none}
 /* presentation mode: read-only scroll-through of a practice (own preview or a shared coach view) */
 #present{position:fixed;top:0;left:0;right:0;height:100vh;height:100dvh;z-index:600;background:var(--bg);display:flex;flex-direction:column} /* dvh tracks a phone's collapsing toolbars, so the nav bar is never hidden behind one */
 /* The editor underneath is wider than a phone; mobile browsers widen the layout viewport to fit it, which

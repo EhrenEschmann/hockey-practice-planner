@@ -331,7 +331,11 @@ body.presenting #topbar,body.presenting #viewbar,body.presenting #layout{display
 /* ---- rink mode: one drill at a time, sized for a phone held in a glove ----
    #present.focus shows only the .current drill card, with a prev/next bar underneath; swipe changes drills,
    tapping the diagram plays it, and in portrait the diagram can be turned sideways to fill the screen. */
-#present{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#present{touch-action:pan-y;-webkit-tap-highlight-color:transparent} /* pan-y: the page scrolls but never pinch-zooms — the diagram zooms instead */
+#present .pr-fig{touch-action:none} /* the diagram takes pinch / pan itself */
+#present .pr-tl,#present .pr-react-btn,#present-nav button,#present .pr-play{touch-action:manipulation}
+.pr-fig.zoomed > svg{cursor:grab}
+.pr-fig.zoomed::after{content:'double-tap to reset';position:absolute;right:6px;bottom:6px;font-size:10px;color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:6px;pointer-events:none}
 #present-top{padding-top:calc(8px + env(safe-area-inset-top));padding-left:calc(14px + env(safe-area-inset-left));padding-right:calc(14px + env(safe-area-inset-right))}
 #present-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .pr-top-btn{padding:6px 9px;line-height:1;flex:none}
@@ -396,11 +400,13 @@ body.presenting #topbar,body.presenting #viewbar,body.presenting #layout{display
 #present.landscape #present-top{padding-top:calc(4px + env(safe-area-inset-top));padding-bottom:4px}
 #present.landscape #present-nav{padding-top:5px;padding-bottom:calc(5px + env(safe-area-inset-bottom))}
 #present.landscape #present-nav button{min-height:42px}
-#present.landscape .pr-drill.current{display:grid;grid-template-columns:auto minmax(190px,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:12px;align-items:start}
+#present.landscape .pr-drill.current{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:12px;align-items:start;overflow:hidden}
+#present.landscape .pr-drill.current .pr-animbar{min-width:0}
+#present.landscape .pr-drill.current .pr-animbar label.check{white-space:normal;flex-wrap:wrap;min-height:0;padding:4px 6px}
 #present.landscape .pr-drill.current header{grid-area:1/2;margin-bottom:0}
 #present.landscape .pr-drill.current .pr-fig{grid-area:1/1/4/2;align-self:start}
 #present.landscape .pr-drill.current .pr-animbar{grid-area:2/2;margin-top:6px}
-#present.landscape .pr-drill.current .pr-text{grid-area:3/2;margin-top:6px;min-height:0;overflow-y:auto}
+#present.landscape .pr-drill.current .pr-text{grid-area:3/2;margin-top:6px;min-height:0;max-height:100%;align-self:stretch;overflow-y:auto} /* stretch into its row so long notes scroll inside it instead of pushing the card off screen */
 #present.landscape .pr-drill.current .pr-psgrid{grid-area:1/1/4/3;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));overflow-y:auto;min-height:0}
 #present.landscape .pr-drill.current .pr-psgrid ~ .pr-text{grid-area:auto;grid-column:1/-1}
 @media (max-width:640px){

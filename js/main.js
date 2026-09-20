@@ -2831,6 +2831,25 @@ $('#btn-png').addEventListener('click', async () => {
 });
 
 // ---------- practice document (shared by print & presentation mode) ----------
+/**
+ * The window a drill is shown through outside the editor: its saved view, widened just enough that nothing
+ * in the drill is cropped — a wheel zoom left in the editor must never cut a coach's animation short.
+ */
+function shareView(d) {
+  // A focus area says exactly which space the drill is about: show that whole box, and nothing more.
+  const boxes = d.objects.filter(o => o.type === 'focus' && o.w > 0 && o.h > 0);
+  if (boxes.length) {
+    const bx0 = Math.min(...boxes.map(b => b.x)) - 3, by0 = Math.min(...boxes.map(b => b.y)) - 3;
+    const bx1 = Math.max(...boxes.map(b => b.x + b.w)) + 3, by1 = Math.max(...boxes.map(b => b.y + b.h)) + 3;
+    return { x: G.round1(bx0), y: G.round1(by0), w: G.round1(bx1 - bx0), h: G.round1(by1 - by0) };
+  }
+  const v = { ...d.view };
+  let x0 = v.x, y0 = v.y, x1 = v.x + v.w, y1 = v.y + v.h;
+  for (const q of drillPoints(d)) { x0 = Math.min(x0, q.x - 4); y0 = Math.min(y0, q.y - 4); x1 = Math.max(x1, q.x + 4); y1 = Math.max(y1, q.y + 4); }
+  // never beyond a comfortable margin around the boards
+  x0 = Math.max(-6, x0); y0 = Math.max(-6, y0); x1 = Math.min(RINK.W + 6, x1); y1 = Math.min(RINK.H + 6, y1);
+  return { x: G.round1(x0), y: G.round1(y0), w: G.round1(x1 - x0), h: G.round1(y1 - y0) };
+}
 /** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
 const activeDrills = p => p.drills.filter(d => !d.hidden);
 const parseStart = p => /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null;
@@ -2852,7 +2871,7 @@ $('#btn-print').addEventListener('click', () => {
     return `
       <div class="p-drill">
         <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clock(at)}</span>` : ''}</div>
-        ${standaloneSVG(d, rink, SVG_STYLE)}
+        ${standaloneSVG(d, rink, SVG_STYLE, shareView(d))}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${d.upload ? `<div class="p-meta">Video: uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)</div>` : d.video && videoEmbed(d.video) ? `<div class="p-meta">Video: ${escHtml(d.video)}</div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
@@ -2862,7 +2881,7 @@ $('#btn-print').addEventListener('click', () => {
     <div class="p-title">${escHtml(p.team || 'Practice')}</div>
     <div class="p-sub">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
     ${p.coaches ? `<div class="p-sub">Coaches: ${escHtml(p.coaches)}</div>` : ''}
-    <div class="p-overview">${drills.map(d => standaloneSVG(d, rink, SVG_STYLE)).join('')}</div>
+    <div class="p-overview">${drills.map(d => standaloneSVG(d, rink, SVG_STYLE, shareView(d))).join('')}</div>
     <div class="p-sub">${startMin != null ? `Start @ ${clock(startMin)}` : ''} <span class="p-meta">${drills.length} drills · ${total} min</span></div>
     <div class="p-cols">
     ${drillRows}
@@ -2971,7 +2990,7 @@ function presentHTML(p) {
       return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
-        <div class="pr-fig" data-ar="${(d.view.w / d.view.h).toFixed(3)}">${standaloneSVG(d, rink, SVG_STYLE, undefined, { showPaths: d.showPaths !== false })}</div>
+        <div class="pr-fig" data-ar="${(shareView(d).w / shareView(d).h).toFixed(3)}">${standaloneSVG(d, rink, SVG_STYLE, shareView(d), { showPaths: d.showPaths !== false })}</div>
         ${videoBlockHTML(d)}
         <div class="pr-animbar">
           <button class="pr-play" title="Watch the drill">${icon('play')}</button>
@@ -3101,6 +3120,7 @@ function wirePresentAnims(p) {
     const dcur = { ...d };
     let sm = makeSim(dcur);
     let T = sm.duration();
+    wirePinchZoom(fig);
     if (T <= 0) { // nothing moves in this drill — but a recorded intro still gets a play button
       if (d.intro) {
         bar.innerHTML = `<button class="pr-play" title="Play the coach’s intro">${icon('play')}</button><span class="muted small">🎙 coach’s intro</span>`;
@@ -3117,6 +3137,7 @@ function wirePresentAnims(p) {
     }
     let full = T; // cards park on the final positions; ▶ restarts from the top
     let fx = splitLayers(fig, svgEl);
+    wirePinchZoom(fig);
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
     const cueEl = sec.querySelector('.pr-cue');
     let voice = makeNarrator(drillCues(dcur, sm), text => { cueEl.textContent = text; cueEl.hidden = !text; });
@@ -3125,11 +3146,12 @@ function wirePresentAnims(p) {
     bar.querySelector('.pr-speed')?.addEventListener('change', e => spd = +e.target.value);
     bar.querySelector('.pr-paths')?.addEventListener('change', e => { // re-render this card with paths on/off
       const tmp = document.createElement('div');
-      tmp.innerHTML = standaloneSVG(dcur, rinkStr, SVG_STYLE, undefined, { showPaths: e.target.checked });
+      tmp.innerHTML = standaloneSVG(dcur, rinkStr, SVG_STYLE, shareView(dcur), { showPaths: e.target.checked });
       const fresh = tmp.firstElementChild;
       svgEl.replaceWith(fresh);
       svgEl = fresh;
       fx = splitLayers(fig, svgEl);
+      fig.classList.remove('zoomed'); // the fresh copy is back at the full view
       draw();
       layoutPresent(); // a rotated / landscape diagram is sized inline; the fresh copy needs it again
     });
@@ -3196,7 +3218,7 @@ function wirePresentAnims(p) {
     });
     tl.addEventListener('input', () => { a.t = +tl.value; draw(); });
     // On a phone the diagram itself is the biggest play button there is.
-    fig.addEventListener('click', () => btn.click());
+    fig.addEventListener('click', () => { if (!fig.classList.contains('zoomed')) btn.click(); });
     sec._pause = () => { if (a.intro) { a.intro.cancelled = true; a.intro.stop(); } if (a.playing) btn.click(); }; // leaving the drill in rink mode parks it
     draw();
   }
@@ -3452,6 +3474,57 @@ function sizeMedia(sec, el, ar, scroll) {
   const availH = Math.max(110, scroll.clientHeight - 16 - used - textWant - 28), availW = scroll.clientWidth - 24;
   el.style.width = `${Math.min(availW, availH * ar)}px`;
 }
+/**
+ * Pinch-to-zoom inside a diagram. The page itself never zooms (touch-action locks it — a zoomed page is how
+ * "it doesn't fit on my phone" happens); instead two fingers zoom the drill by shrinking both layers' viewBox
+ * around the pinch, one finger pans while zoomed, and a double tap puts it back.
+ */
+function wirePinchZoom(fig) {
+  if (fig._pinch) return;
+  fig._pinch = true;
+  const base = () => fig.querySelector(':scope > svg');
+  const layers = () => fig.querySelectorAll(':scope > svg');
+  const orig = () => { if (!fig.dataset.vb) fig.dataset.vb = base()?.getAttribute('viewBox') || ''; return fig.dataset.vb.split(' ').map(Number); };
+  const cur = () => (base()?.getAttribute('viewBox') || '').split(' ').map(Number);
+  const set = v => { const str = v.map(n => n.toFixed(2)).join(' '); layers().forEach(l => l.setAttribute('viewBox', str)); fig.classList.toggle('zoomed', v[2] < orig()[2] - 0.01); };
+  const clamp = v => {
+    const o = orig();
+    v[2] = Math.min(o[2], Math.max(o[2] / 4, v[2])); v[3] = v[2] * o[3] / o[2];
+    v[0] = Math.min(o[0] + o[2] - v[2], Math.max(o[0], v[0])); v[1] = Math.min(o[1] + o[3] - v[3], Math.max(o[1], v[1]));
+    return v;
+  };
+  const toRink = (inv, cx, cy) => { const q = new DOMPoint(cx, cy).matrixTransform(inv); return { x: q.x, y: q.y }; };
+  let pinch = null, pan = null, lastTap = 0;
+  fig.reset = () => { set(orig()); pinch = pan = null; };
+  fig.addEventListener('touchstart', e => {
+    const b = base(); if (!b) return;
+    if (e.touches.length === 2) {
+      const [a, c] = e.touches, inv = b.getScreenCTM().inverse();
+      pinch = { d: Math.hypot(a.clientX - c.clientX, a.clientY - c.clientY), vb: cur(), c: toRink(inv, (a.clientX + c.clientX) / 2, (a.clientY + c.clientY) / 2) };
+      pan = null;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTap < 300) { fig.reset(); lastTap = 0; return; }
+      lastTap = now;
+      if (fig.classList.contains('zoomed')) pan = { x: e.touches[0].clientX, y: e.touches[0].clientY, vb: cur(), inv: b.getScreenCTM().inverse() };
+    }
+  }, { passive: true });
+  fig.addEventListener('touchmove', e => {
+    if (pinch && e.touches.length === 2) {
+      e.preventDefault();
+      const [a, c] = e.touches;
+      const k = pinch.d / Math.max(1, Math.hypot(a.clientX - c.clientX, a.clientY - c.clientY)); // fingers apart → smaller box
+      const w = pinch.vb[2] * k, h = pinch.vb[3] * k;
+      const fx = (pinch.c.x - pinch.vb[0]) / pinch.vb[2], fy = (pinch.c.y - pinch.vb[1]) / pinch.vb[3]; // keep the pinch centre under the fingers
+      set(clamp([pinch.c.x - fx * w, pinch.c.y - fy * h, w, h]));
+    } else if (pan && e.touches.length === 1) {
+      e.preventDefault();
+      const p0 = toRink(pan.inv, pan.x, pan.y), p1 = toRink(pan.inv, e.touches[0].clientX, e.touches[0].clientY);
+      set(clamp([pan.vb[0] - (p1.x - p0.x), pan.vb[1] - (p1.y - p0.y), pan.vb[2], pan.vb[3]]));
+    }
+  }, { passive: false });
+  fig.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; if (!e.touches.length) pan = null; }, { passive: true });
+}
 function presentKeydown(e) {
   if (isEditing()) return;
   if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); showDrill(presentIndex + 1); }
@@ -3505,7 +3578,7 @@ document.addEventListener('fullscreenchange', () => { $('#present-full').innerHT
 let swipe = null;
 $('#present-scroll').addEventListener('touchstart', e => {
   swipe = null;
-  if (presentMode !== 'focus' || e.touches.length !== 1 || e.target.closest('input,select,button,canvas')) return;
+  if (presentMode !== 'focus' || e.touches.length !== 1 || e.target.closest('input,select,button,canvas,.pr-fig.zoomed')) return;
   swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now() };
 }, { passive: true });
 $('#present-scroll').addEventListener('touchend', e => {

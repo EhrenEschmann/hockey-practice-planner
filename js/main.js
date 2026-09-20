@@ -1683,6 +1683,11 @@ async function stageVideoFile(d, file) {
   unfocusList(); // the list won't rebuild under a focused input (the link box has focus after opening the row)
   renderPlan();
 }
+function stopDubPreview(vp, preview) {
+  vp.previewing = false;
+  if (vp.dubAudio) { vp.dubAudio.pause(); URL.revokeObjectURL(vp.dubAudio.src); vp.dubAudio = null; }
+  if (preview) { preview.onended = null; preview.ontimeupdate = null; preview.onpause = null; preview.pause(); preview.muted = false; }
+}
 const unfocusList = () => { if (document.activeElement?.closest('#drill-list')) document.activeElement.blur(); };
 /** Fetch an uploaded video into memory (IndexedDB first, then the chunk documents in the cloud, cached for next time). */
 async function fetchUpload(owner, pid, d, onChunk = () => {}) {
@@ -1722,6 +1727,7 @@ async function videoAction(act, li) {
     else { vp.end = Math.round(t * 10) / 10; if (vp.end <= (+vp.start || 0) + 0.5) vp.start = Math.max(0, vp.end - 0.5); }
     renderPlan(); return;
   }
+  if (vp?.previewing && act !== 'vopreview') stopDubPreview(vp, li.querySelector('.vid-preview'));
   if (act === 'cancel') { if (vp?.voRec) { try { await vp.voRec.stop(); } catch { /* fine */ } } if (vp?.url) URL.revokeObjectURL(vp.url); vidPending = null; renderPlan(); return; }
   if (act === 'vorec' && vp) { // talk over the video: it plays silently from the top while the mic records
     try { vp.voRec = await startRecording({ maxSecs: MAX_VIDEO_SECS + 1 }); } catch (e) { vp.error = `Microphone not available: ${e?.message || e}`; renderPlan(); return; }
@@ -1732,6 +1738,23 @@ async function videoAction(act, li) {
     preview.onended = () => videoAction('vostop', $('#drill-list .video-editor'));
     preview.ontimeupdate = () => { if (preview.currentTime >= span.end) { preview.ontimeupdate = null; videoAction('vostop', $('#drill-list .video-editor')); } };
     preview.play().catch(() => {});
+    return;
+  }
+  if (act === 'vopreview' && vp?.vo) { // hear the dub before encoding: the muted video and the recording run together from the in point
+    const preview = li.querySelector('.vid-preview'); if (!preview) return;
+    if (vp.previewing) { stopDubPreview(vp, preview); renderPlan(); return; }
+    const span = trimSpan(vp);
+    vp.dubAudio = new Audio(URL.createObjectURL(vp.vo));
+    vp.previewing = true;
+    renderPlan();
+    const pv = $('#drill-list .vid-preview'); if (!pv) return;
+    pv.muted = true; pv.currentTime = span.start;
+    const stop = () => { stopDubPreview(vp, pv); renderPlan(); };
+    pv.onended = stop;
+    pv.ontimeupdate = () => { if (pv.currentTime >= span.end) stop(); };
+    pv.onpause = () => { if (vp.previewing && !pv.ended && pv.currentTime < span.end) stop(); }; // the user pressed pause on the player
+    await pv.play().catch(() => {});
+    vp.dubAudio.play().catch(() => {});
     return;
   }
   if (act === 'vostop' && vp?.voRec) {
@@ -1918,7 +1941,7 @@ function renderPlan() {
         </div>
         ${vp.audio === 'vo' && !vp.encoding ? `<div class="row">${vp.voRec
           ? '<button data-vact="vostop" class="danger">■ Stop</button><span class="muted small">● Recording — the video is playing silently, talk over it</span>'
-          : `<button data-vact="vorec">● ${vp.vo ? 'Re-record' : 'Record'} voiceover</button><span class="muted small">${vp.vo ? `${vp.voSecs.toFixed(1)} s recorded` : 'plays the video (silently) while you talk'}</span>`}</div>` : ''}
+          : `<button data-vact="vorec">● ${vp.vo ? 'Re-record' : 'Record'} voiceover</button>${vp.vo ? `<button data-vact="vopreview">${vp.previewing ? '■ Stop preview' : '▶ Preview with my voice'}</button>` : ''}<span class="muted small">${vp.vo ? `${vp.voSecs.toFixed(1)} s recorded` : 'plays the video (silently) while you talk'}</span>`}</div>` : ''}
         <div class="row">${vp.encoding
           ? '<span class="vid-progress muted small">Starting the encoder…</span>'
           : `<button data-vact="encode" class="primary" ${vp.audio === 'vo' && !vp.vo ? 'disabled title="Record the voiceover first"' : ''}>⬆ Encode &amp; upload</button><button data-vact="cancel">Cancel</button>`}</div>`)

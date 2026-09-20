@@ -59,6 +59,25 @@ export async function firebaseBackend(config) {
       const snap = await fs.getDocs(fs.collection(db, 'users', uid, 'practices', pid, 'views'));
       await Promise.all(snap.docs.map(d => fs.deleteDoc(d.ref)));
     },
+    // Uploaded drill videos: users/{uid}/practices/{pid}/videos/{drillId}_{at}_{i} — base64 chunks (≤ ~930 KB each)
+    // of one re-encoded clip, read back in order. Firestore's free tier hosts them without a storage bucket.
+    async saveVideo(uid, pid, did, at, chunks, meta) {
+      for (let i = 0; i < chunks.length; i++) {
+        await fs.setDoc(fs.doc(db, 'users', uid, 'practices', pid, 'videos', `${did}_${at}_${i}`), { i, n: chunks.length, data: chunks[i], ...meta, at });
+      }
+    },
+    async loadVideo(uid, pid, did, at, n, onChunk = () => {}) {
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const s = await fs.getDoc(fs.doc(db, 'users', uid, 'practices', pid, 'videos', `${did}_${at}_${i}`));
+        if (!s.exists()) throw new Error(`video chunk ${i + 1} of ${n} is missing`);
+        out.push(s.data().data); onChunk(i + 1, n);
+      }
+      return out;
+    },
+    async removeVideo(uid, pid, did, at, n) {
+      for (let i = 0; i < n; i++) await fs.deleteDoc(fs.doc(db, 'users', uid, 'practices', pid, 'videos', `${did}_${at}_${i}`)).catch(() => {});
+    },
     // The team roster: one document per user at users/{uid}/meta/roster.
     async loadRoster(uid) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'meta', 'roster')); return s.exists() ? s.data() : null; },
     async saveRoster(uid, r) { await fs.setDoc(fs.doc(db, 'users', uid, 'meta', 'roster'), r); },

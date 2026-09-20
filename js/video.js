@@ -58,3 +58,130 @@ export function videoPlayerHTML(v) {
   return `<div class="video-box"><iframe src="${esc(v.src)}" title="${esc(v.host)} video" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe></div>`;
 }
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- uploaded drill videos: dropped in, re-encoded small in the browser, stored as chunks ----------
+// A dropped file is played through a canvas and re-recorded at ≤640 px and a low bitrate, with either its own
+// sound or a recorded voiceover as the audio track. That keeps a 60 s clip to a few MB, which is what makes
+// hosting it in Firestore (free tier, no storage bucket, no billing account) workable: see cloud.js saveVideo.
+export const MAX_VIDEO_SECS = 60;
+export const VIDEO_MAX_WIDTH = 640;
+
+/** Read a dropped file's duration and size (rejects files the browser can't decode). */
+export function probeVideoFile(file) {
+  return new Promise((res, rej) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata'; v.muted = true; v.playsInline = true;
+    const url = URL.createObjectURL(file);
+    v.onloadedmetadata = () => {
+      const out = duration => ({ url, duration, width: v.videoWidth, height: v.videoHeight });
+      if (Number.isFinite(v.duration)) return res(out(v.duration));
+      // A WebM recorded by a browser reports an infinite duration until it is scanned: seek to the end to learn it.
+      // If the browser won't tell us within 2 s, carry on with an unknown length — the encoder stops at the real end anyway.
+      let settled = false;
+      const finish = () => { if (settled) return; settled = true; const d = Number.isFinite(v.duration) ? v.duration : NaN; try { v.currentTime = 0; } catch { /* fine */ } res(out(d)); };
+      v.ondurationchange = () => { if (Number.isFinite(v.duration)) finish(); };
+      v.onseeked = () => finish();
+      setTimeout(finish, 2000);
+      try { v.currentTime = 1e6; } catch { finish(); }
+    };
+    v.onerror = () => { URL.revokeObjectURL(url); rej(new Error('this browser can’t decode that file — try an .mp4 or .mov')); };
+    v.src = url;
+  });
+}
+
+// Encoders, best first: H.264 + AAC in mp4 plays on every phone; VP9/VP8 WebM is the fallback (recent iPhones play it).
+const VIDEO_FORMATS = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+
+/**
+ * Re-encode `file` (first MAX_VIDEO_SECS seconds) at ≤ VIDEO_MAX_WIDTH px. `voiceover` (an audio Blob) replaces
+ * the original sound when given. Runs in real time, so a 60 s clip takes ~60 s; onProgress(secs, total) ticks.
+ * Resolves { blob, mime, secs, width, height }.
+ */
+export async function transcodeVideo(file, { voiceover = null, onProgress = () => {} } = {}) {
+  const meta = await probeVideoFile(file);
+  const total = Number.isFinite(meta.duration) ? Math.min(meta.duration, MAX_VIDEO_SECS) : MAX_VIDEO_SECS; // unknown length: run to the end
+  const scale = Math.min(1, VIDEO_MAX_WIDTH / meta.width);
+  const W = Math.round(meta.width * scale / 2) * 2, H = Math.round(meta.height * scale / 2) * 2; // even sizes for H.264
+  const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const ctx2d = canvas.getContext('2d');
+  const src = document.createElement('video'); src.src = meta.url; src.muted = true; src.playsInline = true; src.preload = 'auto';
+  await new Promise((res, rej) => { src.oncanplay = res; src.onerror = () => rej(new Error('could not load the video')); });
+  // Audio: the file's own sound (routed through an AudioContext so nothing plays out loud) or the voiceover.
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const dest = ac.createMediaStreamDestination();
+  let voNode = null;
+  if (voiceover) {
+    const buf = await ac.decodeAudioData(await voiceover.arrayBuffer());
+    voNode = ac.createBufferSource(); voNode.buffer = buf; voNode.connect(dest);
+  } else {
+    src.muted = false; src.volume = 1; // the element must be audible to the graph; the graph goes to the recorder only
+    try { ac.createMediaElementSource(src).connect(dest); } catch { /* no audio track: silent */ }
+  }
+  const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  // Pick an encoder that really works (isTypeSupported alone is not proof — see clips.js).
+  let rec = null, chunks = [];
+  const tried = [];
+  for (const mime of VIDEO_FORMATS.filter(m => MediaRecorder.isTypeSupported?.(m)).concat([''])) {
+    try { rec = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 700_000, audioBitsPerSecond: 48_000 }); } catch { tried.push(mime); continue; }
+    chunks = [];
+    const alive = await new Promise(res => {
+      let settled = false; const done = v => { if (!settled) { settled = true; res(v); } };
+      rec.ondataavailable = e => { if (e.data.size) { chunks.push(e.data); done(true); } };
+      rec.onerror = () => done(false);
+      try { rec.start(500); } catch { done(false); }
+      ctx2d.drawImage(src, 0, 0, W, H);
+      setTimeout(() => done(rec.state === 'recording' && chunks.length > 0), 1500);
+    });
+    if (alive) break;
+    tried.push(mime || 'default');
+    try { if (rec.state !== 'inactive') rec.stop(); } catch { /* dead */ }
+    rec = null;
+  }
+  if (!rec) { ac.close(); URL.revokeObjectURL(meta.url); throw new Error(`this browser can’t encode video (tried ${tried.join(', ')})`); }
+  const mime = rec.mimeType || 'video/webm';
+  // The probe's take was a still frame: throw it away and start a fresh recorder for the real one.
+  await new Promise(res => { rec.onstop = res; rec.ondataavailable = null; try { rec.stop(); } catch { res(); } });
+  rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 700_000, audioBitsPerSecond: 48_000 });
+  chunks = [];
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(res => { rec.onstop = res; });
+  rec.start(500);
+  src.currentTime = 0;
+  await ac.resume();
+  await src.play();
+  if (voNode) voNode.start();
+  const t0 = performance.now();
+  await new Promise(res => {
+    const tick = () => {
+      const t = src.currentTime;
+      ctx2d.drawImage(src, 0, 0, W, H);
+      onProgress(Math.min(t, total), total);
+      if (src.ended || t >= total) { res(); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  src.pause();
+  try { voNode?.stop(); } catch { /* fine */ }
+  rec.stop();
+  await stopped;
+  ac.close();
+  URL.revokeObjectURL(meta.url);
+  const secs = Math.round(Math.min(total, (performance.now() - t0) / 1000) * 10) / 10;
+  return { blob: new Blob(chunks, { type: mime }), mime, secs, width: W, height: H };
+}
+
+/** Split a blob into base64 chunks that fit Firestore documents. */
+export async function blobToChunks(blob, rawBytes = 700_000) {
+  const out = [];
+  for (let off = 0; off < blob.size; off += rawBytes) {
+    const part = blob.slice(off, off + rawBytes);
+    const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(r.error); r.readAsDataURL(part); });
+    out.push(b64);
+  }
+  return out;
+}
+export function chunksToBlob(b64s, mime) {
+  const parts = b64s.map(b64 => { const bin = atob(b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; });
+  return new Blob(parts, { type: mime });
+}

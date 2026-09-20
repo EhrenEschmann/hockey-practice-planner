@@ -1655,6 +1655,20 @@ const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — depl
 let videoOpenFor = null; // drill whose 🎬 video row is open in the Drills panel
 let vidPending = null;   // a dropped file being prepared: { drillId, file, url, duration, width, height, audio, vo, voSecs, voRec, encoding, error }
 const fmtSecs = t => Number.isFinite(+t) ? `${Math.floor(+t / 60)}:${String(Math.round(+t % 60)).padStart(2, '0')}` : '?:??';
+/** The span a staged video will keep: [start, end) clipped to the file and to the 60 s cap. */
+function trimSpan(vp) {
+  const dur = Number.isFinite(vp.duration) ? vp.duration : Infinity;
+  const start = Math.min(Math.max(0, +vp.start || 0), Number.isFinite(dur) ? Math.max(0, dur - 0.5) : Infinity);
+  const end = Math.min(Number.isFinite(vp.end) ? vp.end : dur, dur);
+  return { start, end: Math.max(start + 0.5, end) };
+}
+function trimSummary(vp) {
+  const { start, end } = trimSpan(vp);
+  const keep = Number.isFinite(end) ? end - start : NaN;
+  const kept = Number.isFinite(keep) ? Math.min(keep, MAX_VIDEO_SECS) : NaN;
+  const trimmed = Number.isFinite(vp.duration) && Number.isFinite(keep) && keep < vp.duration - 0.05;
+  return `${trimmed ? `Keeps ${fmtSecs(kept)} of ${fmtSecs(vp.duration)}` : fmtSecs(vp.duration)}${Number.isFinite(keep) && keep > MAX_VIDEO_SECS ? ` — capped at ${MAX_VIDEO_SECS} s` : ''} · ${vp.width}×${vp.height} → ${Math.min(vp.width, VIDEO_MAX_WIDTH)} px wide${Number.isFinite(kept) ? `, about ${(kept * 0.095).toFixed(1)} MB` : ''}`;
+}
 const videoKey = (owner, pid, d) => clipKey(`video:${owner}`, pid, d.id, d.upload?.at);
 /** A dropped or chosen file becomes the row's preview, ready to encode. */
 async function stageVideoFile(d, file) {
@@ -1702,19 +1716,27 @@ async function videoAction(act, li) {
   const pid = store.practice.id;
   const vp = vidPending?.drillId === d.id ? vidPending : null;
   if (act === 'pick') { li.querySelector('.vid-file')?.click(); return; }
+  if ((act === 'setstart' || act === 'setend') && vp) {
+    const t = li.querySelector('.vid-preview')?.currentTime || 0;
+    if (act === 'setstart') { vp.start = Math.round(t * 10) / 10; if (Number.isFinite(vp.end) && vp.end <= vp.start + 0.5) vp.end = NaN; }
+    else { vp.end = Math.round(t * 10) / 10; if (vp.end <= (+vp.start || 0) + 0.5) vp.start = Math.max(0, vp.end - 0.5); }
+    renderPlan(); return;
+  }
   if (act === 'cancel') { if (vp?.voRec) { try { await vp.voRec.stop(); } catch { /* fine */ } } if (vp?.url) URL.revokeObjectURL(vp.url); vidPending = null; renderPlan(); return; }
   if (act === 'vorec' && vp) { // talk over the video: it plays silently from the top while the mic records
     try { vp.voRec = await startRecording({ maxSecs: MAX_VIDEO_SECS + 1 }); } catch (e) { vp.error = `Microphone not available: ${e?.message || e}`; renderPlan(); return; }
     renderPlan(); // the row now shows ■ Stop — play the (re-drawn) preview silently from the top
     const preview = $('#drill-list .vid-preview'); if (!preview) return;
-    preview.muted = true; preview.currentTime = 0;
+    const span = trimSpan(vp);
+    preview.muted = true; preview.currentTime = span.start;
     preview.onended = () => videoAction('vostop', $('#drill-list .video-editor'));
+    preview.ontimeupdate = () => { if (preview.currentTime >= span.end) { preview.ontimeupdate = null; videoAction('vostop', $('#drill-list .video-editor')); } };
     preview.play().catch(() => {});
     return;
   }
   if (act === 'vostop' && vp?.voRec) {
     const r = vp.voRec; vp.voRec = null;
-    const preview = $('#drill-list .vid-preview'); if (preview) { preview.pause(); preview.onended = null; preview.muted = false; }
+    const preview = $('#drill-list .vid-preview'); if (preview) { preview.pause(); preview.onended = null; preview.ontimeupdate = null; preview.muted = false; }
     const { blob, secs } = await r.stop();
     if (blob.size && secs >= 0.5) { vp.vo = blob; vp.voSecs = secs; vp.audio = 'vo'; }
     renderPlan();
@@ -1724,7 +1746,8 @@ async function videoAction(act, li) {
     vp.encoding = true; renderPlan();
     const progress = msg => { const el = $('#drill-list .vid-progress'); if (el) el.textContent = msg; };
     try {
-      const out = await transcodeVideo(vp.file, { voiceover: vp.audio === 'vo' ? vp.vo : null, onProgress: (t, total) => progress(`Encoding… ${t.toFixed(0)} / ${total.toFixed(0)} s`) });
+      const span = trimSpan(vp);
+      const out = await transcodeVideo(vp.file, { voiceover: vp.audio === 'vo' ? vp.vo : null, start: span.start, end: Number.isFinite(span.end) ? span.end : null, onProgress: (t, total) => progress(`Encoding… ${t.toFixed(0)} / ${total.toFixed(0)} s`) });
       const at = Date.now();
       const meta = { mime: out.mime, secs: out.secs, size: out.blob.size, width: out.width, height: out.height };
       try { await idbPutClip(clipKey(`video:${ownerFor()}`, pid, d.id, at), { mime: out.mime, blob: out.blob, secs: out.secs }); } catch { /* the cloud copy still serves this device */ }
@@ -1835,7 +1858,9 @@ function renderPlan() {
     return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clock(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}`;
   };
   const list = $('#drill-list');
-  if (list.contains(document.activeElement)) return; // someone is typing in the list — don't clobber it
+  // Someone typing in the list must not have their field rebuilt under them — but a focused radio, checkbox
+  // or button is no reason to hold back (a click leaves those focused, and their change needs a redraw).
+  if (list.contains(document.activeElement) && document.activeElement.matches('textarea, input:not([type]), input[type="text"], input[type="number"], input[type="search"]')) return;
   const btns = d => `
       <button data-act="hide" class="${d.hidden ? 'is-hidden' : ''}" title="${d.hidden ? 'Hidden: left out of the plan, print and the coaches’ view — click to put it back' : 'Hide this drill: keep it here to come back to, but leave it out of the plan, print and the coaches’ view'}">${icon(d.hidden ? 'eyeoff' : 'eye')}</button>
       <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (up to ${MAX_VIDEO_SECS} s, optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">🎬</button>
@@ -1878,7 +1903,15 @@ function renderPlan() {
     const uploadHTML = vp ? (vp.error
       ? `<div class="intro-warn warn small">⚠ ${escHtml(vp.error)}</div><div class="row"><button data-vact="cancel">OK</button></div>`
       : `<video class="vid-preview" src="${vp.url}" controls playsinline preload="metadata"></video>
-        <div class="intro-status muted small">${fmtSecs(vp.duration)}${vp.duration > MAX_VIDEO_SECS ? ` — only the first ${MAX_VIDEO_SECS} s are kept` : ''} · ${vp.width}×${vp.height} → ${Math.min(vp.width, VIDEO_MAX_WIDTH)} px wide${Number.isFinite(vp.duration) ? `, about ${(Math.min(vp.duration, MAX_VIDEO_SECS) * 0.095).toFixed(1)} MB` : ''}</div>
+        <div class="row vid-trim" title="Trim: only the part between the two times is kept. Play the preview to a spot and press ‘start here’ / ‘end here’, or type the seconds.">
+          <span class="muted small">Trim</span>
+          <button data-vact="setstart" ${vp.encoding ? 'disabled' : ''}>⟵ start here</button>
+          <input type="number" class="vid-in" step="0.1" min="0" value="${(+vp.start || 0).toFixed(1)}" ${vp.encoding ? 'disabled' : ''}>
+          <span class="muted small">to</span>
+          <input type="number" class="vid-out" step="0.1" min="0" value="${Number.isFinite(vp.end) ? vp.end.toFixed(1) : ''}" placeholder="${Number.isFinite(vp.duration) ? vp.duration.toFixed(1) : 'end'}" ${vp.encoding ? 'disabled' : ''}>
+          <button data-vact="setend" ${vp.encoding ? 'disabled' : ''}>end here ⟶</button>
+        </div>
+        <div class="intro-status muted small vid-summary">${trimSummary(vp)}</div>
         <div class="row">
           <label class="check small"><input type="radio" name="vidaudio" value="keep" ${vp.audio !== 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> keep its sound</label>
           <label class="check small"><input type="radio" name="vidaudio" value="vo" ${vp.audio === 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> my voice instead</label>
@@ -1963,6 +1996,13 @@ $('#drill-list').addEventListener('drop', e => {
 $('#drill-list').addEventListener('change', e => {
   if (e.target.matches('.vid-file')) { const d = store.practice.drills.find(x => x.id === videoOpenFor); if (d) stageVideoFile(d, e.target.files?.[0]); }
   if (e.target.matches('input[name="vidaudio"]') && vidPending) { vidPending.audio = e.target.value; renderPlan(); }
+  if (e.target.matches('.vid-in, .vid-out') && vidPending) { unfocusList(); renderPlan(); }
+});
+$('#drill-list').addEventListener('input', e => {
+  if (!e.target.matches('.vid-in, .vid-out') || !vidPending) return;
+  const v = e.target.value === '' ? NaN : +e.target.value;
+  if (e.target.matches('.vid-in')) vidPending.start = Number.isFinite(v) ? Math.max(0, v) : 0; else vidPending.end = Number.isFinite(v) ? v : NaN;
+  const sum = $('#drill-list .vid-summary'); if (sum) sum.textContent = trimSummary(vidPending);
 });
 $('#drill-list').addEventListener('input', e => {
   if (!e.target.matches('.video-url')) return;

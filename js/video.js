@@ -97,9 +97,11 @@ const VIDEO_FORMATS = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;code
  * the original sound when given. Runs in real time, so a 60 s clip takes ~60 s; onProgress(secs, total) ticks.
  * Resolves { blob, mime, secs, width, height }.
  */
-export async function transcodeVideo(file, { voiceover = null, onProgress = () => {} } = {}) {
+export async function transcodeVideo(file, { voiceover = null, start = 0, end = null, onProgress = () => {} } = {}) {
   const meta = await probeVideoFile(file);
-  const total = Number.isFinite(meta.duration) ? Math.min(meta.duration, MAX_VIDEO_SECS) : MAX_VIDEO_SECS; // unknown length: run to the end
+  const from = Math.max(0, +start || 0);
+  const to = end != null && Number.isFinite(+end) ? +end : (Number.isFinite(meta.duration) ? meta.duration : Infinity);
+  const total = Math.min(Math.max(0.5, to - from), MAX_VIDEO_SECS); // the trimmed span, capped; an unknown length runs to the end
   const scale = Math.min(1, VIDEO_MAX_WIDTH / meta.width);
   const W = Math.round(meta.width * scale / 2) * 2, H = Math.round(meta.height * scale / 2) * 2; // even sizes for H.264
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
@@ -146,16 +148,17 @@ export async function transcodeVideo(file, { voiceover = null, onProgress = () =
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   const stopped = new Promise(res => { rec.onstop = res; });
   rec.start(500);
-  src.currentTime = 0;
+  if (from > 0) await new Promise(res => { src.onseeked = () => { src.onseeked = null; res(); }; src.currentTime = from; });
+  else src.currentTime = 0;
   await ac.resume();
   await src.play();
   if (voNode) voNode.start();
   const t0 = performance.now();
   await new Promise(res => {
     const tick = () => {
-      const t = src.currentTime;
+      const t = src.currentTime - from;
       ctx2d.drawImage(src, 0, 0, W, H);
-      onProgress(Math.min(t, total), total);
+      onProgress(Math.min(Math.max(0, t), total), total);
       if (src.ended || t >= total) { res(); return; }
       requestAnimationFrame(tick);
     };

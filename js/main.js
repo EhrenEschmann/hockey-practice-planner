@@ -2892,9 +2892,11 @@ function wireVideos(p) {
     const sec = box.closest('.pr-drill');
     const btn = box.querySelector('.pr-video-btn');
     const d = p.drills.find(x => x.id === sec.dataset.did);
+    // A drill with a video and nothing drawn on the ice is the video: it opens by itself and the empty rink stays hidden.
+    const videoOnly = !!d && !(d.objects || []).length;
     const label = () => box.dataset.upload ? `🎬 Watch video <span class="muted small">(${fmtSecs(d?.upload?.secs)})</span>` : `🎬 Watch video <span class="muted small">(${escHtml(box.dataset.host)})</span>`;
-    btn.addEventListener('click', async () => {
-      const open = !sec.classList.contains('video-open');
+    const toggle = async ({ auto = false } = {}) => {
+      const open = auto || !sec.classList.contains('video-open');
       sec.classList.toggle('video-open', open);
       box.querySelector('.video-box')?.remove();
       if (open) {
@@ -2903,13 +2905,16 @@ function wireVideos(p) {
           btn.textContent = 'Loading…';
           const entry = await fetchUpload(presentOwner, p.id, d, (i, n) => { btn.textContent = `Downloading ${i} / ${n}…`; });
           if (!sec.classList.contains('video-open')) return; // closed while loading
-          if (!entry) { btn.textContent = '⚠ video not available — tap ↻ to resync, or check the connection'; sec.classList.remove('video-open'); layoutPresent(); return; }
-          box.insertAdjacentHTML('beforeend', `<div class="video-box"><video src="${entry.url}" controls playsinline autoplay preload="auto"></video></div>`);
+          if (!entry) { btn.textContent = '⚠ video not available — tap ↻ to resync, or check the connection'; btn.hidden = false; sec.classList.remove('video-open'); layoutPresent(); return; }
+          box.insertAdjacentHTML('beforeend', `<div class="video-box"><video src="${entry.url}" controls playsinline ${auto ? '' : 'autoplay'} preload="auto"></video></div>`); // an auto-opened player waits for a tap: phones block sound without one
         } else box.insertAdjacentHTML('beforeend', videoPlayerHTML({ kind: box.dataset.kind, src: box.dataset.src, host: box.dataset.host }));
       }
       btn.innerHTML = open ? '✕ Close video' : label();
+      btn.hidden = videoOnly && open; // nothing to close back to
       layoutPresent();
-    });
+    };
+    btn.addEventListener('click', () => toggle());
+    if (videoOnly) { sec.classList.add('video-only'); toggle({ auto: true }); }
   }
 }
 const REACTIONS = [['😀', 'Good'], ['🏒', 'Great hockey'], ['😍', 'Loved it'], ['🤩', 'Amazing']];

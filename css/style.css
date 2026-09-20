@@ -189,6 +189,8 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 .pr-video{margin-top:8px}
 .pr-video-btn{padding:6px 12px;font-size:14px}
 #present.focus .pr-video-btn{min-height:46px;font-size:16px;padding:0 16px;width:100%}
+.pr-drill.video-only .pr-fig{display:none} /* a video-only drill: no empty rink, in any mode */
+.pr-drill.video-only .pr-video{margin-top:0}
 #present.focus .pr-drill.current.video-open .pr-fig{display:none}
 #present.focus .pr-drill.current .pr-video{align-self:stretch;display:flex;flex-direction:column;align-items:center}
 #present.focus .pr-drill.current .pr-video .video-box{max-width:100%}

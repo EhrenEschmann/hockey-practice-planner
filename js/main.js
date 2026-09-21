@@ -160,8 +160,16 @@ let editorOn = false;
 function renderAll() { if (!editorOn) return; renderCanvas(); renderUI(); updateRoute(); }
 
 // ---------- routing: the URL tracks the open practice & drill so refresh restores them ----------
+/** The share link this page is on — { route: 'view' | 'team', owner, pid } — or null. Decoded first: some mail and
+ *  chat apps percent-encode the "=" and "/" of a link's fragment, which must still open the viewer, never the editor. */
+function shareRoute() {
+  let h = location.hash;
+  try { h = decodeURIComponent(h); } catch { /* a stray % — match it as it is */ }
+  const m = h.match(/(view|team)=(\w+)\/(\w+)/);
+  return m ? { route: m[1], owner: m[2], pid: m[3] } : null;
+}
 function updateRoute() {
-  if (/(view|team)=/.test(location.hash)) return; // presentation mode owns the URL
+  if (shareRoute()) return; // presentation mode owns the URL
   const p = store.practice, d = store.drill;
   if (!p || !d) return;
   if ((store.data.lastDrill ||= {})[p.id] !== d.id) { store.data.lastDrill[p.id] = d.id; store.persist(); }
@@ -3303,8 +3311,8 @@ function watchListViews(p) {
 
 /** Show/hide presentation mode to match the URL; called at boot, on hash changes and on sign-in changes. */
 function refreshPresent() {
-  const m = location.hash.match(/(?:view|team)=(\w+)\/(\w+)/);
-  presentAudience = /team=/.test(location.hash) ? 'team' : 'coach';
+  const m = shareRoute();
+  presentAudience = m?.route === 'team' ? 'team' : 'coach';
   presenting = !!m;
   document.body.classList.toggle('presenting', presenting);
   syncEditor();
@@ -3313,7 +3321,7 @@ function refreshPresent() {
   if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentViewIO?.disconnect(); clearTimeout(viewTimer); return; }
   applyPresentMode();
   $('#present-user').textContent = cloudSync?.user?.name || '';
-  const [, ownerUid, pid] = m;
+  const { owner: ownerUid, pid } = m;
   const mine = store.data.practices.find(x => x.id === pid);
   presentOwner = mine ? ownerFor() : ownerUid;
   if (mine) { presentUnsub?.(); presentUnsub = null; presentKey = null; presentDoc(mine); return; } // own practice: straight from the store
@@ -3648,10 +3656,11 @@ async function keepAwake(on) {
 }
 document.addEventListener('visibilitychange', () => { if (presenting && document.visibilityState === 'visible') keepAwake(true); });
 
-$('#btn-present').addEventListener('click', () => {
-  // Presentation is its own destination (same URL coaches get) — a new tab, so the editor stays put.
-  window.open(`${location.origin}${location.pathname}#view=${store.data.ownerUid || 'local'}/${store.practice.id}`, '_blank');
-});
+// Presentation is its own destination (the very URL coaches / families get) — a new tab, so the editor stays put.
+const openPresentation = route => window.open(`${location.origin}${location.pathname}#${route}=${store.data.ownerUid || 'local'}/${store.practice.id}`, '_blank');
+$('#btn-present').addEventListener('click', () => openPresentation('view'));
+$('#btn-open-team').addEventListener('click', () => openPresentation('team'));
+$('#btn-open-coach').addEventListener('click', () => openPresentation('view'));
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, true)));
 $('#gate-reload').addEventListener('click', () => location.reload());
 $('#present-reload').addEventListener('click', () => location.reload()); // a failed module import stays failed for the page's lifetime: start over

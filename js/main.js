@@ -3055,7 +3055,11 @@ function presentHTML(p) {
   const drills = activeDrills(p);
   const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const startMin = parseStart(p);
-  let t = startMin;
+  let t = startMin ?? 0; // no start time on the practice: the schedule runs from 0:00 instead of a clock time
+  // Each drill's slot on the running clock — exactly when it starts and finishes (data-* feed the live "now" marker).
+  const whenHTML = (at, dur) => startMin != null
+    ? `<span class="pr-time" data-from="${at}" data-to="${at + dur}">${clock(at)}–${clock(at + dur)}${ampm(at + dur)}</span><span class="pr-now" hidden></span>`
+    : `<span class="pr-time" title="Minutes into practice — set a start time on the practice to get clock times">${at}–${at + dur} min in</span>`;
   return `
     <div class="pr-head">
     <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
@@ -3064,7 +3068,7 @@ function presentHTML(p) {
     <div class="pr-meta">${drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
     </div>
     ${drills.map((d, i) => {
-      const at = t; if (t != null) t += (+d.duration || 0);
+      const at = t; t += (+d.duration || 0);
       if (isPSDrill(d)) {
         const tiles = (d.psElements || []).map(k => {
           const e = PS_ELEMENTS.find(x => x.key === k);
@@ -3072,7 +3076,7 @@ function presentHTML(p) {
         }).join('');
         return `
       <section class="pr-drill" data-did="${d.id}">
-        <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
+        <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${whenHTML(at, +d.duration || 0)}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
         ${videoBlockHTML(d)}
         <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>
@@ -3080,7 +3084,7 @@ function presentHTML(p) {
       }
       return `
       <section class="pr-drill" data-did="${d.id}">
-        <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
+        <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${whenHTML(at, +d.duration || 0)}</header>
         <div class="pr-fig" data-ar="${(shareView(d).w / shareView(d).h).toFixed(3)}">${standaloneSVG(d, rink, SVG_STYLE, shareView(d), { showPaths: d.showPaths !== false })}</div>
         ${videoBlockHTML(d)}
         <div class="pr-animbar">
@@ -3099,7 +3103,7 @@ function presentHTML(p) {
       </section>`;
     }).join('')}
     <section class="pr-drill pr-dismissal">
-      <header><b>* Dismissal</b>${startMin != null ? `<span class="pr-time">${clock(startMin + total)}</span>` : ''}</header>
+      <header><b>* Dismissal</b>${startMin != null ? `<span class="pr-time">${clock(startMin + total)}${ampm(startMin + total)}</span>` : `<span class="pr-time">${total} min in</span>`}</header>
       <div class="pr-react">
         <div class="pr-react-q">How was practice?</div>
         <div class="pr-react-row">${REACTIONS.map(([e, name]) => `<button class="pr-react-btn" data-emoji="${e}" title="${name}" aria-label="${name}">${e}</button>`).join('')}</div>
@@ -3148,8 +3152,22 @@ function presentDoc(p) {
   watchListViews(p);
   flushViewQueue();
   loadMyFeedback(p);
+  clearInterval(nowTimer); nowTimer = setInterval(tickNow, 15000); tickNow();
 }
 let presentPractice = null; // the practice on screen, for the audit log
+/** While the practice is happening (its date is today), the drill on the clock right now says so, with the minutes it has left. */
+let nowTimer = 0;
+function tickNow() {
+  const p = presentPractice, now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const min = now.getHours() * 60 + now.getMinutes();
+  for (const el of $$('#present-body .pr-time[data-from]')) {
+    const on = !!p && p.date === today && min >= +el.dataset.from && min < +el.dataset.to;
+    const tag = el.nextElementSibling;
+    el.classList.toggle('now', on);
+    if (tag?.classList.contains('pr-now')) { tag.hidden = !on; if (on) tag.textContent = `now · ${+el.dataset.to - min} min left`; }
+  }
+}
 /** Status line under the presentation top bar (e.g. "Offline copy from …"); '' hides it. */
 function presentNote(text) {
   $('#present-note').textContent = text;
@@ -3466,7 +3484,7 @@ function watchInbox() {
 const viewCacheKey = pid => `hpp.viewcache.${pid}`;
 function leavePractice() {
   stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentPractice = null;
-  presentViewIO?.disconnect(); clearTimeout(viewTimer); closeFeedback();
+  presentViewIO?.disconnect(); clearTimeout(viewTimer); clearInterval(nowTimer); closeFeedback();
   if (showingPractice) { showingPractice = false; $('#present-body').innerHTML = ''; applyPresentMode(); }
 }
 /** The copy of a practice this device kept from the last visit (rink mode) — shown with a note about why it is not live. */

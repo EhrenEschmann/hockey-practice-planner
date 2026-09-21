@@ -334,7 +334,11 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
 .pr-drill header{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
 .pr-drill header b{font-size:15px}
 .pr-min{color:var(--muted);font-size:13px}
-.pr-time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+.pr-time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pr-time.now{color:var(--text);font-weight:600}
+.pr-now{flex:none;color:#fff;background:var(--accent);border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.pr-now[hidden]{display:none}
+.pr-drill header{flex-wrap:wrap}
 .pr-fig{position:relative}
 .pr-fig > svg{width:100%;height:auto;border-radius:6px;display:block} /* the rink diagram only — not button icons */
 .pr-fig > svg.pr-overlay{position:absolute;top:0;left:0;pointer-events:none;will-change:transform} /* the moving layer: its own compositor layer, so the static diagram under it is never repainted */

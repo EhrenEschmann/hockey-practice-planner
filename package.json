@@ -6,8 +6,12 @@
   "description": "Design and animate hockey practice drills on a rink diagram.",
   "scripts": {
     "start": "node serve.js",
-    "check": "node --check js/main.js && node --check js/render.js && node --check js/store.js && node --check js/geometry.js && node --check js/rink.js",
-    "icons": "node scripts/build-icons.mjs"
+    "check": "for f in js/*.js sw.js serve.js; do node --check $f || exit 1; done",
+    "icons": "node scripts/build-icons.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-hpp \"node tests/rules.test.mjs\"",
+    "test:routes": "node tests/routing.test.mjs",
+    "test:unit": "node tests/access.test.mjs",
+    "test": "npm run check && npm run test:unit && npm run test:routes && npm run test:rules"
   },
   "devDependencies": {
     "lucide-static": "^1.43.0"

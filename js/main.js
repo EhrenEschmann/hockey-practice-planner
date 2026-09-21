@@ -4,6 +4,7 @@ import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES,
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill, syncFollowers } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
+import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, MAX_VIDEO_SECS, VIDEO_MAX_WIDTH } from './video.js';
@@ -150,6 +151,7 @@ function renderUI() {
   renderPlan();
   renderProps();
   renderAnimBar();
+  paintInboxButtons();
   $('#btn-undo').disabled = !store.undoStack.length;
   $('#btn-redo').disabled = !store.redoStack.length;
 }
@@ -160,27 +162,20 @@ let editorOn = false;
 function renderAll() { if (!editorOn) return; renderCanvas(); renderUI(); updateRoute(); }
 
 // ---------- routing: the URL tracks the open practice & drill so refresh restores them ----------
-/** The share link this page is on — { route: 'view' | 'team', owner, pid } — or null. Decoded first: some mail and
- *  chat apps percent-encode the "=" and "/" of a link's fragment, which must still open the viewer, never the editor. */
-function shareRoute() {
-  let h = location.hash;
-  try { h = decodeURIComponent(h); } catch { /* a stray % — match it as it is */ }
-  const m = h.match(/(view|team)=(\w+)\/(\w+)/);
-  return m ? { route: m[1], owner: m[2], pid: m[3] } : null;
-}
+// The URL is a path: /editor/<practice>/<drill> for the planner, /coach/<practice> and /team/<practice> for everyone
+// else (js/access.js decides who may be where). Inside the editor the path tracks the open practice & drill.
 function updateRoute() {
-  if (shareRoute()) return; // presentation mode owns the URL
+  if (!editorOn) return; // only the editor writes its place into the URL
   const p = store.practice, d = store.drill;
   if (!p || !d) return;
   if ((store.data.lastDrill ||= {})[p.id] !== d.id) { store.data.lastDrill[p.id] = d.id; store.persist(); }
-  const hash = `#p=${p.id}&d=${d.id}`;
-  if (location.hash !== hash) history.replaceState(null, '', hash); // replaceState: no history spam, no hashchange loop
+  const path = routePath({ view: 'editor', pid: p.id, did: d.id });
+  if (location.pathname !== path || location.hash) history.replaceState(null, '', path); // replaceState: no history spam
 }
 
-/** Open the practice/drill named in the URL hash; fall back to the last drill viewed in that practice. */
+/** Open the practice/drill named in the URL; fall back to the last drill viewed in that practice. */
 function applyRoute() {
-  const pid = location.hash.match(/p=(\w+)/)?.[1];
-  const did = location.hash.match(/d=(\w+)/)?.[1];
+  const { pid, did } = parseRoute(location);
   if (pid && pid !== store.data.currentId && store.data.practices.some(x => x.id === pid)) store.switchPractice(pid);
   const p = store.practice;
   const want = did || store.data.lastDrill?.[p.id];
@@ -188,13 +183,22 @@ function applyRoute() {
   if (i >= 0) store.drillIndex = i;
 }
 
-window.addEventListener('hashchange', () => {
-  refreshPresent();
-  if (presenting) return; // the editor underneath stays as it was
+/** Go to another screen of the app without a page load. */
+function navigate(path, { replace = false } = {}) {
+  if (path === location.pathname && !location.hash) return;
+  history[replace ? 'replaceState' : 'pushState'](null, '', path);
+  onLocationChange();
+}
+function onLocationChange() {
+  const wasEditor = editorOn;
+  refreshScreen();
+  if (!editorOn || !wasEditor) return; // entering the editor renders it afresh (syncEditor)
   finishActive();
   applyRoute();
   sel = null; stopAnim(); renderAll();
-});
+}
+window.addEventListener('popstate', onLocationChange);
+window.addEventListener('hashchange', onLocationChange); // links from before paths existed (#view=… / #team=…)
 
 /** Push an undo snapshot, apply a mutation, save and re-render. */
 function commit(fn) {
@@ -813,14 +817,14 @@ function zoomAt(p, f) {
 function setView(v) { drill().view = { ...v }; store.save(); renderCanvas(); }
 
 // ---------- keyboard ----------
-let gated = false; // sign-in required (Firebase configured, nobody signed in): the app is read-only behind the gate
 
 document.addEventListener('keydown', e => {
   if (presenting) { presentKeydown(e); return; } // presentation is view-only and terminal: no editor shortcuts, no way "back"
-  if (gated || !editorOn) return;
+  if (!editorOn) return;
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
   if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
+  if (!$('#feedback').hidden) { if (e.key === 'Escape') $('#feedback').hidden = true; return; }
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
@@ -867,7 +871,7 @@ document.addEventListener('keydown', e => {
   if (t) setTool(t);
 });
 document.addEventListener('keyup', e => {
-  if (gated || presenting || !editorOn) return;
+  if (presenting || !editorOn) return;
   if (e.key === ' ') {
     if (spaceDown && !isEditing() && !drag) togglePlay();
     spaceDown = false;
@@ -1469,7 +1473,8 @@ $('#btn-redo').addEventListener('click', doRedo);
 // ---------- practice / plan sidebar ----------
 function renderPracticeSelect() {
   const s = $('#practice-select');
-  s.innerHTML = store.data.practices.map(p => `<option value="${p.id}">${escHtml(practiceLabel(p))}</option>`).join('');
+  const mark = p => `${{ draft: '', coaches: ' · with coaches', team: ' · released' }[stageOf(p)]}${openFeedbackFor(p.id).length ? ` · 💬${openFeedbackFor(p.id).length}` : ''}`;
+  s.innerHTML = store.data.practices.map(p => `<option value="${p.id}">${escHtml(practiceLabel(p) + mark(p))}</option>`).join('');
   s.value = store.data.currentId;
 }
 const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1485,8 +1490,40 @@ function renderPracticeProps() {
     const em = $(id);
     if (document.activeElement !== em) em.value = (p[key] || []).join(', ');
   }
+  renderStage();
 }
-// Two audiences: coaches get the full plan, the team gets the schedule and drills without coaching notes.
+/** Draft → out to coaches → released to the team: only these buttons release a practice; the roster says to whom. */
+function renderStage() {
+  const p = store.practice, st = stageOf(p), a = accessFor(store.roster, p), t = rosterTeamFor(store.roster, p);
+  const since = ms => ms ? ` since ${new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : '';
+  $('#stage-now').textContent = STAGE_LABELS[st] + (st === 'coaches' ? since(p.sentCoachesAt) : st === 'team' ? since(p.sentTeamAt) : '');
+  $('#stage-now').dataset.stage = st;
+  $('#btn-stage-next').hidden = st === 'team';
+  $('#btn-stage-next').textContent = st === 'draft' ? 'Send to coaches →' : 'Release to team →';
+  $('#btn-stage-back').hidden = st === 'draft';
+  $('#btn-stage-back').textContent = st === 'team' ? '← Pull back from team' : '← Pull back to draft';
+  $('#stage-who').textContent = `${a.coach.length} coach${a.coach.length === 1 ? '' : 'es'} · ${a.team.length} family email${a.team.length === 1 ? '' : 's'}`
+    + (t ? ` — the “${t.name || 'unnamed'}” roster (👥 Team) plus any extras below.` : ' — no team roster yet: add people under 👥 Team.');
+}
+function setStage(next) {
+  const p = store.practice, a = accessFor(store.roster, p), st = stageOf(p);
+  if (next === st) return;
+  const up = STAGES.indexOf(next) > STAGES.indexOf(st);
+  if (up && !cloudSync?.user) return alert('Sign in first — a released practice is read from your cloud account.');
+  const msg = next === 'coaches' && up ? `Send this practice to ${a.coach.length} coach${a.coach.length === 1 ? '' : 'es'} for feedback?${a.coach.length ? '' : '\n\nThere are no coaches on the roster yet — add them under 👥 Team.'}`
+    : next === 'team' ? `Release this practice to the team (${a.team.length} family email${a.team.length === 1 ? '' : 's'})? Coaches keep their access.`
+    : next === 'coaches' ? 'Pull this practice back from the team? Families lose access right away; coaches keep theirs.'
+    : 'Pull this practice back to a draft? Coaches lose access right away.';
+  if (!confirm(msg)) return;
+  commit(() => {
+    p.stage = next;
+    if (next === 'coaches' && up) p.sentCoachesAt = Date.now();
+    if (next === 'team') p.sentTeamAt = Date.now();
+  });
+}
+$('#btn-stage-next').addEventListener('click', () => setStage(STAGES[STAGES.indexOf(stageOf(store.practice)) + 1]));
+$('#btn-stage-back').addEventListener('click', () => setStage(STAGES[STAGES.indexOf(stageOf(store.practice)) - 1]));
+// Extra people beyond the roster (a guest coach, a one-off skater): they get what the practice's stage gives their audience.
 const SHARE_FIELDS = [['#practice-emails', 'sharedWith'], ['#practice-team-emails', 'sharedTeam']];
 for (const [id, key] of PRACTICE_FIELDS) {
   const el = $(id);
@@ -1566,7 +1603,19 @@ function renderTeamMgr() {
         <button data-act="delcontact" title="Remove contact">${icon('x')}</button>
       </div>`).join('')}
     </div>`).join('');
+  // People on no roster who asked to be let in: approving puts them on this team's roster — which is what grants access.
+  const reqRows = openRequests().map(r => `
+    <div class="req-row" data-ruid="${escHtml(r.uid)}">
+      <div><b>${escHtml(r.name || r.email)}</b> <span class="muted small">${escHtml(r.email)} · asks to join as ${r.role === 'coach' ? 'a coach' : 'family'}${r.note ? ` · “${escHtml(r.note)}”` : ''}</span></div>
+      <div class="row">
+        <button data-act="req-coach">Approve as coach</button>
+        <select class="req-player" title="Whose family?">${t.players.map(pl => `<option value="${pl.id}">${escHtml(pl.name || 'unnamed player')}</option>`).join('')}<option value="">＋ new player</option></select>
+        <button data-act="req-family">Approve as family</button>
+        <button data-act="req-deny" class="danger">Deny</button>
+      </div>
+    </div>`).join('');
   body.innerHTML = `
+    ${reqRows ? `<h3>Access requests</h3>${reqRows}` : ''}
     <label class="field inline ros-team-name"><span>Team name</span><input data-field="teamname" value="${escHtml(t.name || '')}"></label>
     <h3>Coaches</h3>
     ${coachRows || '<p class="muted small">No coaches yet.</p>'}
@@ -1611,7 +1660,18 @@ $('#team-body').addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn?.dataset.act) return;
   const t = currentMgrTeam(); if (!t) return;
   const player = t.players.find(p => p.id === btn.closest('[data-pid]')?.dataset.pid);
+  const reqRow = btn.closest('[data-ruid]'), req = reqRow && accessRequests.find(r => r.uid === reqRow.dataset.ruid);
+  const settle = (fn, r) => fn(r.uid).catch(e => alert(`Couldn't update the request: ${e?.message || e}`));
   switch (btn.dataset.act) {
+    case 'req-coach': if (!req) return; t.coaches.push({ id: uid(), name: req.name || '', email: req.email }); settle(cloudBackend.removeRequest, req); break;
+    case 'req-family': {
+      if (!req) return;
+      let pl = t.players.find(x => x.id === reqRow.querySelector('.req-player').value);
+      if (!pl) { pl = { id: uid(), name: '', contacts: [] }; t.players.push(pl); }
+      (pl.contacts ||= []).push({ id: uid(), rel: '', name: req.name || '', email: req.email });
+      settle(cloudBackend.removeRequest, req); break;
+    }
+    case 'req-deny': if (req) settle(cloudBackend.denyRequest, req); return;
     case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
     case 'delcoach': t.coaches = t.coaches.filter(c => c.id !== btn.closest('[data-cid]').dataset.cid); break;
     case 'addplayer': t.players.push({ id: uid(), name: '', contacts: [] }); break;
@@ -1622,22 +1682,36 @@ $('#team-body').addEventListener('click', e => {
   }
   store.saveRoster(); renderTeamMgr();
 });
-// Practice popover: pull the roster team's coach emails into this practice's viewer list.
-/** Merge roster emails into one of the practice's share lists. */
-function addRosterEmails(key, pick, what) {
-  const team = store.roster.teams.find(t => (t.name || '').toLowerCase() === (store.practice.team || '').toLowerCase()) || store.roster.teams[0];
-  const emails = pick(team || {}).map(e => (e || '').trim().toLowerCase()).filter(Boolean);
-  if (!emails.length) return alert(`No ${what} in the team roster yet — add them under 👥 Team.`);
-  store.beginPending();
-  store.practice[key] = [...new Set([...(store.practice[key] || []), ...emails])];
-  store.commitPending();
-  store.save();
-  renderPracticeProps();
+// ---------- coach feedback, as the planner reads it ----------
+function openFeedbackPanel() { finishActive(); $('#practice-pop').hidden = true; $('#feedback').hidden = false; renderFeedback(); }
+function renderFeedback() {
+  const p = store.practice;
+  $('#feedback-title').textContent = practiceLabel(p);
+  const rows = feedbackAll.filter(f => f.pid === p.id);
+  const item = f => `<div class="fb-item${f.resolved ? ' resolved' : ''}" data-fid="${escHtml(f.fid)}">
+      <div class="fb-meta"><b>${escHtml(f.name || f.email)}</b> <span class="muted small">${escHtml(f.email)} · ${new Date(f.at || 0).toLocaleString()}</span></div>
+      <pre>${escHtml(f.text)}</pre>
+      <div class="row"><button data-fact="resolve">${f.resolved ? '↺ Reopen' : '✓ Resolve'}</button></div>
+    </div>`;
+  const groups = [...p.drills.map((d, i) => ({ title: `${i + 1}. ${d.name}`, did: d.id, rows: rows.filter(f => f.drillId === d.id) })),
+    { title: 'Overall', did: null, rows: rows.filter(f => !p.drills.some(d => d.id === f.drillId)) }].filter(g => g.rows.length);
+  $('#feedback-body').innerHTML = groups.length ? groups.map(g => `<section class="fb-group">
+      <h3>${escHtml(g.title)}${g.did ? ` <button data-fact="goto" data-did="${g.did}">Open drill</button>` : ''}</h3>
+      ${g.rows.sort((a, b) => (a.resolved ? 1 : 0) - (b.resolved ? 1 : 0) || (b.at || 0) - (a.at || 0)).map(item).join('')}</section>`).join('')
+    : `<p class="vl-empty">No feedback on this practice yet.${stageOf(p) === 'draft' ? ' It is still a draft — send it to the coaches from + Practice.' : ''}</p>`;
 }
-$('#btn-team-emails').addEventListener('click', () =>
-  addRosterEmails('sharedWith', t => (t.coaches || []).map(c => c.email), 'coach emails'));
-$('#btn-family-emails').addEventListener('click', () =>
-  addRosterEmails('sharedTeam', t => (t.players || []).flatMap(p => (p.contacts || []).map(c => c.email)), 'family contact emails'));
+$('#btn-feedback').addEventListener('click', openFeedbackPanel);
+$('#feedback-close').addEventListener('click', () => { $('#feedback').hidden = true; });
+$('#feedback-body').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-fact]'); if (!b) return;
+  if (b.dataset.fact === 'goto') {
+    const i = store.practice.drills.findIndex(d => d.id === b.dataset.did);
+    if (i >= 0) { store.drillIndex = i; sel = null; stopAnim(); $('#feedback').hidden = true; renderAll(); }
+    return;
+  }
+  const f = feedbackAll.find(x => x.pid === store.practice.id && x.fid === b.closest('[data-fid]').dataset.fid); if (!f) return;
+  try { await cloudBackend.resolveFeedback(f.pid, f.fid, !f.resolved); } catch (err) { alert(`Couldn't update: ${err?.message || err}`); }
+});
 
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
 let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
@@ -1891,6 +1965,7 @@ function renderPlan() {
     const at = startOf.get(d.id);
     return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clock(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}`;
   };
+  const fbCount = d => feedbackAll.filter(f => f.pid === p.id && f.drillId === d.id && !f.resolved).length;
   const list = $('#drill-list');
   // Someone typing in the list must not have their field rebuilt under them — but a focused radio, checkbox
   // or button is no reason to hold back (a click leaves those focused, and their change needs a redraw).
@@ -1914,6 +1989,7 @@ function renderPlan() {
       : `<li class="${i === store.drillIndex ? 'active' : ''}${d.hidden ? ' hidden-drill' : ''}" data-index="${i}" draggable="true" title="${d.hidden ? 'Hidden from the plan · drag to reorder' : 'Drag to reorder'}">
           <span class="num">${i + 1}.</span>
           <span class="name"><span class="dname-text">${escHtml(d.name)}</span><span class="dwhen">${when(d)}</span></span>
+          ${fbCount(d) ? `<button data-act="feedback" class="dfb" title="Unresolved coach feedback on this drill — click to read">💬${fbCount(d)}</button>` : ''}
           ${btns(d)}
         </li>`;
     const notes = notesOpenFor === d.id
@@ -2089,7 +2165,8 @@ $('#drill-list').addEventListener('click', e => {
   if (li.matches('.video-editor')) { if (btn?.dataset.vact) videoAction(btn.dataset.vact, li); return; }
   if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#drill-list .video-url')?.focus(); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
-  if (act === 'hide') { const d = p.drills[i]; commit(() => { if (d.hidden) delete d.hidden; else d.hidden = true; }); renderAll(); if (presenting) refreshPresent(); return; }
+  if (act === 'feedback') { openFeedbackPanel(); return; }
+  if (act === 'hide') { const d = p.drills[i]; commit(() => { if (d.hidden) delete d.hidden; else d.hidden = true; }); renderAll(); return; }
   if (li.matches('.notes-editor, .intro-editor, .video-editor')) return;
   finishActive();
   if (act === 'save' || act === 'cancel') {
@@ -2905,7 +2982,9 @@ $('#btn-print').addEventListener('click', () => {
 // The owner opens it with 📺 Present; coaches listed in the practice's "Coach emails" open the same
 // link, sign in with Google, and read the practice live from the owner's cloud account.
 let presenting = false;
-let presentAudience = 'coach'; // 'coach' = full plan; 'team' = families: schedule and drills, no coaching notes
+let presentAudience = 'coach'; // which link is open: /coach or /team — the same page; a coach on /coach can also leave feedback
+let feedbackOn = false;        // this viewer may leave feedback on the practice on screen
+let showingPractice = false;   // a practice (not a list or a message) fills the viewer
 let presentOwner = 'local';    // whose account the shown practice (and its intro clips) belongs to
 let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
@@ -2971,7 +3050,7 @@ function wireReactions(p) {
   });
 }
 function presentHTML(p) {
-  const forCoaches = presentAudience === 'coach'; // the team's link leaves out coaching notes & assignments
+  const fbBtn = key => feedbackOn ? `<button class="pr-fb wp-toggle" data-fb="${key}" title="Only the head coach sees what you write">💬 Feedback</button>` : '';
   const rink = rinkSVG();
   const drills = activeDrills(p);
   const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
@@ -2981,7 +3060,7 @@ function presentHTML(p) {
     <div class="pr-head">
     <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
     <div class="pr-meta">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
-    ${p.coaches && forCoaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
+    ${p.coaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
     <div class="pr-meta">${drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
     </div>
     ${drills.map((d, i) => {
@@ -2996,7 +3075,7 @@ function presentHTML(p) {
         <header><b>${i + 1}. ${escHtml(d.name)}</b><span class="pr-min">(${+d.duration || 0} min)</span>${at != null ? `<span class="pr-time">${clock(at)}</span>` : ''}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
         ${videoBlockHTML(d)}
-        <div class="pr-text">${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}</div>
+        <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>
       </section>`;
       }
       return `
@@ -3016,7 +3095,7 @@ function presentHTML(p) {
         </div>
         <div class="pr-text"><div class="pr-cue" hidden></div>
         ${rulesHTML(d)}
-        ${d.notes && forCoaches ? `<pre>${escHtml(d.notes)}</pre>` : ''}</div>
+        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>
       </section>`;
     }).join('')}
     <section class="pr-drill pr-dismissal">
@@ -3026,6 +3105,7 @@ function presentHTML(p) {
         <div class="pr-react-row">${REACTIONS.map(([e, name]) => `<button class="pr-react-btn" data-emoji="${e}" title="${name}" aria-label="${name}">${e}</button>`).join('')}</div>
         <div class="pr-react-note muted small"></div>
       </div>
+      ${feedbackOn ? `<div class="pr-text">${fbBtn('overall').replace('💬 Feedback', '💬 Overall feedback')}</div>` : ''}
     </section>`;
 }
 
@@ -3052,7 +3132,8 @@ function wireRules(sec) {
   });
 }
 function presentDoc(p) {
-  $('#present-title').textContent = practiceLabel(p) + (presentAudience === 'team' ? ' · team view' : '');
+  $('#present-title').textContent = practiceLabel(p) + (who.persona === 'planner' ? ` · ${presentAudience} view` : '');
+  if (!showingPractice) { showingPractice = true; applyPresentMode(); }
   $('#present-body').innerHTML = presentHTML(p);
   wirePresentAnims(p);
   $('#present-gate').hidden = true;
@@ -3066,6 +3147,7 @@ function presentDoc(p) {
   wireVideos(p);
   watchListViews(p);
   flushViewQueue();
+  loadMyFeedback(p);
 }
 let presentPractice = null; // the practice on screen, for the audit log
 /** Status line under the presentation top bar (e.g. "Offline copy from …"); '' hides it. */
@@ -3235,22 +3317,27 @@ function wirePresentAnims(p) {
     draw();
   }
 }
-function presentMsg(msg, canSignIn = false, canReload = false) {
+/** A message card over the viewer. `opts`: signIn / reload / request (show that control), list: '/coach' (a link back to their practices). */
+function presentMsg(msg, opts = {}) {
   $('#present-gate').hidden = false;
   $('#present-msg').textContent = msg;
-  $('#present-signin').hidden = !canSignIn;
-  $('#present-reload').hidden = !canReload;
+  $('#present-signin').hidden = !opts.signIn;
+  $('#present-reload').hidden = !opts.reload;
+  $('#present-request').hidden = !opts.request;
+  $('#present-tolist').hidden = !opts.list;
+  if (opts.list) $('#present-tolist').dataset.to = opts.list;
   // Signed in but stuck on a message (usually: the wrong Google account for this link) — say who, and offer the way out.
-  const u = cloudSync?.user;
-  $('#present-switch').hidden = !u || msg === 'Loading…';
-  $('#present-who').textContent = u && msg !== 'Loading…' ? `Signed in as ${u.email || u.name}` : '';
+  const u = cloudSync?.user, quiet = msg === 'Loading…' || msg === CHECKING;
+  $('#present-switch').hidden = !u || quiet;
+  $('#present-who').textContent = u && !quiet ? `Signed in as ${u.email || u.name}` : '';
 }
+const CHECKING = 'Checking your sign-in…';
 /** Sign out of the viewer. The offline practice copies on this device go too: they belong to the account that could read them. */
 async function presentSignOut() {
   closeAcct();
-  try { for (const k of Object.keys(localStorage)) if (k.startsWith('hpp.viewcache.')) localStorage.removeItem(k); } catch { /* storage blocked */ }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('hpp.viewcache.') || k.startsWith('hpp.inbox.')) localStorage.removeItem(k); } catch { /* storage blocked */ }
   try { localStorage.removeItem(viewQueueKey); } catch { /* fine */ }
-  presentUnsub?.(); presentUnsub = null; presentKey = null;
+  leavePractice();
   try { await cloudSync?.signOut(); } catch (e) { presentMsg(`Sign-out failed: ${e?.message || e}`); }
 }
 function openAcct() {
@@ -3271,7 +3358,7 @@ let viewTimer = 0;
 const viewQueueKey = 'hpp.viewqueue';
 function logDrillView(p, did, action) {
   if (!cloudBackend?.logView || !cloudSync?.user) return; // nobody to log as (offline copies with no session are anonymous)
-  if (presentOwner === ownerFor()) return; // the owner's own previews aren't audience views
+  if (who.persona === 'planner') return; // the planner's own previews aren't audience views
   const d = p.drills.find(x => x.id === did); if (!d) return;
   const key = `${p.id}:${did}:${action}`;
   const now = Date.now();
@@ -3284,7 +3371,7 @@ function logDrillView(p, did, action) {
 }
 function logReaction(p, emoji) {
   if (!cloudBackend?.logView || !cloudSync?.user) return false;
-  if (presentOwner === ownerFor()) return 'owner';
+  if (who.persona === 'planner') return 'owner';
   const key = `${p.id}:react:${emoji}`;
   const now = Date.now();
   if (now - (viewLogged.get(key) || 0) < VIEW_GAP) return true;
@@ -3327,66 +3414,292 @@ function watchListViews(p) {
   for (const sec of $$('#present-body .pr-drill[data-did]')) presentViewIO.observe(sec);
 }
 
-/** Show/hide presentation mode to match the URL; called at boot, on hash changes and on sign-in changes. */
-function refreshPresent() {
-  const m = shareRoute();
-  presentAudience = m?.route === 'team' ? 'team' : 'coach';
-  presenting = !!m;
+// ---------- who is here, and the screen they get (docs/requirements-routing-auth.md; the matrix is resolveRoute in access.js) ----------
+let authKnown = false;   // Firebase has said whether anyone is signed in
+let signInError = '';
+let viewerInbox;         // a non-planner's list document (inbox/{email}): undefined = not loaded yet, null = on no roster
+let inboxUnsub = null, inboxFor = null, inboxTimer = 0, inboxStale = false;
+let who = { persona: 'checking' };
+let screen = { screen: 'checking' };
+const inboxKey = email => `hpp.inbox.${email}`;
+const ownerFlag = () => { try { return localStorage.getItem('hpp.owner') === '1'; } catch { return false; } };
+
+/** { persona: 'checking' | 'offline' | 'anonymous' | 'planner' | 'coach' | 'team' | 'unknown', roles: { [practiceId]: 'coach' | 'team' } } */
+function currentWho() {
+  if (cloudBoot === 'none') return { persona: 'planner' }; // local-only install (no Firebase config): nothing to sign in to
+  if (cloudBoot === 'loading') return { persona: 'checking' };
+  // Cloud didn't load: the planner's own device still works offline; anyone else sees what this device kept, or an error.
+  if (cloudBoot === 'failed') return { persona: ownerFlag() ? 'planner' : 'offline' };
+  if (!authKnown) return { persona: 'checking' };
+  const u = cloudSync?.user;
+  if (!u) return { persona: 'anonymous' };
+  if (isOwner(u)) return { persona: 'planner' };
+  if (viewerInbox === undefined) return { persona: inboxStale ? 'offline' : 'checking' };
+  if (!viewerInbox) return { persona: 'unknown' };
+  const roles = Object.fromEntries(Object.entries(viewerInbox.practices || {}).map(([pid, c]) => [pid, c.role === 'coach' ? 'coach' : 'team']));
+  return { persona: viewerInbox.persona === 'coach' ? 'coach' : 'team', roles };
+}
+
+/** Follow the signed-in viewer's list document live: being approved, or a practice being released, shows up without a reload. */
+function watchInbox() {
+  const u = cloudSync?.user;
+  const email = u && !isOwner(u) ? String(u.email || '').toLowerCase() : null;
+  if (email === inboxFor) return;
+  inboxUnsub?.(); inboxUnsub = null; clearTimeout(inboxTimer);
+  inboxFor = email; viewerInbox = undefined; inboxStale = false;
+  if (!email || !cloudBackend?.subscribeInbox) return;
+  try { viewerInbox = JSON.parse(localStorage.getItem(inboxKey(email)) || 'null') || undefined; } catch { viewerInbox = undefined; } // last known list: the rink has no signal
+  inboxTimer = setTimeout(() => { if (viewerInbox === undefined) { inboxStale = true; refreshScreen(); } }, 8000);
+  inboxUnsub = cloudBackend.subscribeInbox(email, (doc, err) => {
+    clearTimeout(inboxTimer);
+    if (inboxFor !== email) return;
+    if (err) { if (viewerInbox === undefined) inboxStale = true; refreshScreen(); return; }
+    viewerInbox = doc; inboxStale = false;
+    try {
+      if (doc) localStorage.setItem(inboxKey(email), JSON.stringify(doc));
+      else for (const k of Object.keys(localStorage)) if (k === inboxKey(email) || k.startsWith('hpp.viewcache.')) localStorage.removeItem(k); // off every roster: the offline copies go too
+    } catch { /* fine */ }
+    refreshScreen();
+  });
+}
+
+const viewCacheKey = pid => `hpp.viewcache.${pid}`;
+function leavePractice() {
+  stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentPractice = null;
+  presentViewIO?.disconnect(); clearTimeout(viewTimer); closeFeedback();
+  if (showingPractice) { showingPractice = false; $('#present-body').innerHTML = ''; applyPresentMode(); }
+}
+/** The copy of a practice this device kept from the last visit (rink mode) — shown with a note about why it is not live. */
+function showCachedPractice(pid, note) {
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem(viewCacheKey(pid)) || 'null'); } catch { cached = null; }
+  if (!cached?.p) return false;
+  if (presentKey !== `cached/${pid}`) {
+    leavePractice(); presentKey = `cached/${pid}`;
+    (cached.p.drills || []).forEach(migrateDrill);
+    presentOwner = cached.p.owner || 'local'; feedbackOn = false;
+    presentDoc(cached.p);
+  }
+  presentNote(`Offline copy from ${new Date(cached.at).toLocaleString()} — ${note}`);
+  return true;
+}
+
+/** Put the right screen up for the URL and whoever is signed in; called at boot, on navigation and on every sign-in / list change. */
+function refreshScreen() {
+  who = currentWho();
+  const waiting = who.persona === 'checking' || who.persona === 'offline';
+  // Until we know who this is, only links from before paths existed and unknown paths move; everything else waits where it is.
+  const decide = route => waiting && !(route.view === 'unknown' || (route.legacy && route.view !== 'root'))
+    ? { screen: who.persona, as: route.view, pid: route.pid } : resolveRoute(route, who);
+  let route = parseRoute(location);
+  // Approved (or signed in to the right account) while on the request screen: carry on to the link they first opened.
+  if (route.view === 'request' && ['coach', 'team', 'planner'].includes(who.persona)) {
+    let wanted = null;
+    try { wanted = sessionStorage.getItem('hpp.wanted'); sessionStorage.removeItem('hpp.wanted'); } catch { /* fine */ }
+    if (wanted && parseRoute({ pathname: wanted }).view !== 'request') { history.replaceState(null, '', wanted); route = parseRoute(location); }
+  }
+  let r = decide(route);
+  for (let i = 0; r.go && i < 5; i++) {
+    if (r.go === '/request-access' && route.pid) { try { sessionStorage.setItem('hpp.wanted', location.pathname); } catch { /* fine */ } }
+    history.replaceState(null, '', r.go); // replace: Back must not bounce through the redirect
+    route = parseRoute(location); r = decide(route);
+  }
+  screen = r;
+  presenting = r.screen !== 'editor';
   document.body.classList.toggle('presenting', presenting);
-  syncEditor();
+  syncEditor(!presenting);
   $('#present').hidden = !presenting;
-  keepAwake(presenting);
-  if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentViewIO?.disconnect(); clearTimeout(viewTimer); return; }
-  applyPresentMode();
+  keepAwake(r.screen === 'practice');
+  if (!presenting) { leavePractice(); return; }
   $('#present-user').textContent = cloudSync?.user?.name || '';
   $('#present-account').hidden = !cloudSync?.user;
   if (!cloudSync?.user) closeAcct();
-  const { owner: ownerUid, pid } = m;
-  const mine = store.data.practices.find(x => x.id === pid);
-  presentOwner = mine ? ownerFor() : ownerUid;
-  if (mine) { presentUnsub?.(); presentUnsub = null; presentKey = null; presentDoc(mine); return; } // own practice: straight from the store
-  // Rink mode: a previously viewed copy is kept on this device, shown immediately, and replaced live when online.
-  const key = `${ownerUid}/${pid}`;
-  let cached = null;
-  try { cached = JSON.parse(localStorage.getItem(`hpp.viewcache.${key}`) || 'null'); } catch { cached = null; }
-  const showCached = note => {
-    if (!cached?.p) return false;
-    (cached.p.drills || []).forEach(migrateDrill);
-    presentDoc(cached.p);
-    presentNote(`Offline copy from ${new Date(cached.at).toLocaleString()} — ${note}`);
-    return true;
-  };
-  if (!cloudBackend) {
-    if (showCached('reconnect to get updates.')) return;
-    // Still booting: say so. Failed: the cloud service never loaded on this device (no connection, a content
-    // blocker or a filtered network stopping gstatic.com) — say why and offer another go, not a dead end.
-    if (cloudBoot === 'loading') presentMsg('Loading…');
-    else if (cloudBoot === 'failed') presentMsg(`Couldn't connect to load this practice. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again.${cloudBootError ? ` (${cloudBootError})` : ''}`, false, true);
-    else presentMsg('This practice is not available on this device.');
-    return;
+  applyPresentMode();
+  const offlineMsg = `Couldn't connect. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again.${cloudBootError ? ` (${cloudBootError})` : ''}`;
+  switch (r.screen) {
+    case 'practice': showPractice(r); break;
+    case 'list': leavePractice(); showList(r); break;
+    case 'request': leavePractice(); showRequest(); break;
+    case 'unavailable':
+      leavePractice();
+      if (!inboxStale) { try { localStorage.removeItem(viewCacheKey(r.pid)); } catch { /* fine */ } } // released no longer (or never): the offline copy goes too
+      $('#present-title').textContent = '';
+      presentMsg("This practice isn't available yet. It will show up in your list once your coach sends it out.", { list: `/${r.as}` });
+      break;
+    case 'signin':
+      if (route.pid && showCachedPractice(route.pid, 'sign in when online to get updates.')) break;
+      leavePractice(); $('#present-title').textContent = '';
+      presentMsg(signInError ? `Sign-in failed: ${signInError}` : route.view === 'editor' || route.view === 'root'
+        ? 'Sign in to continue.' : 'Practice plans are shared with the team. Sign in with the Google account your coach has on the team list.', { signIn: true });
+      break;
+    case 'offline':
+      if (route.pid && showCachedPractice(route.pid, 'reconnect to get updates.')) break;
+      leavePractice(); $('#present-title').textContent = '';
+      presentMsg(offlineMsg, { reload: true });
+      break;
+    default: // checking
+      if (route.pid && showCachedPractice(route.pid, 'checking for updates…')) break;
+      leavePractice(); $('#present-title').textContent = '';
+      presentMsg(CHECKING);
   }
-  if (!cloudSync?.user) { if (!showCached('sign in when online to get updates.')) presentMsg('This practice plan is shared with specific coaches. Sign in to view it.', true); return; }
-  if (presentKey === key) return; // already watching this practice
-  presentUnsub?.();
-  presentKey = key;
-  if (!showCached('checking for updates…')) presentMsg('Loading…');
-  presentUnsub = cloudBackend.subscribePractice(ownerUid, pid, (p, err) => {
-    if (err) {
-      // Not (or no longer) on the list: the copy kept for offline use goes too, rather than outliving the access.
-      if (err.code === 'permission-denied') { cached = null; try { localStorage.removeItem(`hpp.viewcache.${key}`); } catch { /* fine */ } }
-      const msg = err.code === 'permission-denied'
-        ? `You don't have access to this practice. Ask the coach who shared it to add your Google email to the practice's ${presentAudience === 'team' ? 'team' : 'coach'} list.`
-        : `Could not load the practice: ${err.message || err}`;
-      if (!showCached('could not reach the cloud.')) presentMsg(msg);
+}
+
+/** One practice, as /coach/<id> or /team/<id> shows it. */
+function showPractice(r) {
+  const pid = r.pid;
+  presentAudience = r.as;
+  if (who.persona === 'planner') {
+    // The planner previews their own practice straight from the store (drafts included, offline too) — as the audience would get it.
+    const mine = store.data.practices.find(x => x.id === pid);
+    if (mine) {
+      const key = `mine/${r.as}/${pid}/${mine.updatedAt || 0}`;
+      if (presentKey === key) return;
+      presentUnsub?.(); presentUnsub = null; presentKey = key;
+      presentOwner = ownerFor(); feedbackOn = false;
+      presentDoc(publishedCopy(mine, ownerFor()));
       return;
     }
-    if (!p) return presentMsg('This practice no longer exists.');
+    if (!cloudBackend) { leavePractice(); presentMsg("This practice isn't on this device.", { list: `/${r.as}` }); return; }
+  }
+  const mayComment = r.as === 'coach' && who.roles?.[pid] === 'coach';
+  const key = `live/${r.as}/${pid}/${mayComment}`;
+  if (presentKey === key) return; // already watching this practice
+  const hadCopy = showCachedPractice(pid, 'checking for updates…');
+  presentUnsub?.(); presentUnsub = null;
+  presentKey = key; feedbackOn = mayComment;
+  if (!hadCopy) { leavePractice(); presentKey = key; feedbackOn = mayComment; presentMsg('Loading…'); }
+  presentUnsub = cloudBackend.subscribePublished(pid, (p, err) => {
+    if (presentKey !== key) return;
+    if (err) {
+      // Not (or no longer) on the list: the copy kept for offline use goes too, rather than outliving the access.
+      if (err.code === 'permission-denied') {
+        try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ }
+        leavePractice(); presentKey = key;
+        presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
+      } else if (!showingPractice) presentMsg(`Could not load the practice: ${err.message || err}`, { reload: true });
+      else presentNote('Offline — showing the copy on this device.');
+      return;
+    }
+    if (!p) { try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ } leavePractice(); presentKey = key; return presentMsg('This practice no longer exists.', { list: `/${r.as}` }); }
     (p.drills || []).forEach(migrateDrill);
-    try { localStorage.setItem(`hpp.viewcache.${key}`, JSON.stringify({ p, at: Date.now() })); } catch { /* full/blocked storage: live view still works */ }
-    cached = { p, at: Date.now() };
+    try { localStorage.setItem(viewCacheKey(pid), JSON.stringify({ p, at: Date.now() })); } catch { /* full/blocked storage: live view still works */ }
+    presentOwner = p.owner || 'local'; feedbackOn = mayComment;
     presentDoc(p);
   });
 }
+
+/** /coach and /team: every practice released to this person, upcoming first — one bookmark for the whole season. */
+function showList(r) {
+  const as = r.as;
+  let items;
+  if (who.persona === 'planner') {
+    items = store.data.practices.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
+      .map(p => ({ pid: p.id, role: as, team: p.team, date: p.date, time: p.time }));
+  } else {
+    items = Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
+  }
+  const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const byDate = (a, b) => `${a.date || ''} ${a.time || ''}`.localeCompare(`${b.date || ''} ${b.time || ''}`);
+  const upcoming = items.filter(x => (x.date || '') >= today).sort(byDate), past = items.filter(x => (x.date || '') < today).sort(byDate).reverse();
+  const row = x => {
+    const min = parseStart(x);
+    const view = as === 'coach' && x.role === 'coach' ? 'coach' : 'team'; // a coach's parent-only practices open as the team sees them
+    return `<a class="pl-item" href="${routePath({ view, pid: x.pid })}" data-nav>
+      <b>${escHtml(x.team || 'Practice')}</b><span>${escHtml(x.date ? longDate(x.date) : 'no date')}${min != null ? ` · ${clock(min)}${ampm(min)}` : ''}</span>
+      ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
+  };
+  $('#present-title').textContent = who.persona === 'planner' ? `Practices — ${as} view` : 'Practices';
+  $('#present-gate').hidden = true; presentNote(inboxStale ? 'Offline — this is the list from your last visit.' : '');
+  $('#present-body').innerHTML = `<div class="pl-list">
+    ${items.length ? '' : '<p class="muted">Nothing here yet — practices show up once your coach sends them out.</p>'}
+    ${upcoming.length ? `<h2>Upcoming</h2>${upcoming.map(row).join('')}` : ''}
+    ${past.length ? `<h2>Earlier</h2>${past.map(row).join('')}` : ''}
+  </div>`;
+  $('#present-scroll').scrollTop = 0;
+}
+$('#present-body').addEventListener('click', e => {
+  const a = e.target.closest('a[data-nav]'); if (!a || e.metaKey || e.ctrlKey) return;
+  e.preventDefault(); navigate(a.getAttribute('href'));
+});
+$('#present-home').addEventListener('click', () => { if (['coach', 'team', 'planner'].includes(who.persona) && screen.as) navigate(`/${screen.as === 'coach' ? 'coach' : 'team'}`); });
+
+// ---------- request access: someone signed in who is on no roster ----------
+let myRequest;           // undefined = not loaded; null = none filed; else the requests/{uid} document
+let myRequestFor = null;
+async function showRequest() {
+  $('#present-title').textContent = '';
+  const u = cloudSync?.user; if (!u) return;
+  const paint = () => {
+    const open = myRequest?.status === 'open', denied = myRequest?.status === 'denied' && Date.now() < (myRequest.deniedAt || 0) + 7 * 86400000;
+    presentMsg(open ? "Request sent — you'll get in as soon as the coach approves it. This page opens by itself once that happens."
+      : denied ? 'Your request was not approved. If that seems wrong, talk to your coach.'
+      : "This Google account isn't on the team list yet. Ask the coach for access — or switch to the account the coach has for you.", { request: !open && !denied });
+  };
+  if (myRequestFor !== u.uid) { myRequest = undefined; myRequestFor = u.uid; }
+  $('#req-mail').href = `mailto:${OWNER_EMAILS[0]}?subject=${encodeURIComponent('Practice plan access')}&body=${encodeURIComponent(`Hi coach — please add my Google account (${u.email}) to the team list for the practice plans.\n\n${u.name || ''}`)}`;
+  if (myRequest === undefined) {
+    presentMsg('Loading…');
+    try { myRequest = (await cloudBackend.loadRequest(u.uid)) || null; } catch { myRequest = null; }
+    if (screen.screen !== 'request') return;
+  }
+  paint();
+}
+$('#req-send').addEventListener('click', async () => {
+  const u = cloudSync?.user; if (!u) return;
+  const req = { uid: u.uid, email: String(u.email || '').toLowerCase(), name: u.name || '', role: $('input[name="req-role"]:checked')?.value === 'coach' ? 'coach' : 'team',
+    note: $('#req-note').value.trim().slice(0, 300), status: 'open', at: Date.now() };
+  $('#req-send').disabled = true;
+  try { await cloudBackend.saveRequest(u.uid, req); myRequest = req; showRequest(); }
+  catch (e) { presentMsg(`Couldn't send the request: ${e?.message || e}`, { request: true }); }
+  $('#req-send').disabled = false;
+});
+
+// ---------- coach feedback: one note per drill (and one overall), seen only by the planner ----------
+let myFeedback = new Map(), myFeedbackFor = null, fbKey = null;
+const fbId = key => `${cloudSync.user.uid}_${key}`;
+async function loadMyFeedback(p) {
+  if (!feedbackOn || !cloudSync?.user) return;
+  if (myFeedbackFor !== p.id) {
+    myFeedbackFor = p.id; myFeedback = new Map();
+    try { for (const f of await cloudBackend.loadMyFeedback(p.id, cloudSync.user.uid)) myFeedback.set(f.drillId || 'overall', f); } catch { /* offline: buttons just start blank */ }
+    if (presentPractice?.id !== p.id) return;
+  }
+  for (const b of $$('#present-body .pr-fb')) {
+    const has = myFeedback.has(b.dataset.fb);
+    b.classList.toggle('active', has);
+    b.textContent = `${b.dataset.fb === 'overall' ? '💬 Overall feedback' : '💬 Feedback'}${has ? ' ✓' : ''}`;
+  }
+}
+function openFeedback(key) {
+  const p = presentPractice; if (!p || !feedbackOn) return;
+  fbKey = key;
+  const d = p.drills.find(x => x.id === key);
+  $('#fb-title').textContent = d ? `Feedback — ${d.name}` : 'Overall feedback on this practice';
+  $('#fb-text').value = myFeedback.get(key)?.text || '';
+  $('#fb-del').hidden = !myFeedback.has(key);
+  $('#fb-note').textContent = 'Only the head coach sees this.';
+  $('#present-fb').hidden = false;
+  if (!matchMedia('(pointer: coarse)').matches) $('#fb-text').focus();
+}
+function closeFeedback() { $('#present-fb').hidden = true; fbKey = null; }
+$('#present-body').addEventListener('click', e => { const b = e.target.closest('.pr-fb'); if (b) openFeedback(b.dataset.fb); });
+$('#present-fb').addEventListener('click', e => { if (e.target === e.currentTarget) closeFeedback(); });
+$('#fb-cancel').addEventListener('click', closeFeedback);
+$('#fb-send').addEventListener('click', async () => {
+  const p = presentPractice, u = cloudSync?.user, text = $('#fb-text').value.trim();
+  if (!p || !u || !fbKey) return;
+  if (!text) { $('#fb-note').textContent = 'Write something first — or Delete to take your note back.'; return; }
+  const d = p.drills.find(x => x.id === fbKey);
+  const entry = { uid: u.uid, email: String(u.email || '').toLowerCase(), name: u.name || '', drillId: d ? d.id : '', drillName: d ? d.name : 'Overall', text: text.slice(0, 4000), at: Date.now() };
+  $('#fb-note').textContent = 'Sending…';
+  try { await cloudBackend.saveFeedback(p.id, fbId(fbKey), entry); myFeedback.set(fbKey, entry); closeFeedback(); loadMyFeedback(p); }
+  catch (e) { $('#fb-note').textContent = `Couldn't send: ${e?.message || e}`; }
+});
+$('#fb-del').addEventListener('click', async () => {
+  const p = presentPractice; if (!p || !fbKey) return;
+  try { await cloudBackend.removeFeedback(p.id, fbId(fbKey)); myFeedback.delete(fbKey); closeFeedback(); loadMyFeedback(p); }
+  catch (e) { $('#fb-note').textContent = `Couldn't delete: ${e?.message || e}`; }
+});
 
 // ---------- rink mode: the presentation on a phone, one drill at a time ----------
 // Coaches read the plan on a phone at the bench: focus mode shows a single drill card filling the screen
@@ -3419,7 +3732,8 @@ function drillNowIndex(p) {
 }
 
 function applyPresentMode() {
-  const focus = presentMode === 'focus';
+  const focus = presentMode === 'focus' && showingPractice; // a list or a message is an ordinary page
+  $('#present-mode').hidden = !showingPractice;
   $('#present').classList.toggle('focus', focus);
   $('#present-nav').hidden = !focus;
   $('#present-mode').innerHTML = icon(focus ? 'list' : 'focus');
@@ -3461,7 +3775,7 @@ function showDrill(i) {
 /** Inline sizing for the two cases CSS can't do alone: the sideways portrait diagram and the phone-landscape row. */
 function layoutPresent() {
   if (!presenting) return;
-  const focus = presentMode === 'focus';
+  const focus = presentMode === 'focus' && showingPractice;
   const landscape = focus && inLandscape();
   $('#present').classList.toggle('landscape', landscape);
   const scroll = $('#present-scroll');
@@ -3574,7 +3888,7 @@ function presentKeydown(e) {
   if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); showDrill(presentIndex + 1); }
   else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); showDrill(presentIndex - 1); }
   else if (e.key === ' ' && presentMode === 'focus') { e.preventDefault(); presentCards()[presentIndex]?.querySelector('.pr-play')?.click(); }
-  else if (e.key === 'Escape') { closePicker(); closeAcct(); }
+  else if (e.key === 'Escape') { closePicker(); closeAcct(); closeFeedback(); }
 }
 
 // jump list: every drill with its clock time
@@ -3647,7 +3961,7 @@ const atTop = el => { for (; el && el !== document.body; el = el.parentElement) 
 const endPull = () => { pull = null; pullTip.hidden = true; };
 document.addEventListener('touchstart', e => {
   pull = null;
-  if (editorOn || e.touches.length !== 1 || e.target.closest('input,select,textarea,canvas,video,.pr-fig.zoomed,#present-picker,#present-acct') || !atTop(e.target)) return;
+  if (editorOn || e.touches.length !== 1 || e.target.closest('input,select,textarea,canvas,video,.pr-fig.zoomed,#present-picker,#present-acct,#present-fb') || !atTop(e.target)) return;
   pull = { x: e.touches[0].clientX, y: e.touches[0].clientY, el: e.target, armed: false };
 }, { passive: true });
 document.addEventListener('touchmove', e => {
@@ -3683,17 +3997,16 @@ async function keepAwake(on) {
 document.addEventListener('visibilitychange', () => { if (presenting && document.visibilityState === 'visible') keepAwake(true); });
 
 // Presentation is its own destination (the very URL coaches / families get) — a new tab, so the editor stays put.
-const openPresentation = route => window.open(`${location.origin}${location.pathname}#${route}=${store.data.ownerUid || 'local'}/${store.practice.id}`, '_blank');
-$('#btn-present').addEventListener('click', () => openPresentation('view'));
+const openPresentation = view => window.open(`${location.origin}${routePath({ view, pid: store.practice.id })}`, '_blank');
+$('#btn-present').addEventListener('click', () => openPresentation('coach'));
 $('#btn-open-team').addEventListener('click', () => openPresentation('team'));
-$('#btn-open-coach').addEventListener('click', () => openPresentation('view'));
-$('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, true)));
-$('#gate-reload').addEventListener('click', () => location.reload());
+$('#btn-open-coach').addEventListener('click', () => openPresentation('coach'));
+$('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, { signIn: true })));
+$('#present-tolist').addEventListener('click', e => navigate(e.currentTarget.dataset.to || '/'));
 $('#present-reload').addEventListener('click', () => location.reload()); // a failed module import stays failed for the page's lifetime: start over
-/** Copy one of the two share links: `view` = coaches (full plan), `team` = players' families (no coaching notes). */
-async function copyShareLink(btn, route) {
-  if (!store.data.ownerUid) return alert('Sign in first — the link reads the practice from your cloud account.');
-  const url = `${location.origin}${location.pathname}#${route}=${store.data.ownerUid}/${store.practice.id}`;
+/** Copy one of the two links: /coach/<id> or /team/<id>. Who can open it is decided by the stage and the roster, not by having the link. */
+async function copyShareLink(btn, view) {
+  const url = `${location.origin}${routePath({ view, pid: store.practice.id })}`;
   try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); return; }
   const old = btn.textContent;
   btn.textContent = '✓ Copied';
@@ -3755,7 +4068,7 @@ $('#viewlog-clear').addEventListener('click', async () => {
   try { await cloudBackend.clearViews(store.data.ownerUid, store.practice.id); openViewLog(); }
   catch (e) { alert(`Couldn't clear the log: ${e?.message || e}`); }
 });
-$('#btn-share-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'view'));
+$('#btn-share-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'coach'));
 $('#btn-share-team-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'team'));
 
 // ---------- cloud sync (Firebase) ----------
@@ -3770,105 +4083,99 @@ function renderCloudStatus(sync, state, detail) {
   $('#btn-signin').hidden = !!u;
   $('#btn-signout').hidden = !u;
 }
-/** Show (state = 'checking' | 'signedout' | 'noaccess' | 'offline' | 'error') or hide (null) the sign-in gate that covers the app. */
 // Only these accounts get the practice-creation interface. Everyone else uses share links
 // (this is a UI gate; the real protection is Firestore's rules — nobody can write another
 // account's practices, and readers only see the practices they are listed on).
 const OWNER_EMAILS = ['ehren.eschmann@gmail.com'];
 const isOwner = u => !u?.email || OWNER_EMAILS.includes(String(u.email).toLowerCase());
 
-/** May this session use the practice creator? Only the planner's account — never a share link's viewer. */
-function editorAllowed() {
-  if (cloudBoot === 'none') return true; // local-only install (no Firebase config): nothing to sign in to
-  if (cloudBoot === 'ready') return !!cloudSync?.user && isOwner(cloudSync.user);
-  // Cloud didn't load (the planner offline at the rink): only on a device where the planner has signed in before.
-  if (cloudBoot === 'failed') { try { return localStorage.getItem('hpp.owner') === '1'; } catch { return false; } }
-  return false; // still booting
-}
-/** Bring the practice creator up or take it away to match who is signed in and what the URL shows. */
-function syncEditor() {
-  const on = editorAllowed() && !presenting; // a #view= / #team= page is a viewer, whoever opens it
+/** Bring the practice creator up (only ever for the planner on /editor — see resolveRoute) or take it away. */
+function syncEditor(on) {
   if (on === editorOn) return;
+  if (!on) { finishActive(); pickTarget = null; if (anim.playing) togglePlay(); }
   editorOn = on;
   document.body.classList.toggle('no-editor', !on);
   if (on) { applyRoute(); sel = null; renderAll(); }
 }
 
-function setGate(state, detail = '') {
-  gated = !!state;
-  $('#gate').hidden = !state;
-  document.body.classList.toggle('gated', gated);
-  $('#gate-signout').hidden = state !== 'noaccess';
-  if (!state) { $('#gate-reload').hidden = true; return; }
-  finishActive(); pickTarget = null; if (anim.playing) togglePlay();
-  $('#gate-msg').textContent =
-    state === 'checking' ? 'Checking your sign-in…'
-    : state === 'noaccess' ? 'Practice plans are shared by link. Open the link your coach sent you — it works with this Google account.'
-    : state === 'offline' ? "Couldn't connect to the sign-in service. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again."
-    : 'Sign in to plan practices. Your practices are saved to your account and follow you between devices.';
-  $('#gate-signin').hidden = state === 'checking' || state === 'noaccess' || state === 'offline';
-  $('#gate-reload').hidden = state !== 'offline';
-  $('#gate-detail').textContent = state === 'error' ? `Sign-in failed: ${detail}`
-    : state === 'offline' ? detail
-    : state === 'noaccess' ? `Signed in as ${detail}` : '';
+// ---------- the planner's inbox: coach feedback and access requests, live ----------
+let feedbackAll = [], accessRequests = [], feedsUnsub = [];
+function watchPlannerFeeds() {
+  const on = !!cloudSync?.user && isOwner(cloudSync.user) && !!cloudBackend?.subscribeAllFeedback;
+  if (on === !!feedsUnsub.length) return;
+  feedsUnsub.forEach(f => f?.()); feedsUnsub = []; feedbackAll = []; accessRequests = [];
+  if (!on) return;
+  feedsUnsub = [
+    cloudBackend.subscribeAllFeedback((rows, err) => { if (err) return console.warn('feedback:', err); feedbackAll = rows; renderInboxBadges(); if (!$('#feedback').hidden) renderFeedback(); }),
+    cloudBackend.subscribeRequests((rows, err) => { if (err) return console.warn('requests:', err); accessRequests = rows; renderInboxBadges(); if (!$('#teammgr').hidden) renderTeamMgr(); }),
+  ];
+}
+const openFeedbackFor = pid => feedbackAll.filter(f => f.pid === pid && !f.resolved);
+const openRequests = () => accessRequests.filter(r => r.status === 'open');
+function renderInboxBadges() {
+  if (!editorOn) return;
+  paintInboxButtons();
+  renderPracticeSelect(); renderPlan();
+}
+function paintInboxButtons() {
+  const n = openFeedbackFor(store.practice.id).length;
+  $('#btn-feedback').textContent = `💬${n ? ` ${n}` : ''}`;
+  $('#btn-feedback').classList.toggle('attn', n > 0);
+  const r = openRequests().length;
+  $('#btn-team').textContent = `👥 Team${r ? ` (${r})` : ''}`;
+  $('#btn-team').classList.toggle('attn', r > 0);
 }
 
 (async () => {
   // `globalThis.__hppBackend` lets tests plug in a fake backend; otherwise use Firebase when configured.
   let backend = globalThis.__hppBackend || null;
-  let cfg = null;
   if (!backend) {
     try {
-      cfg = await loadConfig();
-      if (cfg) { setGate('checking'); backend = await firebaseBackend(cfg); }
+      const cfg = await loadConfig();
+      if (cfg) backend = await firebaseBackend(cfg);
     } catch (e) {
-      // Offline and the SDK isn't cached yet, or something on this device blocks it: run local-only rather
-      // than hang the gate. A share link says what went wrong and tries again once the connection is back.
+      // Offline and the SDK isn't cached yet, or something on this device blocks it. The planner's own device
+      // still works local-only; a viewer sees the copy this device kept, or what went wrong and a way to retry.
       cloudBoot = 'failed'; cloudBootError = e?.message || String(e);
-      setGate(editorAllowed() ? null : 'offline', cloudBootError); // the planner's own device still works offline; anyone else has nothing to open
       console.warn('Cloud service did not load:', e);
-      addEventListener('online', () => { if (presenting || gated) location.reload(); }, { once: true });
+      addEventListener('online', () => { if (presenting) location.reload(); }, { once: true });
     }
   }
-  if (!backend) { if (cloudBoot === 'loading') cloudBoot = 'none'; refreshPresent(); return; } // no config (or failed boot): local-only; presentation falls back to its offline copy
-  setGate('checking');
+  if (!backend) { if (cloudBoot === 'loading') cloudBoot = 'none'; refreshScreen(); return; } // no config (or failed boot): local-only
   $('#cloud').hidden = false;
   const sync = createSync({
     store, backend,
-    canSync: isOwner, // viewers only read what is shared with them: no practices are pulled into or saved from their account
+    canSync: isOwner, // viewers only read what is released to them: no practices are pulled into or saved from their account
     onStatus: (state, detail) => {
+      authKnown = true;
       renderCloudStatus(sync, state, detail);
-      // The app is only usable while signed in.
-      if (state === 'signedout') setGate('signedout');
-      else if (state === 'error' && !sync.user) setGate('error', detail);
-      else if (sync.user && !isOwner(sync.user)) setGate('noaccess', sync.user.email || sync.user.name); // viewers use share links
-      else if (sync.user) setGate(null);
+      signInError = state === 'error' && !sync.user ? detail || '' : '';
       if (sync.user) { try { if (isOwner(sync.user)) localStorage.setItem('hpp.owner', '1'); else localStorage.removeItem('hpp.owner'); } catch { /* storage blocked */ } }
       if (sync.user && isOwner(sync.user) && state === 'saved' && !uploadsChecked) { uploadsChecked = true; uploadPendingIntros(); } // first quiet moment after sign-in
-      refreshPresent(); // presentation mode reacts to sign-in changes too
+      watchInbox(); watchPlannerFeeds();
+      refreshScreen(); // who is signed in decides the screen
     },
     onRemote: (ids, { full } = {}) => {
       // Practices changed from another device (or first sync): refresh what is on screen.
       if (full || ids.includes(store.data.currentId) || !store.practice) { finishActive(); sel = null; stopAnim(); renderAll(); }
       else renderPracticeSelect();
-      if (presenting) refreshPresent(); // presenting one's own practice: pick up the change live
+      if (presenting) refreshScreen(); // previewing one's own practice: pick up the change live
     },
     onRoster: () => { if (!$('#teammgr').hidden) renderTeamMgr(); }, // roster edited on another device
   });
   cloudSync = sync; cloudBackend = backend; cloudBoot = 'ready';
-  $('#gate-signin').addEventListener('click', () => sync.signIn().catch(e => setGate('error', e?.message || String(e))));
-  $('#gate-signout').addEventListener('click', () => sync.signOut().catch(() => {}));
   $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   $('#btn-signout').addEventListener('click', () => sync.signOut().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   renderCloudStatus(sync, 'signedout');
+  refreshScreen();
 })();
 
 // ---------- boot ----------
 // Offline support: cache the app shell so the rink works without internet (needs HTTPS or localhost).
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 hydrateIcons();
 applyRoute();
 setTool('select');
-refreshPresent();
+refreshScreen();
 renderAll();
 window.addEventListener('resize', drawSelection);

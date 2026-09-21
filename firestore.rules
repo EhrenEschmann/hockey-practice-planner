@@ -1,64 +1,101 @@
 rules_version = '2';
+// Authorization for docs/requirements-routing-auth.md. The app's redirects are a convenience; these rules are the guarantee.
+//
+//   users/{uid}/practices/{pid}     the planner's working document — planner only
+//   published/{pid}                 the copy coaches and the team read (exists while the practice is released)
+//   published/{pid}/feedback/{fid}  a coach's feedback — the author and the planner only
+//   access/{pid}                    { stage, coach: [emails], team: [emails] } — planner only; looked up by these rules
+//   inbox/{email}                   that person's persona + list of practices — themselves and the planner only
+//   requests/{uid}                  an access request — the requester and the planner only
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only the planner(s) can create or change anything — keep this list in step with OWNER_EMAILS in
-    // js/main.js. Everyone else is a viewer: they sign in only so the rules can check their email.
-    function isPlanner() {
-      return request.auth != null && 'email' in request.auth.token &&
-        request.auth.token.email.lower() in ['ehren.eschmann@gmail.com'];
+    function signedIn() {
+      return request.auth != null && 'email' in request.auth.token && request.auth.token.email_verified == true;
     }
-    // A planner can read and write their own practices.
-    // A practice can also be *read* by anyone whose email the owner listed in its
-    // `sharedWith` (coaches — full plan) or `sharedTeam` (players' families — no coaching
-    // notes) array. Both views are read-only; only the owner can ever write.
-    // Per-user metadata (team roster etc.) — owner only.
+    function me() { return request.auth.token.email.lower(); }
+    // Only the planner(s) can create or change practices — keep this list in step with OWNER_EMAILS in js/main.js.
+    function isPlanner() { return signedIn() && me() in ['ehren.eschmann@gmail.com']; }
+
+    function accessPath(pid) { return /databases/$(database)/documents/access/$(pid); }
+    function isCoachOf(pid) {
+      return signedIn() && exists(accessPath(pid)) && get(accessPath(pid)).data.stage in ['coaches', 'team'] && me() in get(accessPath(pid)).data.coach;
+    }
+    function isTeamOf(pid) {
+      return signedIn() && exists(accessPath(pid)) && get(accessPath(pid)).data.stage == 'team' && me() in get(accessPath(pid)).data.team;
+    }
+    function canView(pid) { return isPlanner() || isCoachOf(pid) || isTeamOf(pid); }
+
+    // ---- the planner's own account: nobody else reads anything here but clips / videos of a practice released to them
     match /users/{uid}/meta/{docId} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if isPlanner() && request.auth.uid == uid;
     }
     match /users/{uid}/practices/{practiceId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if isPlanner() && request.auth.uid == uid;
-      allow read: if request.auth != null && (
-        request.auth.uid == uid ||
-        ('email' in request.auth.token && (
-          request.auth.token.email.lower() in resource.data.get('sharedWith', []) ||
-          request.auth.token.email.lower() in resource.data.get('sharedTeam', [])
-        ))
-      );
-      // Audit log: anyone who may read the practice can append a record of what they viewed or played,
-      // in their own name only; just the owner can read (or clear) the log.
+      // Audit log: whoever may view the practice appends a record of what they viewed or played, in their own
+      // name only; just the planner can read (or clear) the log.
       match /views/{viewId} {
-        allow create: if request.auth != null && request.resource.data.uid == request.auth.uid && (
-          request.auth.uid == uid ||
-          ('email' in request.auth.token && (
-            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedWith', []) ||
-            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedTeam', [])
-          ))
-        );
-        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create: if canView(practiceId) && request.resource.data.uid == request.auth.uid;
+        allow read, delete: if isPlanner() && request.auth.uid == uid;
       }
-      // An uploaded drill video, stored in chunks: owner writes; readable by whoever may read the practice.
+      // An uploaded drill video (in chunks) and a drill's recorded intro clip: planner writes; readable by whoever may view the practice.
       match /videos/{chunkId} {
         allow write: if isPlanner() && request.auth.uid == uid;
-        allow read: if request.auth != null && (
-          request.auth.uid == uid ||
-          ('email' in request.auth.token && (
-            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedWith', []) ||
-            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedTeam', [])
-          ))
-        );
+        allow read: if canView(practiceId);
       }
-      // A drill's recorded intro clip: owner writes; readable by whoever may read the practice.
       match /clips/{drillId} {
         allow write: if isPlanner() && request.auth.uid == uid;
-        allow read: if request.auth != null && (
-          request.auth.uid == uid ||
-          ('email' in request.auth.token && (
-            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedWith', []) ||
-            request.auth.token.email.lower() in get(/databases/$(database)/documents/users/$(uid)/practices/$(practiceId)).data.get('sharedTeam', [])
-          ))
-        );
+        allow read: if canView(practiceId);
       }
+    }
+
+    // ---- what coaches and the team read
+    match /published/{pid} {
+      allow read: if canView(pid);
+      allow write: if isPlanner();
+      // One document per coach per drill: `${uid}_${drillId}` (or `${uid}_overall`). Coaches never see each other's.
+      match /feedback/{fid} {
+        function mine() {
+          return request.resource.data.uid == request.auth.uid && request.resource.data.email == me()
+            && fid.matches('^' + request.auth.uid + '_[A-Za-z0-9]+$')
+            && request.resource.data.text is string && request.resource.data.text.size() <= 4000;
+        }
+        allow create: if isCoachOf(pid) && mine() && !('resolved' in request.resource.data);
+        allow update: if isPlanner() || (isCoachOf(pid) && resource.data.uid == request.auth.uid && mine()
+          && request.resource.data.get('resolved', false) == false); // a rewritten note is unresolved again
+        allow delete: if isPlanner() || (isCoachOf(pid) && resource.data.uid == request.auth.uid);
+        allow read: if isPlanner() || (isCoachOf(pid) && resource.data.uid == request.auth.uid);
+      }
+    }
+    // The planner's feedback overview reads every practice's feedback in one query.
+    match /{path=**}/feedback/{fid} {
+      allow read: if isPlanner();
+    }
+
+    match /access/{pid} {
+      allow read, write: if isPlanner();
+    }
+    match /inbox/{email} {
+      allow read: if isPlanner() || (signedIn() && me() == email);
+      allow write: if isPlanner();
+    }
+
+    // ---- "request access" from someone on no roster: one document per account, in their own name
+    match /requests/{uid} {
+      function ownRequest() {
+        return signedIn() && request.auth.uid == uid
+          && request.resource.data.uid == uid && request.resource.data.email == me()
+          && request.resource.data.status == 'open' && request.resource.data.role in ['coach', 'team']
+          && request.resource.data.note is string && request.resource.data.note.size() <= 300
+          && request.resource.data.name is string && request.resource.data.name.size() <= 200;
+      }
+      allow create: if ownRequest();
+      // Re-asking after a denial waits 7 days.
+      allow update: if isPlanner() || (ownRequest() && (resource.data.status != 'denied'
+        || request.time.toMillis() > resource.data.deniedAt + 604800000));
+      allow read: if isPlanner() || (signedIn() && request.auth.uid == uid);
+      allow delete: if isPlanner();
     }
   }
 }

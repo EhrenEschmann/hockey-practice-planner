@@ -10,6 +10,7 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 createServer(async (req, res) => {
   try {
     let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    if (/^\/(editor|coach|team|request-access)(\/|$)/.test(path)) path = '/index.html'; // app routes (see firebase.json rewrites)
     if (path.endsWith('/')) path += 'index.html';
     const file = normalize(join(root, path));
     if (!file.startsWith(root)) throw new Error('forbidden');

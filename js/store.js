@@ -1,5 +1,6 @@
 // Persistent state: a library of practices, each with drills. Undo/redo for the current practice.
 import { VIEWS } from './rink.js';
+import { stageOf } from './access.js';
 
 const KEY = 'hpp.v1';
 const UNDO_LIMIT = 100;
@@ -126,6 +127,7 @@ export class Store {
     for (const p of this.data.practices) {
       if (p.name) { if (!p.team) p.team = p.name; delete p.name; } // practices are now identified by team + date
       for (const d of p.drills || []) migrateDrill(d);
+      p.stage = stageOf(p); // practices shared by link before stages existed keep their audience (team list → released, coach list → with coaches)
     }
   }
   blankPractice() { return newPractice(); }

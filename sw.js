@@ -2,9 +2,9 @@
 // the newest deploy and refreshes the cache; the cache is only a fallback when the network is gone
 // or too slow. So frequent app updates are always picked up, and a coach who opened the app once
 // with internet can still open it cold at the rink.
-const CACHE = 'hpp-v1';
+const CACHE = 'hpp-v2';
 const PRECACHE = ['./', './index.html', './css/style.css',
-  './js/main.js', './js/render.js', './js/rink.js', './js/sim.js', './js/geometry.js', './js/store.js', './js/cloud.js', './js/powerskate.js', './js/clips.js', './js/video.js',
+  './js/main.js', './js/access.js', './js/icons.js', './js/render.js', './js/rink.js', './js/sim.js', './js/geometry.js', './js/store.js', './js/cloud.js', './js/powerskate.js', './js/clips.js', './js/video.js',
   './js/firebase-config.js', './firebase-config.js'];
 const RUNTIME_HOSTS = ['https://www.gstatic.com/firebasejs/']; // the Firebase SDK modules are cached too
 const TIMEOUT = 4000; // ms to wait for a flaky one-bar connection before falling back to the cache
@@ -42,6 +42,7 @@ async function networkFirst(req) {
   try {
     return await Promise.race([net, new Promise((_, rej) => setTimeout(rej, TIMEOUT))]);
   } catch {
+    // App routes (/coach/<id>, /editor, …) are all the one page.
     const hit = await cache.match(req) || (req.mode === 'navigate' ? await cache.match('./index.html') : null);
     // No cache entry either: give a slow network its chance before declaring us offline.
     return hit || net.catch(() => new Response('Offline — open this page once with internet first.', { status: 503, headers: { 'content-type': 'text/plain' } }));

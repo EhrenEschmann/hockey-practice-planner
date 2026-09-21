@@ -1,6 +1,8 @@
 # Routing & authorization — requirements
 
-Status: **draft for review** · 2026-09-21 · Decisions marked ✅ were made by Ehren; items marked ❓ are open.
+Status: **built 2026-09-21** (open questions settled as proposed — see §10) · Decisions marked ✅ were made by Ehren.
+
+Where it lives: the redirect matrix and who-gets-what are pure functions in [js/access.js](../js/access.js); the guarantees are [firestore.rules](../firestore.rules); tests are `npm test` (`tests/access.test.mjs` — the matrix, `tests/routing.test.mjs` — §11 in a real browser, `tests/rules.test.mjs` — §8 against the Firestore emulator).
 
 ## 1. Goal
 
@@ -91,13 +93,13 @@ Evaluated after sign-in state is known; while it is being determined the page sh
 |---|---|---|---|
 | Header, schedule, drills, diagrams, animation, intro clips, videos | ✔ | ✔ | ✔ |
 | Give feedback | — | ✔ | ✘ |
-| See feedback | all of it | ❓ see Q1 | ✘ |
+| See feedback | all of it | their own only (Q1) | ✘ |
 | "How was practice?" reactions, view log entries | reads them | writes own | writes own |
 
 - R6.1 Feedback is per drill plus one overall box per practice; plain text; the author can edit or delete their own; each entry records author name, email and time.
 - R6.2 The planner sees feedback inside the editor next to the drill it is about, with an unread count per practice, and can mark items resolved.
 - R6.3 Feedback never travels with the practice document: nothing the team's browser downloads contains any feedback (see R8.3).
-- R6.4 ❓ Coaching notes / assignments / coaches line in the team view — see Q2.
+- R6.4 Coaching notes and the coaches line are shown in both views (Q2); hidden drills are in neither.
 
 ## 7. Request access
 
@@ -122,18 +124,14 @@ Evaluated after sign-in state is known; while it is being determined the page sh
 Multiple planners or multiple organisations per deployment; email / push notifications; team members commenting;
 coaches editing drills; per-drill visibility rules beyond today's "hidden drill".
 
-## 10. Open questions
+## 10. Questions settled ("build it" — the proposals stand)
 
-- **Q1 — Can coaches see each other's feedback?** You first said feedback is visible only to you; later that the
-  team view is the coach view "minus the ability to add or see other coaches' feedback", which reads as coaches
-  *can* see each other's. Proposed: each coach sees **their own** entries only, you see everything — private
-  feedback tends to be more candid. Say the word if you want it shared among coaches instead.
-- **Q2 — Does the team now see coaching notes and assignments?** Today the team view leaves them out. "Identical
-  minus feedback" says they are now shown. Proposed: follow your answer — identical — and keep anything
-  staff-only in feedback or in a drill you mark hidden. Confirm, because this is a visible change for parents.
-- **Q3 — Notification of access requests** (R7.5): badge only, or badge + "email the coach" button?
-- **Q4 — Migration:** practices already shared by link have hand-typed email lists. Proposed: treat them as
-  stage `team` if a team list exists, `coaches` if only a coach list exists, else `draft`, and keep their emails as "extras" (R2.4).
+- **Q1 — Coaches do not see each other's feedback.** Each coach sees only their own notes; the planner sees all of it, attributed.
+- **Q2 — The team view is the coach view.** Coaching notes and the coaches line are shown to families too; anything staff-only belongs in feedback or in a drill marked hidden (hidden drills are never published).
+- **Q3 — Access requests** show as a badge on 👥 Team, and the request screen also offers an "email the coach" link, since the app sends no notifications.
+- **Q4 — Migration:** a practice shared before stages existed becomes `team` if it had a team list, `coaches` if only a coach list, else `draft`; its typed emails stay as extras. The first planner sign-in after deploying publishes everything.
+
+Simplifications made while building: feedback is **one note per coach per drill** (plus one overall) — editing replaces it, and a rewritten note counts as unresolved again; R7.4's "one open request per account" is the document id (`requests/{uid}`).
 
 ## 11. Acceptance checks (each becomes an automated browser test)
 

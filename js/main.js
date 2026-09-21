@@ -3240,7 +3240,25 @@ function presentMsg(msg, canSignIn = false, canReload = false) {
   $('#present-msg').textContent = msg;
   $('#present-signin').hidden = !canSignIn;
   $('#present-reload').hidden = !canReload;
+  // Signed in but stuck on a message (usually: the wrong Google account for this link) — say who, and offer the way out.
+  const u = cloudSync?.user;
+  $('#present-switch').hidden = !u || msg === 'Loading…';
+  $('#present-who').textContent = u && msg !== 'Loading…' ? `Signed in as ${u.email || u.name}` : '';
 }
+/** Sign out of the viewer. The offline practice copies on this device go too: they belong to the account that could read them. */
+async function presentSignOut() {
+  closeAcct();
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('hpp.viewcache.')) localStorage.removeItem(k); } catch { /* storage blocked */ }
+  try { localStorage.removeItem(viewQueueKey); } catch { /* fine */ }
+  presentUnsub?.(); presentUnsub = null; presentKey = null;
+  try { await cloudSync?.signOut(); } catch (e) { presentMsg(`Sign-out failed: ${e?.message || e}`); }
+}
+function openAcct() {
+  const u = cloudSync?.user; if (!u) return;
+  $('#present-acct-who').textContent = u.email && u.name !== u.email ? `${u.name} · ${u.email}` : u.name;
+  $('#present-acct').hidden = false;
+}
+function closeAcct() { $('#present-acct').hidden = true; }
 
 // ---------- audit log: who looked at which drill, and when ----------
 // Each viewer appends records to users/{owner}/practices/{pid}/views (rules: append-only in their own name;
@@ -3321,6 +3339,8 @@ function refreshPresent() {
   if (!presenting) { stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentViewIO?.disconnect(); clearTimeout(viewTimer); return; }
   applyPresentMode();
   $('#present-user').textContent = cloudSync?.user?.name || '';
+  $('#present-account').hidden = !cloudSync?.user;
+  if (!cloudSync?.user) closeAcct();
   const { owner: ownerUid, pid } = m;
   const mine = store.data.practices.find(x => x.id === pid);
   presentOwner = mine ? ownerFor() : ownerUid;
@@ -3352,6 +3372,8 @@ function refreshPresent() {
   if (!showCached('checking for updates…')) presentMsg('Loading…');
   presentUnsub = cloudBackend.subscribePractice(ownerUid, pid, (p, err) => {
     if (err) {
+      // Not (or no longer) on the list: the copy kept for offline use goes too, rather than outliving the access.
+      if (err.code === 'permission-denied') { cached = null; try { localStorage.removeItem(`hpp.viewcache.${key}`); } catch { /* fine */ } }
       const msg = err.code === 'permission-denied'
         ? `You don't have access to this practice. Ask the coach who shared it to add your Google email to the practice's ${presentAudience === 'team' ? 'team' : 'coach'} list.`
         : `Could not load the practice: ${err.message || err}`;
@@ -3552,7 +3574,7 @@ function presentKeydown(e) {
   if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); showDrill(presentIndex + 1); }
   else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); showDrill(presentIndex - 1); }
   else if (e.key === ' ' && presentMode === 'focus') { e.preventDefault(); presentCards()[presentIndex]?.querySelector('.pr-play')?.click(); }
-  else if (e.key === 'Escape') closePicker();
+  else if (e.key === 'Escape') { closePicker(); closeAcct(); }
 }
 
 // jump list: every drill with its clock time
@@ -3576,6 +3598,10 @@ $('#present-sync').addEventListener('click', async () => {
   location.reload();
 });
 $('#present-jump').addEventListener('click', openPicker);
+$('#present-account').addEventListener('click', openAcct);
+$('#present-acct').addEventListener('click', e => { if (e.target === e.currentTarget) closeAcct(); }); // tap outside the sheet
+$('#present-signout').addEventListener('click', presentSignOut);
+$('#present-switch').addEventListener('click', presentSignOut);
 $('#present-picker').addEventListener('click', e => {
   const li = e.target.closest('li[data-i]');
   if (li) showDrill(+li.dataset.i);
@@ -3621,7 +3647,7 @@ const atTop = el => { for (; el && el !== document.body; el = el.parentElement) 
 const endPull = () => { pull = null; pullTip.hidden = true; };
 document.addEventListener('touchstart', e => {
   pull = null;
-  if (editorOn || e.touches.length !== 1 || e.target.closest('input,select,textarea,canvas,video,.pr-fig.zoomed,#present-picker') || !atTop(e.target)) return;
+  if (editorOn || e.touches.length !== 1 || e.target.closest('input,select,textarea,canvas,video,.pr-fig.zoomed,#present-picker,#present-acct') || !atTop(e.target)) return;
   pull = { x: e.touches[0].clientX, y: e.touches[0].clientY, el: e.target, armed: false };
 }, { passive: true });
 document.addEventListener('touchmove', e => {

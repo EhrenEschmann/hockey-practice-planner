@@ -358,6 +358,15 @@ body.presenting #topbar,body.presenting #viewbar,body.presenting #layout{display
 .pr-nav-next{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #present-picker{position:absolute;inset:0;z-index:5;display:flex;align-items:flex-end;justify-content:center;background:rgba(15,17,22,.7)}
 #present-picker[hidden]{display:none}
+#present-acct{position:absolute;inset:0;z-index:6;display:flex;align-items:flex-end;justify-content:center;background:rgba(15,17,22,.7)}
+#present-acct[hidden]{display:none}
+#present-acct p{margin:0 0 12px;overflow-wrap:anywhere}
+#present-acct-who{font-size:16px;font-weight:600}
+#present-signout{min-height:48px;font-size:15px;margin-bottom:12px}
+#present-signout .lucide{width:18px;height:18px;vertical-align:-4px}
+#present-switch{margin-top:10px}
+#present-switch[hidden]{display:none}
+#present-who{margin:12px 0 0;overflow-wrap:anywhere}
 .pr-picker-sheet{background:var(--panel);border:1px solid var(--border);border-radius:14px 14px 0 0;width:min(560px,100%);max-height:80%;display:flex;flex-direction:column;padding:12px 12px calc(12px + env(safe-area-inset-bottom))}
 .pr-picker-sheet h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 #present-picker-list{list-style:none;margin:0;padding:0;overflow-y:auto;display:flex;flex-direction:column;gap:4px}

@@ -227,6 +227,7 @@
     <b id="present-title"></b>
     <span class="spacer"></span>
     <span id="present-user" class="muted small"></span>
+    <button id="present-account" class="pr-top-btn" title="Account: who is signed in · sign out to use a different Google account" hidden><span data-icon="account"></span></button>
     <button id="present-sync" class="pr-top-btn" title="Resync: fetch the latest plan and any new or re-recorded intros"><span data-icon="sync"></span></button>
     <button id="present-rotate" class="pr-top-btn" title="Turn the diagram sideways so it fills a phone held upright" hidden><span data-icon="rotate"></span></button>
     <button id="present-mode" class="pr-top-btn" title="Switch between one drill at a time (phone) and the whole plan as a scroll-through"><span data-icon="list"></span></button>
@@ -239,6 +240,12 @@
     <button id="present-jump" title="Jump to a drill"><span class="pr-nav-count"></span><span class="pr-nav-next muted small"></span></button>
     <button id="present-next" title="Next drill (swipe left)"><span data-icon="next"></span></button>
   </div>
+  <div id="present-acct" hidden><div class="pr-picker-sheet">
+    <h3>Signed in as</h3>
+    <p id="present-acct-who"></p>
+    <button id="present-signout" class="primary"><span data-icon="signout"></span> Sign out / use a different account</button>
+    <p class="muted small">Signing out removes the practice copies kept on this device for offline use. Sign in again with the Google email the practice was shared with.</p>
+  </div></div>
   <div id="present-picker" hidden><div class="pr-picker-sheet"><h3>Jump to drill</h3><ol id="present-picker-list"></ol></div></div>
   <div id="present-gate" hidden>
     <div class="gate-card">
@@ -246,6 +253,8 @@
       <p id="present-msg"></p>
       <button id="present-signin" class="primary" hidden>Sign in with Google</button>
       <button id="present-reload" class="primary" hidden>Try again</button>
+      <button id="present-switch" hidden>Use a different account</button>
+      <p id="present-who" class="muted small"></p>
     </div>
   </div>
 </div>

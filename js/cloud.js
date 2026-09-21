@@ -37,7 +37,11 @@ export async function firebaseBackend(config) {
   const col = uid => fs.collection(db, 'users', uid, 'practices');
   return {
     onUser(cb) { return auth.onAuthStateChanged(a, u => cb(u ? { uid: u.uid, email: u.email || '', name: u.displayName || u.email || 'Signed in' } : null)); },
-    async signIn() { await auth.signInWithPopup(a, new auth.GoogleAuthProvider()); },
+    async signIn() {
+      const provider = new auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' }); // always offer the account chooser, so signing out really lets someone switch emails
+      await auth.signInWithPopup(a, provider);
+    },
     async signOut() { await auth.signOut(a); },
     async load(uid) { return (await fs.getDocs(col(uid))).docs.map(d => d.data()); },
     async save(uid, p) { await fs.setDoc(fs.doc(col(uid), p.id), p); },

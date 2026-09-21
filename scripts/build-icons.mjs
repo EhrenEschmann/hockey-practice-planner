@@ -14,6 +14,7 @@ const WANTED = {
   copy: ['copy'], x: ['x'], check: ['check'], library: ['library', 'library-big'],
   prev: ['chevron-left'], next: ['chevron-right'], rotate: ['rotate-cw'], fullscreen: ['maximize'], unfullscreen: ['minimize'],
   list: ['rows-3', 'list'], focus: ['smartphone'], sync: ['refresh-cw'], eye: ['eye'], eyeoff: ['eye-off'], focusarea: ['scan', 'focus'],
+  account: ['circle-user', 'user'], signout: ['log-out'],
 };
 
 const out = {};

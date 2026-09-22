@@ -21,7 +21,7 @@ const today = new Date(), iso = d => `${d.getFullYear()}-${String(d.getMonth() +
 const drill = (id, name, extra = {}) => ({ id, name, duration: 10, notes: `notes for ${name}`, view: { x: 0, y: 0, w: 200, h: 85 }, objects: [], ...extra });
 const SEED = { ownerUid: 'own', currentId: 'p1', practices: [
   { id: 'p0', team: 'Mites', date: iso(new Date(+today - 7 * 86400000)), time: '17:00', stage: 'team', updatedAt: 5, drills: [drill('d0', 'Last week')] },
-  { id: 'p1', team: 'Mites', date: iso(today), time: '17:00', stage: 'team', updatedAt: 5, sharedWith: ['guest@example.com'], drills: [drill('d1', 'Warmup'), drill('d2', 'Secret', { hidden: true }), drill('d3', 'Scrimmage')] },
+  { id: 'p1', team: 'Mites', date: iso(today), time: '17:00', stage: 'team', updatedAt: 5, sharedWith: ['guest@example.com'], drills: [drill('d1', 'Warmup', { objects: [{ id: 'sk1', type: 'skater', x: 20, y: 40, color: 'blue', number: '1', speed: 20, path: [{ x: 100, y: 40 }] }] }), drill('d2', 'Secret', { hidden: true }), drill('d3', 'Scrimmage')] },
   { id: 'p2', team: 'Mites', date: iso(new Date(+today + 86400000)), stage: 'coaches', updatedAt: 5, drills: [drill('d4', 'Edges')] },
   { id: 'p3', team: 'Mites', date: iso(new Date(+today + 2 * 86400000)), stage: 'draft', updatedAt: 5, drills: [drill('d5', 'Draft drill')] }],
   roster: { updatedAt: 5, teams: [{ id: 't1', name: 'Mites', coaches: [{ id: 'c1', name: 'Coach A', email: 'coach.a@example.com' }, { id: 'c2', name: 'Coach B', email: 'CoachB@example.com' }],
@@ -148,6 +148,29 @@ try {
   await parent.open('/team/p1'); w = await when(parent);
   ok('a parent gets the same dropdown: the practices released to the team', w.options.length === 2 && w.picked.includes('today') && w.warn === null, w);
   await parent.open('/team'); ok('no practice bar or banner on the list', (await when(parent)).team === null && (await when(parent)).warn === null);
+
+  console.log('audit log: views, plays and reactions reach the planner');
+  let since = Date.now();
+  const viewsOf = email => [...cloud.db.entries()].filter(([k, v]) => k.startsWith('users/own/practices/p1/views/') && v.email === email && v.at >= since).map(([, v]) => v);
+  await coachA.open('/coach/p1');
+  await coachA.ev(`localStorage.setItem('hpp.viewmode', 'list')`); await coachA.open('/coach/p1'); await sleep(2600); // list mode: cards on screen log a view after 2 s
+  await coachA.ev(`document.querySelector('#present-body .pr-drill[data-did="d3"]').scrollIntoView()`); await sleep(2600); // …and the one scrolled to
+  ok('a coach reading the plan logs a view of each drill on screen', viewsOf('coach.a@example.com').filter(v => v.action === 'view').map(v => v.drillName).sort().join() === 'Scrimmage,Warmup', viewsOf('coach.a@example.com'));
+  await coachA.click('#present-body .pr-drill[data-did="d1"] .pr-play'); await sleep(400);
+  ok('pressing ▶ logs a play', viewsOf('coach.a@example.com').some(v => v.action === 'play' && v.drillId === 'd1'), viewsOf('coach.a@example.com'));
+  await coachA.click('#present-body .pr-react-btn'); await sleep(400);
+  ok('a reaction after practice is logged', viewsOf('coach.a@example.com').some(v => v.action === 'react' && v.emoji === '😀'), viewsOf('coach.a@example.com'));
+  since = Date.now(); await parent.ev(`localStorage.setItem('hpp.viewmode', 'focus')`); await parent.open('/team/p1'); await sleep(2600); // focus mode: the one card on screen
+  ok('a parent in rink mode logs the drill on screen, as the team', viewsOf('parent@example.com').some(v => v.action === 'view' && v.audience === 'team'), viewsOf('parent@example.com'));
+  await parent.click('#present-next'); await sleep(2600);
+  ok('…and the next one after swiping', viewsOf('parent@example.com').filter(v => v.action === 'view').length === 2, viewsOf('parent@example.com'));
+  const before = viewsOf('parent@example.com').length; await parent.click('#present-prev'); await sleep(2600);
+  ok('flipping back within 5 minutes does not log the same drill again', viewsOf('parent@example.com').length === before);
+  await planner.open('/coach/p1'); await sleep(2600);
+  ok('the planner\'s own preview is logged too, marked as the planner', viewsOf('ehren.eschmann@gmail.com').some(v => v.action === 'view' && v.audience === 'planner'), viewsOf('ehren.eschmann@gmail.com'));
+  await planner.open('/editor/p1'); await planner.click('#btn-new-practice'); await planner.click('#btn-views'); await sleep(600);
+  const logText = await planner.ev(`document.querySelector('#viewlog-body').textContent`);
+  ok('the planner\'s Views log shows who viewed and played what', /Coach A/.test(logText) && /Pat Parent/.test(logText) && /Reactions after practice/.test(logText) && /1\. Warmup/.test(logText), logText.slice(0, 300));
 
   console.log('planner: feedback, previews');
   await planner.open('/editor/p1');

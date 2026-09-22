@@ -63,6 +63,10 @@ ok('parent reads a released practice\'s clip', await get(PARENT, 'users/own/prac
 ok('parent cannot read a clip of an unreleased practice', await get(PARENT, 'users/own/practices/p2/clips/d1'), DENY);
 ok('parent logs a view in their own name', await set(PARENT, 'users/own/practices/p1/views/v1', { uid: 'pa', action: 'view' }), ALLOW);
 ok('parent cannot log a view as someone else', await set(PARENT, 'users/own/practices/p1/views/v2', { uid: 'ca', action: 'view' }), DENY);
+ok('planner logs their own preview', await set(PLANNER, 'users/own/practices/p1/views/v3', { uid: 'own', action: 'view', audience: 'planner' }), ALLOW);
+ok('planner logs a view of a draft', await set(PLANNER, 'users/own/practices/p3/views/v4', { uid: 'own', action: 'view', audience: 'planner' }), ALLOW);
+ok('planner reads the log', await query(PLANNER, 'users/own/practices/p1', 'views'), r => r.status === 200 && r.n >= 2);
+ok('coach cannot list the log', (await query(COACH_A, 'users/own/practices/p1', 'views')).status, DENY);
 
 console.log('feedback: coaches write their own, never see each other\'s; the team has none');
 const fb = { uid: 'ca', email: 'coach.a@example.com', name: 'Coach A', text: 'too long', drillId: 'd1', at: 1 };

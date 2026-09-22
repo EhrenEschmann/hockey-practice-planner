@@ -106,5 +106,7 @@ export const pageBackend = (port, user, signInAs) => `
     removeRequest: uid => call('delete', 'requests/' + uid),
     subscribeRequests: cb => watch(async () => (await call('list', 'requests')).map(x => x.data), cb),
     logView: (uid, pid, e) => call('set', 'users/' + uid + '/practices/' + pid + '/views/' + Math.random().toString(36).slice(2), e),
+    loadViews: async (uid, pid) => (await call('list', 'users/' + uid + '/practices/' + pid + '/views')).map(x => ({ id: id(x.path), ...x.data })).sort((a, b) => b.at - a.at),
+    clearViews: async (uid, pid) => { for (const x of await call('list', 'users/' + uid + '/practices/' + pid + '/views')) await call('delete', x.path); },
   };
 })();`;

@@ -3122,8 +3122,7 @@ function wireReactions(p) {
     try { localStorage.setItem(key, picked); } catch { /* fine */ }
     show();
     const sent = logReaction(p, picked);
-    note.textContent = sent === 'owner' ? 'That’s your own practice — coaches’ and families’ picks show up in your Views log.'
-      : sent ? 'Thanks! Sent to the coach.' : 'Thanks! Sign in when you’re online to send it to the coach.';
+    note.textContent = sent ? 'Thanks! Sent to the coach.' : 'Thanks! Sign in when you’re online to send it to the coach.';
   });
 }
 /**
@@ -3482,7 +3481,7 @@ let viewTimer = 0;
 const viewQueueKey = 'hpp.viewqueue';
 function logDrillView(p, did, action) {
   if (!cloudBackend?.logView || !cloudSync?.user) return; // nobody to log as (offline copies with no session are anonymous)
-  if (who.persona === 'planner') return; // the planner's own previews aren't audience views
+  // The planner's own views are logged too (marked 'planner'), so the log can be checked without a second account.
   const d = p.drills.find(x => x.id === did); if (!d) return;
   const key = `${p.id}:${did}:${action}`;
   const now = Date.now();
@@ -3490,19 +3489,19 @@ function logDrillView(p, did, action) {
   viewLogged.set(key, now);
   const u = cloudSync.user;
   const entry = { uid: u.uid, email: (u.email || '').toLowerCase(), name: u.name || '', drillId: did, drillName: d.name, action, at: now,
-    audience: presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' };
+    audience: who.persona === 'planner' ? 'planner' : presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' };
   sendView(presentOwner, p.id, entry);
 }
 function logReaction(p, emoji) {
   if (!cloudBackend?.logView || !cloudSync?.user) return false;
-  if (who.persona === 'planner') return 'owner';
+
   const key = `${p.id}:react:${emoji}`;
   const now = Date.now();
   if (now - (viewLogged.get(key) || 0) < VIEW_GAP) return true;
   viewLogged.set(key, now);
   const u = cloudSync.user;
   sendView(presentOwner, p.id, { uid: u.uid, email: (u.email || '').toLowerCase(), name: u.name || '', drillId: null, drillName: 'Dismissal', action: 'react', emoji, at: now,
-    audience: presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' });
+    audience: who.persona === 'planner' ? 'planner' : presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' });
   return true;
 }
 async function sendView(owner, pid, entry) {

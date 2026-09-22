@@ -14,14 +14,14 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 const n = v => Math.round((+v || 0) * 100) / 100;
 const ptsStr = pts => pts.map(p => `${n(p.x)},${n(p.y)}`).join(' ');
 
-function arrowHead(dense, color, size = 2.2) {
+function arrowHead(dense, color, size = 2.2, cls = '') {
   if (dense.length < 2) return '';
   let i = dense.length - 2;
   while (i > 0 && Math.hypot(dense[i].x - dense[dense.length - 1].x, dense[i].y - dense[dense.length - 1].y) < 0.3) i--;
   const a = dense[i], b = dense[dense.length - 1];
   const ang = Math.atan2(b.y - a.y, b.x - a.x);
   const p = (r, da) => `${n(b.x + r * Math.cos(ang + da))},${n(b.y + r * Math.sin(ang + da))}`;
-  return `<polygon points="${n(b.x)},${n(b.y)} ${p(size, Math.PI - 0.5)} ${p(size, Math.PI + 0.5)}" fill="${color}"/>`;
+  return `<polygon${cls ? ` class="${cls}"` : ''} points="${n(b.x)},${n(b.y)} ${p(size, Math.PI - 0.5)} ${p(size, Math.PI + 0.5)}" fill="${color}"/>`;
 }
 
 /** Numbered waypoint badges (shown while a puck is selected, or a player is triggered by a waypoint). */
@@ -70,7 +70,7 @@ function playerPath(o, opts) {
   const stopMarks = pts.filter((p, i) => i > 0 && +p.stop > 0).map(p =>
     `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.15" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".4" font-size="1.05" text-anchor="middle" fill="${color}">⏸${+p.stop}</text></g>`).join('');
   const pivots = pts.filter((p, i) => i > 0 && p.pivot);
-  if (!pivots.length) return `${hit}<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward)}/>${arrowHead(dense, color)}${stopMarks}`;
+  if (!pivots.length) return `${hit}<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward)}/>${arrowHead(dense, color, 1.8, 'path-head')}${stopMarks}`;
   // Split the line at each pivot; the stretches alternate forward/backward from the start direction.
   const idxOf = p => { let bi = 0, bd = Infinity; for (let i = 0; i < dense.length; i++) { const d = (dense[i].x - p.x) ** 2 + (dense[i].y - p.y) ** 2; if (d < bd) { bd = d; bi = i; } } return bi; };
   const cuts = [0, ...pivots.map(idxOf).sort((a, b) => a - b), dense.length - 1];
@@ -82,7 +82,7 @@ function playerPath(o, opts) {
     back = !back;
   }
   const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">${p.pivot === 'L' ? '⟲' : p.pivot === 'R' ? '⟳' : '⇄'}</text></g>`).join('');
-  return hit + segs.join('') + arrowHead(dense, color) + marks + stopMarks;
+  return hit + segs.join('') + arrowHead(dense, color, 1.8, 'path-head') + marks + stopMarks;
 }
 
 export function renderObjects(drill, selId, opts = {}) {

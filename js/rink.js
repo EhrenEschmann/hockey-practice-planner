@@ -38,7 +38,8 @@ export const SVG_STYLE = `
   .hash{stroke:#d7263d;stroke-width:.25}
   .crease{fill:#9ec9ee;fill-opacity:.75;stroke:#d7263d;stroke-width:.3}
   .trap{stroke:#d7263d;stroke-width:.3}
-  .path-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
+  .path-line{fill:none;stroke-width:.4;stroke-opacity:.7;stroke-linecap:round;stroke-linejoin:round} /* skating routes stay light: the skaters, pucks and stations are what the eye should land on */
+  .path-head{fill-opacity:.7}
   .path-hit{fill:none;stroke:#000;stroke-width:2.6;stroke-opacity:0;pointer-events:stroke}
   .arrow-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .skater-body .body{stroke:#fff;stroke-width:.3}

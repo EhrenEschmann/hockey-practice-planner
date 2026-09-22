@@ -1809,7 +1809,7 @@ const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — depl
 let videoOpenFor = null; // drill whose 🎬 video row is open in the Drills panel
 let vidPending = null;   // a dropped file being prepared: { drillId, file, url, duration, width, height, audio, vo, voSecs, voRec, encoding, error }
 const fmtSecs = t => Number.isFinite(+t) ? `${Math.floor(+t / 60)}:${String(Math.round(+t % 60)).padStart(2, '0')}` : '?:??';
-/** The span a staged video will keep: [start, end) clipped to the file and to the 60 s cap. */
+/** The span a staged video will keep: [start, end) clipped to the file and to the MAX_VIDEO_SECS cap. */
 function trimSpan(vp) {
   const dur = Number.isFinite(vp.duration) ? vp.duration : Infinity;
   const start = Math.min(Math.max(0, +vp.start || 0), Number.isFinite(dur) ? Math.max(0, dur - 0.5) : Infinity);

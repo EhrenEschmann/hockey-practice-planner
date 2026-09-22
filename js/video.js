@@ -61,9 +61,9 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 // ---------- uploaded drill videos: dropped in, re-encoded small in the browser, stored as chunks ----------
 // A dropped file is played through a canvas and re-recorded at ≤640 px and a low bitrate, with either its own
-// sound or a recorded voiceover as the audio track. That keeps a 60 s clip to a few MB, which is what makes
+// sound or a recorded voiceover as the audio track. That keeps a 90 s clip to a few MB, which is what makes
 // hosting it in Firestore (free tier, no storage bucket, no billing account) workable: see cloud.js saveVideo.
-export const MAX_VIDEO_SECS = 60;
+export const MAX_VIDEO_SECS = 90;
 export const VIDEO_MAX_WIDTH = 640;
 
 /** Read a dropped file's duration and size (rejects files the browser can't decode). */
@@ -94,7 +94,7 @@ const VIDEO_FORMATS = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;code
 
 /**
  * Re-encode `file` (first MAX_VIDEO_SECS seconds) at ≤ VIDEO_MAX_WIDTH px. `voiceover` (an audio Blob) replaces
- * the original sound when given. Runs in real time, so a 60 s clip takes ~60 s; onProgress(secs, total) ticks.
+ * the original sound when given. Runs in real time, so a 90 s clip takes ~90 s; onProgress(secs, total) ticks.
  * Resolves { blob, mime, secs, width, height }.
  */
 export async function transcodeVideo(file, { voiceover = null, start = 0, end = null, onProgress = () => {} } = {}) {

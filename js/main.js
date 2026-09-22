@@ -2602,13 +2602,13 @@ function puckProps(o) {
       const arrive = rec?.ok && byReceiver ? `<span class="muted">(leaves at t = ${rec.t.toFixed(1)} s, arrives ${rec.arrive.toFixed(1)} s)</span>` : '';
       // Off the boards: the receiver may then be the passer themselves.
       const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
-        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="bx" value="${G.round1(ev.bank.x)}" title="bounce x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="by" value="${G.round1(ev.bank.y)}" title="bounce y (ft)"></span>` : '');
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="bankx" value="${G.round1(ev.bank.x)}" title="bounce x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="banky" value="${G.round1(ev.bank.y)}" title="bounce y (ft)"></span>` : '');
       const arrivesAt = rec?.ok && rec.to ? `<span class="muted" title="Where the pass arrives — drag the → marker on the ice along the receiver's path to change it">arrives at (${G.round1(rec.to.x)}, ${G.round1(rec.to.y)})</span>` : '';
       body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', ev.bank ? null : rec?.carrier, rec?.carrier)}</select>${bankUI}${bySel}${where('')}${arrive}${arrivesAt}${mark}`;
     }
     else if (ev.type === 'shoot') {
       const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
-        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="bx" value="${G.round1(ev.bank.x)}" title="bounce x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="by" value="${G.round1(ev.bank.y)}" title="bounce y (ft)"></span>` : '');
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="bankx" value="${G.round1(ev.bank.x)}" title="bounce x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="banky" value="${G.round1(ev.bank.y)}" title="bounce y (ft)"></span>` : '');
       const tgt = ev.target
         ? `<span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="tx" value="${G.round1(ev.target.x)}" title="target x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="ty" value="${G.round1(ev.target.y)}" title="target y (ft)"></span>`
         : '<span class="muted">nearest net</span>';
@@ -2676,7 +2676,7 @@ propsBody.addEventListener('input', e => {
     if (!ev || !k) return;
     if (k === 'wp') ev.wp = Math.max(0, Math.round(+el.value || 0));
     else if (k === 'tx' || k === 'ty') { if (ev.target) ev.target[k[1]] = +el.value || 0; }
-    else if (k === 'bx' || k === 'by') { if (ev.bank) ev.bank[k[1]] = +el.value || 0; }
+    else if (k === 'bankx' || k === 'banky') { if (ev.bank) ev.bank[k[4]] = +el.value || 0; } // (not 'bx'/'by': 'by' is the pass-timing select)
     else if (k === 'dist') ev.dist = el.value === '' ? null : Math.max(0, +el.value || 0);
     else if (k === 'bank') { if (el.checked) ev.bank = defaultBank(o, +el.dataset.ev); else delete ev.bank; }
     else if (k === 'by') {

@@ -86,6 +86,10 @@ export async function firebaseBackend(config) {
         snap => cb(snap.docs.map(d => ({ fid: d.id, pid: d.ref.parent.parent.id, ...d.data() })), null), err => cb(null, err));
     },
     async resolveFeedback(pid, fid, resolved) { await fs.updateDoc(fs.doc(db, 'published', pid, 'feedback', fid), { resolved }); },
+    // Sign-ins that got nowhere: attempts/{uid} — { uid, email, name, path, at, count }: the last try and how many, written by the account itself.
+    async logAttempt(uid, a) { await fs.setDoc(fs.doc(db, 'attempts', uid), { ...a, count: fs.increment(1) }, { merge: true }); },
+    subscribeAttempts(cb) { return fs.onSnapshot(fs.collection(db, 'attempts'), snap => cb(snap.docs.map(d => d.data()), null), err => cb(null, err)); },
+    async removeAttempt(uid) { await fs.deleteDoc(fs.doc(db, 'attempts', uid)); },
     // Access requests: requests/{uid} — filed by someone on no roster, answered by the planner.
     async loadRequest(uid) { const s = await fs.getDoc(fs.doc(db, 'requests', uid)); return s.exists() ? s.data() : null; },
     async saveRequest(uid, req) { await fs.setDoc(fs.doc(db, 'requests', uid), req); },

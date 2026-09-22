@@ -107,6 +107,7 @@ Evaluated after sign-in state is known; while it is being determined the page sh
 - R7.2 ✅ The request goes to a queue in the editor (badge on 👥 Team). The planner can **Approve as coach**, **Approve as family of `<player>`**, or **Deny**. Approving writes the email into the roster — which is what actually grants access (R2.3).
 - R7.3 The requester sees "Request sent — you'll get access once the coach approves", and the page lets them in without a new link once approved (on next load or pull-to-reload).
 - R7.4 One open request per account; a denied account cannot re-request for 7 days; requests reveal nothing about practices or the roster.
+- R7.6 (added 2026-09-22) Every signed-in account that lands on the request screen is recorded (`attempts/{uid}`: email, name, link opened, last time, count) whether or not they ask; the planner sees these under **Signed in without access** in 👥 Team with Add / Dismiss, and a settled request retires the record.
 - R7.5 The app sends no email or push. ❓ Q3: is a badge in the editor enough, or should the screen also offer an "email the coach" button so you hear about it right away?
 
 ## 8. Authorization (server-side — the UI rules above are convenience, these are the guarantee)

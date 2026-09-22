@@ -33,6 +33,10 @@ export function startFakeCloud(port) {
     if (seg[0] === 'feedback*') return isPlanner(u); // collection group
     if (seg[0] === 'access') return isPlanner(u);
     if (seg[0] === 'inbox') return write || op === 'list' ? isPlanner(u) : isPlanner(u) || (!!u && email(u) === seg[1]);
+    if (seg[0] === 'attempts') {
+      if (isPlanner(u)) return true;
+      return op === 'set' && !!u && seg[1] === u.uid && data.uid === u.uid && data.email === email(u) && typeof data.name === 'string' && typeof data.path === 'string';
+    }
     if (seg[0] === 'requests') {
       if (isPlanner(u)) return true;
       if (!u || op === 'list' || op === 'delete' || seg[1] !== u.uid) return false;
@@ -101,6 +105,9 @@ export const pageBackend = (port, user, signInAs) => `
     loadMyFeedback: async (pid, uid) => (await call('list', 'published/' + pid + '/feedback', { where: ['uid', uid] })).map(x => ({ fid: id(x.path), ...x.data })),
     subscribeAllFeedback: cb => watch(async () => (await call('list', 'feedback*')).map(x => ({ fid: id(x.path), pid: x.path.split('/')[1], ...x.data })), cb),
     resolveFeedback: async (pid, fid, resolved) => { const p = 'published/' + pid + '/feedback/' + fid; await call('set', p, { ...(await call('get', p)), resolved }); },
+    logAttempt: async (uid, a) => { let n = 0; try { n = +(window.__att || 0); } catch {} window.__att = n + 1; await call('set', 'attempts/' + uid, { ...a, count: n + 1 }); },
+    subscribeAttempts: cb => watch(async () => (await call('list', 'attempts')).map(x => x.data), cb),
+    removeAttempt: uid => call('delete', 'attempts/' + uid),
     loadRequest: uid => call('get', 'requests/' + uid), saveRequest: (uid, r) => call('set', 'requests/' + uid, r),
     denyRequest: async uid => call('set', 'requests/' + uid, { ...(await call('get', 'requests/' + uid)), status: 'denied', deniedAt: Date.now() }),
     removeRequest: uid => call('delete', 'requests/' + uid),

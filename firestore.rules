@@ -81,6 +81,15 @@ service cloud.firestore {
       allow write: if isPlanner();
     }
 
+    // ---- sign-ins that got nowhere: someone on no roster opened the app — one document per account, in their own
+    //      name, so the planner can see who tried (and let them in). Nothing else is readable to them.
+    match /attempts/{uid} {
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.uid == uid && request.resource.data.email == me()
+        && request.resource.data.name is string && request.resource.data.name.size() <= 200
+        && request.resource.data.path is string && request.resource.data.path.size() <= 300;
+      allow read, delete: if isPlanner();
+    }
     // ---- "request access" from someone on no roster: one document per account, in their own name
     match /requests/{uid} {
       function ownRequest() {

@@ -1664,18 +1664,22 @@ function renderTeamMgr() {
       </div>`).join('')}
     </div>`).join('');
   // People on no roster who asked to be let in: approving puts them on this team's roster — which is what grants access.
-  const reqRows = openRequests().map(r => `
-    <div class="req-row" data-ruid="${escHtml(r.uid)}">
-      <div><b>${escHtml(r.name || r.email)}</b> <span class="muted small">${escHtml(r.email)} · asks to join as ${r.role === 'coach' ? 'a coach' : 'family'}${r.note ? ` · “${escHtml(r.note)}”` : ''}</span></div>
+  const reqRow = (r, what, kind) => `
+    <div class="req-row" data-ruid="${escHtml(r.uid)}" data-kind="${kind}">
+      <div><b>${escHtml(r.name || r.email)}</b> <span class="muted small">${escHtml(r.email)} · ${what}</span></div>
       <div class="row">
-        <button data-act="req-coach">Approve as coach</button>
+        <button data-act="req-coach">${kind === 'request' ? 'Approve' : 'Add'} as coach</button>
         <select class="req-player" title="Whose family?">${t.players.map(pl => `<option value="${pl.id}">${escHtml(pl.name || 'unnamed player')}</option>`).join('')}<option value="">＋ new player</option></select>
-        <button data-act="req-family">Approve as family</button>
-        <button data-act="req-deny" class="danger">Deny</button>
+        <button data-act="req-family">${kind === 'request' ? 'Approve' : 'Add'} as family</button>
+        <button data-act="req-deny" class="danger">${kind === 'request' ? 'Deny' : 'Dismiss'}</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  const reqRows = openRequests().map(r => reqRow(r, `asks to join as ${r.role === 'coach' ? 'a coach' : 'family'}${r.note ? ` · “${escHtml(r.note)}”` : ''}`, 'request')).join('');
+  // Signed in, on no roster, and never asked: the audit of who tried to get in — and a one-click way to let them.
+  const tryRows = deniedSignIns().map(a => reqRow(a, `signed in without access ${a.count > 1 ? `${a.count} times, last ` : ''}${stamp(a.at || 0)}${a.path ? ` · opened ${escHtml(a.path)}` : ''}`, 'attempt')).join('');
   body.innerHTML = `
     ${reqRows ? `<h3>Access requests</h3>${reqRows}` : ''}
+    ${tryRows ? `<h3>Signed in without access</h3>${tryRows}` : ''}
     <label class="field inline ros-team-name"><span>Team name</span><input data-field="teamname" value="${escHtml(t.name || '')}"></label>
     <h3>Coaches</h3>
     ${coachRows || '<p class="muted small">No coaches yet.</p>'}
@@ -1729,18 +1733,21 @@ $('#team-body').addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn?.dataset.act) return;
   const t = currentMgrTeam(); if (!t) return;
   const player = t.players.find(p => p.id === btn.closest('[data-pid]')?.dataset.pid);
-  const reqRow = btn.closest('[data-ruid]'), req = reqRow && accessRequests.find(r => r.uid === reqRow.dataset.ruid);
-  const settle = (fn, r) => fn(r.uid).catch(e => alert(`Couldn't update the request: ${e?.message || e}`));
+  const reqRow = btn.closest('[data-ruid]');
+  const fromAttempt = reqRow?.dataset.kind === 'attempt';
+  const req = reqRow && (fromAttempt ? accessAttempts : accessRequests).find(r => r.uid === reqRow.dataset.ruid);
+  const settle = (fn, r) => { fn(r.uid).catch(e => alert(`Couldn't update the request: ${e?.message || e}`)); if (!fromAttempt) cloudBackend.removeAttempt?.(r.uid).catch(() => {}); }; // a settled request retires the sign-in record too
+  const clear = fromAttempt ? cloudBackend.removeAttempt : cloudBackend.removeRequest;
   switch (btn.dataset.act) {
-    case 'req-coach': if (!req) return; t.coaches.push({ id: uid(), name: req.name || '', email: req.email }); settle(cloudBackend.removeRequest, req); break;
+    case 'req-coach': if (!req) return; t.coaches.push({ id: uid(), name: req.name || '', email: req.email }); settle(clear, req); break;
     case 'req-family': {
       if (!req) return;
       let pl = t.players.find(x => x.id === reqRow.querySelector('.req-player').value);
       if (!pl) { pl = { id: uid(), name: '', contacts: [] }; t.players.push(pl); }
       (pl.contacts ||= []).push({ id: uid(), rel: '', name: req.name || '', email: req.email });
-      settle(cloudBackend.removeRequest, req); break;
+      settle(clear, req); break;
     }
-    case 'req-deny': if (req) settle(cloudBackend.denyRequest, req); return;
+    case 'req-deny': if (req) settle(fromAttempt ? cloudBackend.removeAttempt : cloudBackend.denyRequest, req); return;
     case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
     case 'delcoach': t.coaches = t.coaches.filter(c => c.id !== btn.closest('[data-cid]').dataset.cid); break;
     case 'addplayer': t.players.push({ id: uid(), name: '', contacts: [] }); break;
@@ -3786,9 +3793,15 @@ $('#present-home').addEventListener('click', () => { if (['coach', 'team', 'plan
 // ---------- request access: someone signed in who is on no roster ----------
 let myRequest;           // undefined = not loaded; null = none filed; else the requests/{uid} document
 let myRequestFor = null;
+let attemptLogged = null; // uid whose failed sign-in this session already recorded
 async function showRequest() {
   $('#present-title').textContent = '';
   const u = cloudSync?.user; if (!u) return;
+  if (attemptLogged !== u.uid && cloudBackend?.logAttempt) { // the planner sees who signed in and got nowhere
+    attemptLogged = u.uid;
+    let wanted = ''; try { wanted = sessionStorage.getItem('hpp.wanted') || ''; } catch { /* fine */ }
+    cloudBackend.logAttempt(u.uid, { uid: u.uid, email: String(u.email || '').toLowerCase(), name: u.name || '', path: wanted.slice(0, 300), at: Date.now() }).catch(() => {});
+  }
   const paint = () => {
     const open = myRequest?.status === 'open', denied = myRequest?.status === 'denied' && Date.now() < (myRequest.deniedAt || 0) + 7 * 86400000;
     presentMsg(open ? "Request sent — you'll get in as soon as the coach approves it. This page opens by itself once that happens."
@@ -4261,19 +4274,22 @@ function syncEditor(on) {
 }
 
 // ---------- the planner's inbox: coach feedback and access requests, live ----------
-let feedbackAll = [], accessRequests = [], feedsUnsub = [];
+let feedbackAll = [], accessRequests = [], accessAttempts = [], feedsUnsub = [];
 function watchPlannerFeeds() {
   const on = !!cloudSync?.user && isOwner(cloudSync.user) && !!cloudBackend?.subscribeAllFeedback;
   if (on === !!feedsUnsub.length) return;
-  feedsUnsub.forEach(f => f?.()); feedsUnsub = []; feedbackAll = []; accessRequests = [];
+  feedsUnsub.forEach(f => f?.()); feedsUnsub = []; feedbackAll = []; accessRequests = []; accessAttempts = [];
   if (!on) return;
   feedsUnsub = [
     cloudBackend.subscribeAllFeedback((rows, err) => { if (err) return console.warn('feedback:', err); feedbackAll = rows; renderInboxBadges(); if (!$('#feedback').hidden) renderFeedback(); }),
     cloudBackend.subscribeRequests((rows, err) => { if (err) return console.warn('requests:', err); accessRequests = rows; renderInboxBadges(); if (!$('#teammgr').hidden) renderTeamMgr(); }),
+    cloudBackend.subscribeAttempts?.((rows, err) => { if (err) return console.warn('attempts:', err); accessAttempts = rows; renderInboxBadges(); if (!$('#teammgr').hidden) renderTeamMgr(); }),
   ];
 }
 const openFeedbackFor = pid => feedbackAll.filter(f => f.pid === pid && !f.resolved);
 const openRequests = () => accessRequests.filter(r => r.status === 'open');
+/** Accounts that signed in and got nowhere, and haven't asked (an open request says more) or been told no. */
+const deniedSignIns = () => accessAttempts.filter(a => !accessRequests.some(r => r.uid === a.uid && (r.status === 'open' || r.status === 'denied'))).sort((a, b) => (b.at || 0) - (a.at || 0));
 function renderInboxBadges() {
   if (!editorOn) return;
   paintInboxButtons();
@@ -4283,7 +4299,7 @@ function paintInboxButtons() {
   const n = openFeedbackFor(store.practice.id).length;
   $('#btn-feedback').textContent = `💬${n ? ` ${n}` : ''}`;
   $('#btn-feedback').classList.toggle('attn', n > 0);
-  const r = openRequests().length;
+  const r = openRequests().length + deniedSignIns().length;
   $('#btn-team').textContent = `👥 Team${r ? ` (${r})` : ''}`;
   $('#btn-team').classList.toggle('attn', r > 0);
 }

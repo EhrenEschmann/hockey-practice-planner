@@ -190,6 +190,12 @@ try {
   const gran = await browser(U.stranger);
   await gran.open('/coach/p1'); s = await gran.state();
   ok('someone on no roster → /request-access, nothing fetched', s.path === '/request-access' && s.request && !reads('gran@example.com', 'published/p1').length, s);
+  await gran.until(`fetch('http://127.0.0.1:${CLOUD}/', { method: 'POST', body: JSON.stringify({ user: ${JSON.stringify(U.planner)}, op: 'get', path: 'attempts/st' }) }).then(r => r.json()).then(r => !!r.data)`, 'failed sign-in recorded');
+  ok('the failed sign-in is recorded: who, and the link they opened', cloud.db.get('attempts/st')?.email === 'gran@example.com' && cloud.db.get('attempts/st').path === '/coach/p1' && cloud.db.get('attempts/st').count === 1, cloud.db.get('attempts/st'));
+  await planner.open('/editor/p1'); await planner.until(`document.querySelector('#btn-team').textContent.includes('(1)')`, 'sign-in badge');
+  await planner.click('#btn-team');
+  ok('the planner sees it under "Signed in without access", with a way to add them', await planner.ev(`(r => !!r && r.textContent.includes('gran@example.com') && r.textContent.includes('signed in without access') && r.textContent.includes('/coach/p1') && !!r.querySelector('[data-act="req-family"]'))(document.querySelector('.req-row[data-kind="attempt"]'))`));
+  await planner.click('#team-close');
   await gran.ev(`document.querySelector('#req-note').value = "Sam's grandma"`); await gran.click('#req-send');
   await gran.until(`/Request sent/.test(document.querySelector('#present-msg').textContent)`, 'request sent');
   ok('the request is filed in their own name', cloud.db.get('requests/st')?.email === 'gran@example.com' && cloud.db.get('requests/st').role === 'team' && cloud.db.get('requests/st').note === "Sam's grandma", cloud.db.get('requests/st'));
@@ -202,6 +208,7 @@ try {
   s = await gran.state();
   ok('approved as family → the page they first opened, as the team sees it', s.path === '/team/p1' && s.cards.length === 3, s);
   ok('approval put them on the roster and cleared the request', cloud.db.get('users/own/meta/roster').teams[0].players[0].contacts.some(k => k.email === 'gran@example.com') && !cloud.db.has('requests/st'));
+  await sleep(400); ok('…and retired the sign-in record', !cloud.db.has('attempts/st'));
 
   console.log('revocation and pulling back');
   await planner.click('#team-body [data-cid="c2"] [data-act="delcoach"]');

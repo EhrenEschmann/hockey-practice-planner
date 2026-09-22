@@ -109,6 +109,18 @@ await set('admin', 'requests/st', { ...req, status: 'denied', deniedAt: Date.now
 ok('…but can after 7 days', await set(STRANGER, 'requests/st', req), ALLOW);
 ok('stranger cannot delete requests', await del(STRANGER, 'requests/st'), DENY);
 
+console.log('sign-ins without access are recorded, in their own name only');
+const att = { uid: 'st', email: 'stranger@example.com', name: 'Gran', path: '/coach/p1', at: 1, count: 1 };
+ok('stranger records their failed sign-in', await set(STRANGER, 'attempts/st', att), ALLOW);
+ok('…and updates it next time', await set(STRANGER, 'attempts/st', { ...att, at: 2, count: 2 }), ALLOW);
+ok('stranger cannot record it under another account', await set(STRANGER, 'attempts/pa', { ...att, uid: 'pa' }), DENY);
+ok('stranger cannot claim another email', await set(STRANGER, 'attempts/st', { ...att, email: 'parent@example.com' }), DENY);
+ok('stranger cannot read attempts (not even their own)', await get(STRANGER, 'attempts/st'), DENY);
+ok('parent cannot list attempts', (await query(PARENT, '', 'attempts')).status, DENY);
+ok('planner lists attempts', await query(PLANNER, '', 'attempts'), r => r.status === 200 && r.n === 1);
+ok('planner clears one', await del(PLANNER, 'attempts/st'), ALLOW);
+ok('stranger cannot delete', await del(STRANGER, 'attempts/st'), DENY);
+
 console.log('revocation');
 await set('admin', 'access/p1', { stage: 'team', coach: ['coachb@example.com'], team: [] });
 ok('a coach removed from the list is denied on the next read', await get(COACH_A, 'published/p1'), DENY);

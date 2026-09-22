@@ -59,7 +59,7 @@ export function inboxDocs(roster, practices) {
   for (const p of practices || []) {
     const a = accessFor(roster, p);
     if (a.stage === 'draft') continue;
-    const card = role => ({ role, team: p.team || '', date: p.date || '', time: p.time || '' });
+    const card = role => ({ role, stage: a.stage, team: p.team || '', date: p.date || '', time: p.time || '' });
     for (const e of a.coach) { const d = doc(e); d.persona = 'coach'; d.practices[p.id] = card('coach'); }
     if (a.stage === 'team') for (const e of a.team) doc(e).practices[p.id] = card('team');
     else for (const e of a.team) doc(e); // known to the app (not a stranger), nothing to open yet

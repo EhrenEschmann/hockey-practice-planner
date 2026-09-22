@@ -3624,39 +3624,39 @@ function showPractice(r) {
 }
 
 /** The practices this person can open on /coach or /team: { pid, role, team, date, time }. The planner previewing one practice (`all`) can step through drafts too. */
-function practiceItems(as, { all = false } = {}) {
+function practiceItems(as) {
   if (who.persona === 'planner') {
-    return store.data.practices.filter(p => all || (as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft'))
-      .map(p => ({ pid: p.id, role: as, team: p.team, date: p.date, time: p.time }));
+    return store.data.practices.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
+      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, date: p.date, time: p.time }));
   }
   return Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
 }
 const itemPath = (as, x) => routePath({ view: as === 'coach' && x.role === 'coach' ? 'coach' : 'team', pid: x.pid }); // a coach's parent-only practices open as the team sees them
 
 /**
- * Which practice is this? The bar under the top bar says team · weekday, date · time, with the earlier / later practice of
- * that team either side. And when it is not the one the calendar points at — the next practice (today's counts all
+ * Which practice is this? The bar under the top bar names the team and has a dropdown of dates to switch to any other
+ * practice released to the team. And when the one on screen is not the one the calendar points at — the next practice (today's counts all
  * day), else the most recent — a red banner says so and jumps there: nobody runs last week's plan by mistake.
  */
 let whenTarget = null;
 function paintWhen() {
   const p = showingPractice ? presentPractice : null;
-  const bar = $('#present-when'), warn = $('#present-warn');
+  const bar = $('#present-when'), warn = $('#present-warn'), sel = $('#when-select');
   const was = `${bar.hidden}${warn.hidden}`;
   if (!p) { bar.hidden = true; warn.hidden = true; whenTarget = null; }
   else {
+    // The dropdown lists this team's practices that are released to the team — nothing that is still a draft or
+    // with the coaches, and only the ones this person may open. The practice on screen is always in it, marked
+    // when it is not one of those (a coach reading a plan out for feedback, the planner previewing a draft).
     const sameTeam = x => String(x.team || '').trim().toLowerCase() === String(p.team || '').trim().toLowerCase();
-    const items = practiceItems(presentAudience, { all: true }).filter(sameTeam).sort(byCalendar);
-    const i = items.findIndex(x => x.pid === p.id);
-    const prev = i > 0 ? items[i - 1] : null, next = i >= 0 ? items[i + 1] || null : null;
-    const say = x => whenLabel(x);
+    const items = practiceItems(presentAudience).filter(x => sameTeam(x) && x.stage === 'team').sort(byCalendar);
+    const listed = items.some(x => x.pid === p.id);
+    const today = todayISO(), say = x => whenLabel(x);
     bar.hidden = false;
-    $('#when-label').innerHTML = `${escHtml(p.team || 'Practice')} <span class="muted">·</span> ${escHtml(say(p))}`;
-    for (const [btn, x, word] of [[$('#when-prev'), prev, 'Earlier'], [$('#when-next'), next, 'Later']]) {
-      btn.disabled = !x; btn.dataset.to = x ? itemPath(presentAudience, x) : '';
-      btn.title = x ? `${word} practice — ${say(x)}` : `No ${word.toLowerCase()} practice`;
-    }
-    const today = todayISO(), focus = i >= 0 ? calendarFocus(items, today) : null;
+    $('#when-team').textContent = p.team || 'Practice';
+    const opt = (x, extra = '') => `<option value="${escHtml(itemPath(presentAudience, x))}"${x.pid === p.id ? ' selected' : ''}>${escHtml(say(x))}${x.date === today ? ' · today' : ''}${extra}</option>`;
+    sel.innerHTML = (listed ? '' : opt(p, ' · not yet released to the team')) + items.map(x => opt(x)).join('');
+    const focus = listed ? calendarFocus(items, today) : null;
     whenTarget = focus && focus.pid !== p.id ? itemPath(presentAudience, focus) : null;
     warn.hidden = !whenTarget;
     if (whenTarget) {
@@ -3667,9 +3667,7 @@ function paintWhen() {
   }
   if (was !== `${bar.hidden}${warn.hidden}`) layoutPresent();
 }
-$('#when-prev').addEventListener('click', e => { if (e.currentTarget.dataset.to) navigate(e.currentTarget.dataset.to); });
-$('#when-next').addEventListener('click', e => { if (e.currentTarget.dataset.to) navigate(e.currentTarget.dataset.to); });
-$('#when-label').addEventListener('click', () => $('#present-home').click());
+$('#when-select').addEventListener('change', e => { if (e.target.value && e.target.value !== location.pathname) navigate(e.target.value); });
 $('#present-warn').addEventListener('click', () => { if (whenTarget) navigate(whenTarget); });
 
 /** /coach and /team: every practice released to this person, upcoming first — one bookmark for the whole season. */

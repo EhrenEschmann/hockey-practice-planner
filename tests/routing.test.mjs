@@ -130,20 +130,24 @@ try {
   await coachA.open('/#team%3Down%2Fp1'); ok('old percent-encoded #team= link → /team/p1', (await coachA.path()) === '/team/p1', await coachA.path());
   await coachA.open('/coach/p1/extra/bits'); ok('unknown path → "/" → home', (await coachA.path()) === '/coach', await coachA.path());
 
-  console.log('which practice is this: team · weekday, date · time, earlier / later, and the red banner');
-  const when = b => b.ev(`({ label: document.querySelector('#present-when').hidden ? null : document.querySelector('#when-label').textContent, prev: !document.querySelector('#when-prev').disabled, next: !document.querySelector('#when-next').disabled,
+  console.log('which practice is this: team + date dropdown of practices released to the team, and the red banner');
+  const when = b => b.ev(`({ team: document.querySelector('#present-when').hidden ? null : document.querySelector('#when-team').textContent,
+    options: [...document.querySelectorAll('#when-select option')].map(o => o.textContent), picked: document.querySelector('#when-select').selectedOptions[0]?.textContent,
     warn: document.querySelector('#present-warn').hidden ? null : document.querySelector('#present-warn').textContent })`);
+  const pick = async (b, path) => { await b.ev(`(s => { s.value = ${JSON.stringify(path)}; s.dispatchEvent(new Event('change')); })(document.querySelector('#when-select'))`); await b.until(`location.pathname === ${JSON.stringify(path)}`, `dropdown → ${path}`); await b.settle(); };
   const wd = d => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  const lastWeek = new Date(+today - 7 * 86400000);
   await coachA.open('/coach/p1'); let w = await when(coachA);
-  ok('today\'s practice: team, weekday + date, start time; earlier and later practices offered; no banner', w.label === `Mites · ${wd(today)} @ 05:00 PM` && w.prev && w.next && w.warn === null, w);
-  await coachA.click('#when-next'); await coachA.until(`location.pathname === '/coach/p2'`, 'later practice'); await coachA.settle(); w = await when(coachA);
-  ok('a future practice gets the red banner naming today\'s', /future practice/.test(w.warn || '') && w.warn.includes(`Today’s practice is ${wd(today)} @ 05:00 PM`) && !w.next, w);
+  ok('today\'s practice: team named, dropdown lists only practices released to the team (not the one with the coaches), today picked, no banner',
+    w.team === 'Mites' && w.options.join('|') === `${wd(lastWeek)} @ 05:00 PM|${wd(today)} @ 05:00 PM · today` && w.picked.startsWith(wd(today)) && w.warn === null, w);
+  await pick(coachA, '/coach/p0'); w = await when(coachA);
+  ok('an older practice picked from the dropdown gets the red banner naming today\'s', /older practice/.test(w.warn || '') && w.warn.includes(`Today’s practice is ${wd(today)} @ 05:00 PM`), w);
   await coachA.click('#present-warn'); await coachA.until(`location.pathname === '/coach/p1'`, 'banner jumps to the practice on the calendar'); await coachA.settle();
-  await coachA.click('#when-prev'); await coachA.until(`location.pathname === '/coach/p0'`, 'earlier practice'); await coachA.settle(); w = await when(coachA);
-  ok('an older practice gets the red banner too', /older practice/.test(w.warn || '') && !w.prev && w.next, w);
+  await coachA.open('/coach/p2'); w = await when(coachA);
+  ok('a practice still with the coaches is in the dropdown only as the marked current entry', w.picked.endsWith('not yet released to the team') && w.options.length === 3 && w.warn === null, w);
   await parent.open('/team/p1'); w = await when(parent);
-  ok('a parent steps only through what is released to the team (no peeking at tomorrow\'s)', w.prev && !w.next && w.warn === null, w);
-  await parent.open('/team'); ok('no practice bar or banner on the list', (await when(parent)).label === null && (await when(parent)).warn === null);
+  ok('a parent gets the same dropdown: the practices released to the team', w.options.length === 2 && w.picked.includes('today') && w.warn === null, w);
+  await parent.open('/team'); ok('no practice bar or banner on the list', (await when(parent)).team === null && (await when(parent)).warn === null);
 
   console.log('planner: feedback, previews');
   await planner.open('/editor/p1');

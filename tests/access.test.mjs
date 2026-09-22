@@ -52,8 +52,8 @@ const inbox = inboxDocs(roster, [p1, { id: 'p2', team: 'Squirts', stage: 'coache
 assert.deepEqual(Object.keys(inbox.get('head@x.io').practices), ['p1'], 'a practice still with the coaches is not on a parent\'s list');
 assert.equal(inbox.get('head@x.io').persona, 'coach');
 assert.equal(inbox.get('head@x.io').practices.p1.role, 'coach');
-assert.deepEqual(inbox.get('mom@x.io'), { persona: 'team', practices: { p1: { role: 'team', team: 'mites', date: '2026-09-21', time: '' } } });
-assert.deepEqual(inbox.get('sq@x.io'), { persona: 'coach', practices: { p2: { role: 'coach', team: 'Squirts', date: '', time: '' } } });
+assert.deepEqual(inbox.get('mom@x.io'), { persona: 'team', practices: { p1: { role: 'team', stage: 'team', team: 'mites', date: '2026-09-21', time: '' } } });
+assert.deepEqual(inbox.get('sq@x.io'), { persona: 'coach', practices: { p2: { role: 'coach', stage: 'coaches', team: 'Squirts', date: '', time: '' } } });
 assert.ok(inbox.has('guest@x.io') && !inbox.has(''), 'extras are known people; blank emails are nobody');
 // the practice the calendar points at: the next one (today's counts all day), else the most recent
 const cal = [{ pid: 'old', date: '2026-09-14', time: '17:00' }, { pid: 'am', date: '2026-09-21', time: '07:00' }, { pid: 'pm', date: '2026-09-21', time: '17:00' }, { pid: 'next', date: '2026-09-23' }];

@@ -3126,12 +3126,38 @@ function wireReactions(p) {
       : sent ? 'Thanks! Sent to the coach.' : 'Thanks! Sign in when you’re online to send it to the coach.';
   });
 }
+/**
+ * How long a coach or parent needs to go through the plan once: every drill's animation at its playback speed
+ * (plus the intro clip that plays before it), uploaded videos, and reading the notes and station rules at an
+ * easy pace — with a few seconds per card to take in the diagram. Rounded up to whole minutes.
+ */
+function reviewEstimate(p) {
+  const parts = { watch: 0, listen: 0, video: 0, read: 0, look: 0 };
+  for (const d of activeDrills(p)) {
+    parts.look += 5;
+    if (isPSDrill(d)) parts.watch += 12 * (d.psElements || []).length; // each 3D element loops; a dozen seconds tells the story
+    else if ((d.objects || []).some(o => isPlayer(o) && o.path?.length || o.type === 'puck')) {
+      let T = 0; try { T = makeSim(d).duration(); } catch { T = 0; }
+      parts.watch += T / (+d.animSpeed || 1);
+    }
+    if (d.intro?.secs) parts.listen += +d.intro.secs;
+    if (d.upload?.secs) parts.video += +d.upload.secs;
+    else if (d.video) parts.video += 60; // a linked clip of unknown length: call it a minute
+    const words = `${d.notes || ''} ${zoneRules(d).flatMap(z => [z.label, ...z.lines]).join(' ')}`.trim().split(/\s+/).filter(Boolean).length;
+    parts.read += words / 200 * 60; // ~200 words a minute
+  }
+  const secs = Object.values(parts).reduce((a, b) => a + b, 0);
+  const min = Math.max(1, Math.ceil(secs / 60));
+  const bits = [parts.watch ? `${fmtSecs(parts.watch)} of animation` : '', parts.listen ? `${fmtSecs(parts.listen)} of intros` : '', parts.video ? `${fmtSecs(parts.video)} of video` : '', parts.read ? `${fmtSecs(parts.read)} reading` : ''].filter(Boolean);
+  return { min, secs, detail: bits.join(' · ') };
+}
 function presentHTML(p) {
   const fbBtn = key => feedbackOn ? `<button class="pr-fb wp-toggle" data-fb="${key}" title="Only the head coach sees what you write">💬 Feedback</button>` : '';
   const rink = rinkSVG();
   const drills = activeDrills(p);
   const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const startMin = parseStart(p);
+  const est = reviewEstimate(p);
   let t = startMin ?? 0; // no start time on the practice: the schedule runs from 0:00 instead of a clock time
   // Each drill's slot on the running clock — exactly when it starts and finishes (data-* feed the live "now" marker).
   const whenHTML = (at, dur) => startMin != null
@@ -3143,6 +3169,7 @@ function presentHTML(p) {
     <div class="pr-meta">${escHtml(whenLabel(p, true))}</div>
     ${p.coaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
     <div class="pr-meta">${drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clockFull(startMin)}` : ''}</div>
+    <div class="pr-meta pr-review" title="${escHtml(est.detail)}">⏱ About ${est.min} min to review this plan${est.detail ? ` <span class="muted">(${escHtml(est.detail)})</span>` : ''}</div>
     </div>
     ${drills.map((d, i) => {
       const at = t; t += (+d.duration || 0);
@@ -4031,6 +4058,8 @@ function openPicker() {
   $('#present-picker-list').innerHTML = cards.map((c, i) => `<li class="${i === presentIndex ? 'current' : ''}" data-i="${i}">
     <span class="name">${escHtml(c.querySelector('header b')?.textContent || '')}</span>
     <span class="when">${escHtml([c.querySelector('.pr-min')?.textContent, c.querySelector('.pr-time')?.textContent].filter(Boolean).join(' · '))}</span></li>`).join('');
+  const est = presentPractice ? reviewEstimate(presentPractice) : null;
+  $('#present-picker h3').textContent = est ? `Jump to drill · about ${est.min} min to review` : 'Jump to drill';
   $('#present-picker').hidden = false;
   $('#present-picker-list li.current')?.scrollIntoView({ block: 'center' });
 }

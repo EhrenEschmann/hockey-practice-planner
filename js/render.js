@@ -62,8 +62,8 @@ const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'ti
 const zType = o => (o.type === 'skater' && o.role === 'G' ? 'goalie' : o.type);
 
 /** A player's skating path (line + arrowhead), or '' if there is none to draw. Backward stretches (from `backward` / waypoint pivots) draw dotted, with a ⇄ marker at each pivot. */
-function playerPath(o, opts) {
-  if (!o.path?.length || opts.showPaths === false) return '';
+function playerPath(o, opts, selected = false) {
+  if (!o.path?.length || (opts.showPaths === false && !selected)) return ''; // paths hidden: only the selected player's route shows, so it can still be edited
   const isCoach = o.type === 'coach';
   const color = skaterHex(o) || (isCoach ? COACH_COLOR : SKATER_COLORS.blue);
   const pts = skaterPoints(o);
@@ -102,7 +102,7 @@ export function renderObjects(drill, selId, opts = {}) {
   const below = objs.filter(o => Z_ORDER.indexOf(zType(o)) < playerZ);
   const above = objs.filter(o => Z_ORDER.indexOf(zType(o)) >= playerZ);
   const pathLayer = above.filter(o => o.type === 'skater' || o.type === 'coach')
-    .map(o => { const p = playerPath(o, o2); return p ? `<g class="obj ${o.type} path-under" data-id="${o.id}">${p}</g>` : ''; }).join('');
+    .map(o => { const p = playerPath(o, o2, o.id === selId); return p ? `<g class="obj ${o.type} path-under" data-id="${o.id}">${p}</g>` : ''; }).join('');
   // Raised pads are drawn in two parts: tires in normal order, and the slab on top of everything so
   // skaters visibly slide underneath it.
   return below.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
@@ -309,8 +309,8 @@ const draw = {
   coach(o, sel, opts) {
     const color = skaterHex(o) || COACH_COLOR;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
-    const h = sel && opts.showPaths !== false ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects); hidden paths hide their waypoints too
-    const wps = opts.numberWaypoints && opts.showPaths !== false ? wpLabels(o) : '';
+    const h = sel ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects); a selected player's path shows even with paths hidden
+    const wps = opts.numberWaypoints && (opts.showPaths !== false || sel) ? wpLabels(o) : ''; // numbered waypoints only along a path that is on screen
     // Tackle pad: a padded bumper held out in the facing direction.
     const hd = o.pad && opts.sim ? opts.sim.skaterPose(o.id, 0).heading * 180 / Math.PI : 0;
     const pad = o.pad ? `<g transform="rotate(${n(hd)})"><rect x="1.9" y="-1.8" width="1.15" height="3.6" rx=".55" fill="#c05621" stroke="#7a3a12" stroke-width=".22"/></g>` : '';
@@ -330,12 +330,12 @@ const draw = {
 
   skater(o, sel, opts) {
     const color = skaterHex(o) || SKATER_COLORS.blue;
-    const h = sel && !o.follow && opts.showPaths !== false ? handles(o.path || []) : ''; // path draws in the underlay; a follower's route is edited via its leader; hidden paths hide their waypoints too
+    const h = sel && !o.follow ? handles(o.path || []) : ''; // path draws in the underlay; a follower's route is edited via its leader
     const body = o.role === 'G'
       ? `<rect class="body" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".7" fill="${color}"/>`
       : `<circle class="body" r="1.75" fill="${color}"/>`;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
-    const wps = opts.numberWaypoints && opts.showPaths !== false ? wpLabels(o) : '';
+    const wps = opts.numberWaypoints && (opts.showPaths !== false || sel) ? wpLabels(o) : ''; // numbered waypoints only along a path that is on screen
     const heading0 = opts.sim ? opts.sim.skaterPose(o.id, 0).heading * 180 / Math.PI : 0; // body facing: path tangent (flipped when backward), or facing when standing
     return `<g class="obj skater" data-id="${o.id}">${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">

@@ -3101,6 +3101,7 @@ function wireVideos(p) {
           if (!sec.classList.contains('video-open')) return; // closed while loading
           if (!entry) { btn.textContent = '⚠ video not available — tap ↻ to resync, or check the connection'; btn.hidden = false; sec.classList.remove('video-open'); layoutPresent(); return; }
           box.insertAdjacentHTML('beforeend', `<div class="video-box"><video src="${entry.url}" controls playsinline ${auto ? '' : 'autoplay'} preload="auto"></video></div>`); // an auto-opened player waits for a tap: phones block sound without one
+          if (d.intro) introBeforeVideo(box.querySelector('video'), sec, p, d);
         } else box.insertAdjacentHTML('beforeend', videoPlayerHTML({ kind: box.dataset.kind, src: box.dataset.src, host: box.dataset.host }));
       }
       btn.innerHTML = open ? '✕ Close video' : label();
@@ -3110,6 +3111,34 @@ function wireVideos(p) {
     btn.addEventListener('click', () => toggle());
     if (videoOnly) { sec.classList.add('video-only'); toggle({ auto: true }); }
   }
+}
+/**
+ * A drill with a recorded intro and an uploaded video: the first ▶ on the video (from the start, voice on) plays the
+ * coach's intro first, then the video runs. Pressing ▶ again during the intro skips it. (A YouTube-style embed is
+ * inside its own frame, so it can't be held back — only uploaded clips get the intro.)
+ */
+function introBeforeVideo(vid, sec, p, d) {
+  if (!vid) return;
+  let cur = null, done = false;
+  const cue = sec.querySelector('.pr-cue') || sec.querySelector('.pr-video').appendChild(Object.assign(document.createElement('div'), { className: 'pr-cue', hidden: true }));
+  const say = (text, ms) => { cue.textContent = text; cue.hidden = false; if (ms) setTimeout(() => { cue.hidden = true; }, ms); };
+  vid.addEventListener('play', () => {
+    if (cur) { cur.cancelled = true; cur.stop(); return; } // ▶ during the intro: skip it, the video is already going
+    if (done || vid.currentTime > 0.5) return;
+    done = true; // one intro per opening of the player
+    if (!voiceOn) { if (hasVoice(d)) say('🔇 voice is muted on this phone — tap 🔇 muted to hear the intro', 4000); return; }
+    const clip = clipMem.get(keyFor(presentOwner, p.id, d));
+    if (!clip) { say('🎙 intro not downloaded yet — tap ↻ to resync', 3500); return; }
+    if (!canPlay(clip.mime)) { say(`🎙 intro can’t play on this device (${clip.mime})`, 4000); return; }
+    vid.pause();
+    say('🎙 Coach’s intro…');
+    cur = playClip(clip, { onEnd: err => {
+      const skipped = cur?.cancelled; cur = null;
+      if (err) say(`🎙 intro didn’t play — ${err}`, 4000); else cue.hidden = true;
+      if (!skipped) vid.play().catch(() => {});
+    } });
+  });
+  sec._pauseIntro = () => { if (cur) { cur.cancelled = true; cur.stop(); } };
 }
 const REACTIONS = [['😀', 'Good'], ['🏒', 'Great hockey'], ['😍', 'Loved it'], ['🤩', 'Amazing']];
 /** After practice: a tap on one of the four emoji is remembered on this phone and logged for the coach. */
@@ -3931,7 +3960,7 @@ function showDrill(i) {
   if (cards[presentIndex]?.classList.contains('current') === false) stopReading(); // moving to another drill
   cards.forEach((c, k) => {
     const cur = k === presentIndex;
-    if (!cur && presentMode === 'focus') c._pause?.();
+    if (!cur && presentMode === 'focus') { c._pause?.(); c._pauseIntro?.(); }
     c.classList.toggle('current', cur);
   });
   const nameOf = c => c.querySelector('header b')?.textContent || '';

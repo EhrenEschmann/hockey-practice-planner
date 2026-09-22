@@ -17,7 +17,9 @@ export function newPractice(team = '') {
 }
 
 /** How a practice is shown anywhere it needs a label. */
-export function practiceLabel(p) { return `${p.team || 'No team'} — ${p.date || 'no date'}`; }
+/** Dates are shown US style, mm/dd/yyyy (stored as yyyy-mm-dd, which sorts). */
+export const usDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? `${date.slice(5, 7)}/${date.slice(8, 10)}/${date.slice(0, 4)}` : (date || '');
+export function practiceLabel(p) { return `${p.team || 'No team'} — ${usDate(p.date) || 'no date'}`; }
 
 /**
  * Skaters can share a route: a skater with `follow` skates another skater's path. The route is

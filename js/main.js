@@ -2,7 +2,7 @@ import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
-import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill, syncFollowers } from './store.js';
+import { Store, uid, newDrill, newPractice, practiceLabel, usDate, cloneObjects, migrateDrill, syncFollowers } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
@@ -1495,7 +1495,7 @@ function renderPracticeProps() {
 /** Draft → out to coaches → released to the team: only these buttons release a practice; the roster says to whom. */
 function renderStage() {
   const p = store.practice, st = stageOf(p), a = accessFor(store.roster, p), t = rosterTeamFor(store.roster, p);
-  const since = ms => ms ? ` since ${new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : '';
+  const since = ms => ms ? ` since ${stamp(ms)}` : '';
   $('#stage-now').textContent = STAGE_LABELS[st] + (st === 'coaches' ? since(p.sentCoachesAt) : st === 'team' ? since(p.sentTeamAt) : '');
   $('#stage-now').dataset.stage = st;
   $('#btn-stage-next').hidden = st === 'team';
@@ -1689,7 +1689,7 @@ function renderFeedback() {
   $('#feedback-title').textContent = practiceLabel(p);
   const rows = feedbackAll.filter(f => f.pid === p.id);
   const item = f => `<div class="fb-item${f.resolved ? ' resolved' : ''}" data-fid="${escHtml(f.fid)}">
-      <div class="fb-meta"><b>${escHtml(f.name || f.email)}</b> <span class="muted small">${escHtml(f.email)} · ${new Date(f.at || 0).toLocaleString()}</span></div>
+      <div class="fb-meta"><b>${escHtml(f.name || f.email)}</b> <span class="muted small">${escHtml(f.email)} · ${stamp(f.at || 0)}</span></div>
       <pre>${escHtml(f.text)}</pre>
       <div class="row"><button data-fact="resolve">${f.resolved ? '↺ Reopen' : '✓ Resolve'}</button></div>
     </div>`;
@@ -1954,7 +1954,7 @@ function renderPlan() {
   const total = activeDrills(p).reduce((a, d) => a + (+d.duration || 0), 0);
   const hiddenCount = p.drills.length - activeDrills(p).length;
   const startMin = parseStart(p);
-  $('#plan-total').textContent = `${total} min total${startMin != null ? ` · ${clock(startMin)}–${clock(startMin + total)}` : ''}${hiddenCount ? ` · ${hiddenCount} hidden` : ''}`;
+  $('#plan-total').textContent = `${total} min total${startMin != null ? ` · ${clockFull(startMin)}–${clockFull(startMin + total)}` : ''}${hiddenCount ? ` · ${hiddenCount} hidden` : ''}`;
   $('#plan-total').title = startMin != null ? 'Set the start time in + Practice to change the clock' : 'Set a start time in + Practice to see clock times on each drill';
   // running time: where each (unhidden) drill starts — as a clock time when the practice has one, else minutes in
   let running = 0;
@@ -1963,7 +1963,7 @@ function renderPlan() {
   const when = d => {
     if (d.hidden) return 'hidden';
     const at = startOf.get(d.id);
-    return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clock(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}`;
+    return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clockFull(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}`;
   };
   const fbCount = d => feedbackAll.filter(f => f.pid === p.id && f.drillId === d.id && !f.resolved).length;
   const list = $('#drill-list');
@@ -2214,7 +2214,7 @@ function libraryCards(filter) {
   const practices = [...store.data.practices].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const cards = [];
   for (const p of practices) for (const d of p.drills || []) {
-    if (q && !`${d.name} ${p.team || ''} ${p.date || ''}`.toLowerCase().includes(q)) continue;
+    if (q && !`${d.name} ${p.team || ''} ${p.date || ''} ${usDate(p.date)}`.toLowerCase().includes(q)) continue;
     const v = d.view || VIEWS.full;
     cards.push(`<div class="lib-card">
       <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG()}${renderObjects(d, null)}</svg>
@@ -2941,17 +2941,25 @@ function shareView(d) {
 /** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
 const activeDrills = p => p.drills.filter(d => !d.hidden);
 const parseStart = p => /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null;
-const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
-const ampm = m => (Math.floor(m / 60) % 24) < 12 ? 'am' : 'pm';
-/** "Mon, Sep 21" — the viewer always says which day of the week a practice is. */
-const dayDate = (date, long = false) => /^\d{4}-\d{2}-\d{2}$/.test(date || '')
-  ? new Date(date + 'T12:00').toLocaleDateString(undefined, long ? { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric' })
-  : (date || 'no date');
-const startLabel = x => { const m = parseStart(x); return m != null ? `${clock(m)}${ampm(m)}` : ''; };
-const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
-const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '')
-  ? new Date(date + 'T12:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
-  : (date || '');
+// Every date and time the app shows is US format: mm/dd/yyyy @ hh:mm AM/PM (never the browser's locale).
+const pad2 = n => String(n).padStart(2, '0');
+const clock = m => `${pad2(((Math.floor(m / 60) + 11) % 12) + 1)}:${pad2(m % 60)}`; // minutes since midnight → "05:00"
+const ampm = m => (Math.floor(m / 60) % 24) < 12 ? ' AM' : ' PM';
+const clockFull = m => clock(m) + ampm(m);
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/** "Mon 09/21/2026" (long: "Monday 09/21/2026") — the viewer always says which day of the week a practice is. */
+const dayDate = (date, long = false) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return date || 'no date';
+  const wd = WEEKDAYS[new Date(date + 'T12:00').getDay()];
+  return `${long ? wd : wd.slice(0, 3)} ${usDate(date)}`;
+};
+const startLabel = x => { const m = parseStart(x); return m != null ? clockFull(m) : ''; };
+/** A practice's date and start time: "Mon 09/21/2026 @ 05:00 PM". */
+const whenLabel = (x, long = false) => `${dayDate(x.date, long)}${startLabel(x) ? ` @ ${startLabel(x)}` : ''}`;
+/** A timestamp: "09/21/2026 @ 05:07 PM". */
+const stamp = ms => { const d = new Date(ms); return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}/${d.getFullYear()} @ ${clockFull(d.getHours() * 60 + d.getMinutes())}`; };
+const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`; };
+const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? dayDate(date, true) : (date || '');
 
 $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
@@ -2964,7 +2972,7 @@ $('#btn-print').addEventListener('click', () => {
     const at = t; if (t != null) t += (+d.duration || 0);
     return `
       <div class="p-drill">
-        <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clock(at)}</span>` : ''}</div>
+        <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clockFull(at)}</span>` : ''}</div>
         ${standaloneSVG(d, rink, SVG_STYLE, shareView(d))}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${d.upload ? `<div class="p-meta">Video: uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)</div>` : d.video && videoEmbed(d.video) ? `<div class="p-meta">Video: ${escHtml(d.video)}</div>` : ''}
@@ -2973,13 +2981,13 @@ $('#btn-print').addEventListener('click', () => {
   }).join('');
   $('#print-area').innerHTML = `
     <div class="p-title">${escHtml(p.team || 'Practice')}</div>
-    <div class="p-sub">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
+    <div class="p-sub">${escHtml(whenLabel(p, true))}</div>
     ${p.coaches ? `<div class="p-sub">Coaches: ${escHtml(p.coaches)}</div>` : ''}
     <div class="p-overview">${drills.map(d => standaloneSVG(d, rink, SVG_STYLE, shareView(d))).join('')}</div>
-    <div class="p-sub">${startMin != null ? `Start @ ${clock(startMin)}` : ''} <span class="p-meta">${drills.length} drills · ${total} min</span></div>
+    <div class="p-sub">${startMin != null ? `Start @ ${clockFull(startMin)}` : ''} <span class="p-meta">${drills.length} drills · ${total} min</span></div>
     <div class="p-cols">
     ${drillRows}
-    <div class="p-drill"><div class="p-head"><b>* Dismissal</b>${startMin != null ? `<span class="p-time">${clock(startMin + total)}</span>` : ''}</div></div>
+    <div class="p-drill"><div class="p-head"><b>* Dismissal</b>${startMin != null ? `<span class="p-time">${clockFull(startMin + total)}</span>` : ''}</div></div>
     </div>`;
   window.print();
 });
@@ -3064,14 +3072,14 @@ function presentHTML(p) {
   let t = startMin ?? 0; // no start time on the practice: the schedule runs from 0:00 instead of a clock time
   // Each drill's slot on the running clock — exactly when it starts and finishes (data-* feed the live "now" marker).
   const whenHTML = (at, dur) => startMin != null
-    ? `<span class="pr-time" data-from="${at}" data-to="${at + dur}">${clock(at)}–${clock(at + dur)}${ampm(at + dur)}</span><span class="pr-now" hidden></span>`
+    ? `<span class="pr-time" data-from="${at}" data-to="${at + dur}">${clock(at)}–${clockFull(at + dur)}</span><span class="pr-now" hidden></span>`
     : `<span class="pr-time" title="Minutes into practice — set a start time on the practice to get clock times">${at}–${at + dur} min in</span>`;
   return `
     <div class="pr-head">
     <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
-    <div class="pr-meta">${escHtml(dayDate(p.date, true))}${startMin != null ? ` · ${clock(startMin)}${ampm(startMin)}` : ''}</div>
+    <div class="pr-meta">${escHtml(whenLabel(p, true))}</div>
     ${p.coaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
-    <div class="pr-meta">${drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
+    <div class="pr-meta">${drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clockFull(startMin)}` : ''}</div>
     </div>
     ${drills.map((d, i) => {
       const at = t; t += (+d.duration || 0);
@@ -3109,7 +3117,7 @@ function presentHTML(p) {
       </section>`;
     }).join('')}
     <section class="pr-drill pr-dismissal">
-      <header><b>* Dismissal</b>${startMin != null ? `<span class="pr-time">${clock(startMin + total)}${ampm(startMin + total)}</span>` : `<span class="pr-time">${total} min in</span>`}</header>
+      <header><b>* Dismissal</b>${startMin != null ? `<span class="pr-time">${clockFull(startMin + total)}</span>` : `<span class="pr-time">${total} min in</span>`}</header>
       <div class="pr-react">
         <div class="pr-react-q">How was practice?</div>
         <div class="pr-react-row">${REACTIONS.map(([e, name]) => `<button class="pr-react-btn" data-emoji="${e}" title="${name}" aria-label="${name}">${e}</button>`).join('')}</div>
@@ -3507,7 +3515,7 @@ function showCachedPractice(pid, note) {
     presentOwner = cached.p.owner || 'local'; feedbackOn = false;
     presentDoc(cached.p);
   }
-  presentNote(`Offline copy from ${new Date(cached.at).toLocaleString()} — ${note}`);
+  presentNote(`Offline copy from ${stamp(cached.at)} — ${note}`);
   return true;
 }
 
@@ -3641,7 +3649,7 @@ function paintWhen() {
     const items = practiceItems(presentAudience, { all: true }).filter(sameTeam).sort(byCalendar);
     const i = items.findIndex(x => x.pid === p.id);
     const prev = i > 0 ? items[i - 1] : null, next = i >= 0 ? items[i + 1] || null : null;
-    const say = x => `${dayDate(x.date)}${startLabel(x) ? ` · ${startLabel(x)}` : ''}`;
+    const say = x => whenLabel(x);
     bar.hidden = false;
     $('#when-label').innerHTML = `${escHtml(p.team || 'Practice')} <span class="muted">·</span> ${escHtml(say(p))}`;
     for (const [btn, x, word] of [[$('#when-prev'), prev, 'Earlier'], [$('#when-next'), next, 'Later']]) {
@@ -3671,7 +3679,7 @@ function showList(r) {
   const today = todayISO();
   const upcoming = items.filter(x => (x.date || '') >= today).sort(byCalendar), past = items.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
   const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
-      <b>${escHtml(x.team || 'Practice')}</b><span>${escHtml(dayDate(x.date, true))}${startLabel(x) ? ` · ${startLabel(x)}` : ''}</span>
+      <b>${escHtml(x.team || 'Practice')}</b><span>${escHtml(whenLabel(x, true))}</span>
       ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
   $('#present-title').textContent = who.persona === 'planner' ? `Practices — ${as} view` : 'Practices';
   $('#present-gate').hidden = true; presentNote(inboxStale ? 'Offline — this is the list from your last visit.' : '');
@@ -4078,7 +4086,7 @@ async function copyShareLink(btn, view) {
   setTimeout(() => { btn.textContent = old; }, 1500);
 }
 // ----- the owner's audit log of views -----
-const fmtWhen = ms => new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const fmtWhen = stamp;
 async function openViewLog() {
   const p = store.practice;
   if (!cloudBackend?.loadViews || !cloudSync?.user || !store.data.ownerUid) return alert('Sign in first — the log lives in your cloud account.');

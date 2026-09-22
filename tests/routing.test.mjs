@@ -133,11 +133,11 @@ try {
   console.log('which practice is this: team · weekday, date · time, earlier / later, and the red banner');
   const when = b => b.ev(`({ label: document.querySelector('#present-when').hidden ? null : document.querySelector('#when-label').textContent, prev: !document.querySelector('#when-prev').disabled, next: !document.querySelector('#when-next').disabled,
     warn: document.querySelector('#present-warn').hidden ? null : document.querySelector('#present-warn').textContent })`);
-  const wd = d => d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const wd = d => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   await coachA.open('/coach/p1'); let w = await when(coachA);
-  ok('today\'s practice: team, weekday + date, start time; earlier and later practices offered; no banner', w.label === `Mites · ${wd(today)} · 5:00pm` && w.prev && w.next && w.warn === null, w);
+  ok('today\'s practice: team, weekday + date, start time; earlier and later practices offered; no banner', w.label === `Mites · ${wd(today)} @ 05:00 PM` && w.prev && w.next && w.warn === null, w);
   await coachA.click('#when-next'); await coachA.until(`location.pathname === '/coach/p2'`, 'later practice'); await coachA.settle(); w = await when(coachA);
-  ok('a future practice gets the red banner naming today\'s', /future practice/.test(w.warn || '') && w.warn.includes(`Today’s practice is ${wd(today)} · 5:00pm`) && !w.next, w);
+  ok('a future practice gets the red banner naming today\'s', /future practice/.test(w.warn || '') && w.warn.includes(`Today’s practice is ${wd(today)} @ 05:00 PM`) && !w.next, w);
   await coachA.click('#present-warn'); await coachA.until(`location.pathname === '/coach/p1'`, 'banner jumps to the practice on the calendar'); await coachA.settle();
   await coachA.click('#when-prev'); await coachA.until(`location.pathname === '/coach/p0'`, 'earlier practice'); await coachA.settle(); w = await when(coachA);
   ok('an older practice gets the red banner too', /older practice/.test(w.warn || '') && !w.prev && w.next, w);

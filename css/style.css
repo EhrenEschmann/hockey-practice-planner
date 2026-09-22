@@ -190,8 +190,11 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 .intro-box .row button{font-size:12px}
 .intro-box p{margin:8px 0 0}
 .intro-warn{margin-top:6px;line-height:1.35}
+/* the intro / video buttons: quiet line icons like the rest of the row; a tint only once there is something recorded */
 #drill-list li button.has-intro{color:#f59e0b}
 #drill-list li button.has-video{color:#a78bfa}
+#drill-list li button[data-act=intro]:not(.has-intro),#drill-list li button[data-act=video]:not(.has-video){color:var(--muted);opacity:.7}
+#drill-list li button[data-act=intro]:not(.has-intro):hover,#drill-list li button[data-act=video]:not(.has-video):hover{opacity:1;color:var(--text)}
 #drill-list li.video-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default;display:block}
 .video-url{width:100%;font-size:12.5px}
 .vid-drop{border:2px dashed var(--border);border-radius:8px;padding:12px 10px;text-align:center;font-size:12.5px;color:var(--muted);margin-bottom:8px}

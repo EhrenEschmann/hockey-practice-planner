@@ -3,10 +3,14 @@ import { smoothPath, closestOnPolyline } from './geometry.js';
 import { makeSim, skaterPoints } from './sim.js';
 export { skaterPoints };
 
+// The jersey colours a skater can be given. Coaches are drawn dark by default (COACH_COLOR) but can take any of these.
 export const SKATER_COLORS = {
-  blue: '#1e56d6', red: '#d62828', green: '#1f9d55', black: '#222222',
-  yellow: '#e6b800', white: '#f5f5f5', orange: '#f07f13', purple: '#7b3fbf',
+  blue: '#1e56d6', red: '#d62828', green: '#1f9d55', teal: '#0d9488',
+  yellow: '#e6b800', pink: '#e0218a', orange: '#f07f13', purple: '#7b3fbf',
 };
+export const COACH_COLOR = '#222222';
+// Older drills may still carry the retired 'black' / 'white' jerseys: they keep drawing as they were.
+export const skaterHex = o => SKATER_COLORS[o.color] || ({ black: '#222222', white: '#f5f5f5' })[o.color] || o.color || null;
 export const ZONE_COLORS = ['#2b6cb0', '#c05621', '#2f855a', '#805ad5', '#b83280', '#4a5568'];
 export const ARROW_STYLES = { skate: 'Skate', pass: 'Pass (dashed)', shot: 'Shot (thick)', backward: 'Backward (dotted)' };
 
@@ -61,7 +65,7 @@ const zType = o => (o.type === 'skater' && o.role === 'G' ? 'goalie' : o.type);
 function playerPath(o, opts) {
   if (!o.path?.length || opts.showPaths === false) return '';
   const isCoach = o.type === 'coach';
-  const color = SKATER_COLORS[o.color] || o.color || (isCoach ? SKATER_COLORS.black : SKATER_COLORS.blue);
+  const color = skaterHex(o) || (isCoach ? COACH_COLOR : SKATER_COLORS.blue);
   const pts = skaterPoints(o);
   const dense = smoothPath(pts);
   const dash = back => isCoach ? 'stroke-dasharray="2.5 1.5"' : back ? 'stroke-dasharray="1.5 1.2"' : '';
@@ -303,7 +307,7 @@ const draw = {
   },
 
   coach(o, sel, opts) {
-    const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.black;
+    const color = skaterHex(o) || COACH_COLOR;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
     const h = sel && opts.showPaths !== false ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects); hidden paths hide their waypoints too
     const wps = opts.numberWaypoints && opts.showPaths !== false ? wpLabels(o) : '';
@@ -325,7 +329,7 @@ const draw = {
   },
 
   skater(o, sel, opts) {
-    const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.blue;
+    const color = skaterHex(o) || SKATER_COLORS.blue;
     const h = sel && !o.follow && opts.showPaths !== false ? handles(o.path || []) : ''; // path draws in the underlay; a follower's route is edited via its leader; hidden paths hide their waypoints too
     const body = o.role === 'G'
       ? `<rect class="body" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".7" fill="${color}"/>`

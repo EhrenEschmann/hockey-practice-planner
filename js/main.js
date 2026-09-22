@@ -1,6 +1,6 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
-import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
+import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, usDate, cloneObjects, migrateDrill, syncFollowers } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
@@ -281,7 +281,7 @@ const MINICONE_SPACING = 3; // ft between small cones when laying a row
 function makePlaceable(type, p) {
   const count = t => drill().objects.filter(x => x.type === t).length;
   switch (type) {
-    case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', color: 'black', speed: 10, delay: 0, path: [] }; }
+    case 'coach': { const k = count('coach'); return { type: 'coach', x: p.x, y: p.y, label: k ? `C${k + 1}` : 'C', speed: 10, delay: 0, path: [] }; } // no colour: coaches draw dark (COACH_COLOR) until one is picked
     case 'skater': {
       // Offense (blue) or defense (red), numbered per side; a custom last colour is used when no side is set.
       const side = SIDES[newSide] ? newSide : null;
@@ -680,7 +680,7 @@ function onPointerMove(e) {
       drag.pts.push(raw);
       if (drag.pts.length > 2) {
         const o = getObj(drag.id);
-        overlay.innerHTML = `<polyline points="${drag.pts.map(q => `${q.x},${q.y}`).join(' ')}" fill="none" stroke="${SKATER_COLORS[o.color] || o.color}" stroke-width=".4" stroke-dasharray="1 .6"/>`;
+        overlay.innerHTML = `<polyline points="${drag.pts.map(q => `${q.x},${q.y}`).join(' ')}" fill="none" stroke="${skaterHex(o)}" stroke-width=".4" stroke-dasharray="1 .6"/>`;
       }
       break;
     }
@@ -1373,7 +1373,7 @@ function renderAnimBar() {
 
 /** One "Impact: worse for" option: number + colour name, tinted in the skater's colour (readable fallback for light ones). */
 function loserOption(o, selected) {
-  const hex = SKATER_COLORS[o.color] || o.color || '';
+  const hex = skaterHex(o) || '';
   const tint = o.color === 'white' || o.color === 'yellow' ? '' : ` style="color:${escHtml(hex)}"`;
   return `<option value="${o.id}"${tint} ${selected ? 'selected' : ''}>${playerName(o)} (${escHtml(o.color || '')})</option>`;
 }

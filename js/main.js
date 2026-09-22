@@ -1484,7 +1484,8 @@ function renderPracticeProps() {
   const p = store.practice;
   for (const [id, key] of PRACTICE_FIELDS) {
     const el = $(id);
-    if (document.activeElement !== el) el.value = p[key] || '';
+    if (el.tagName === 'SELECT') renderTeamSelect();
+    else if (document.activeElement !== el) el.value = p[key] || '';
   }
   for (const [id, key] of SHARE_FIELDS) {
     const em = $(id);
@@ -1528,8 +1529,25 @@ const SHARE_FIELDS = [['#practice-emails', 'sharedWith'], ['#practice-team-email
 for (const [id, key] of PRACTICE_FIELDS) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
-  el.addEventListener('input', () => { store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
-  el.addEventListener('change', () => { store.commitPending(); renderUI(); });
+  el.addEventListener('input', () => { if (el.value === MANAGE_TEAMS) return; store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
+  el.addEventListener('change', () => {
+    if (el.value === MANAGE_TEAMS) { el.value = store.practice.team || ''; $('#practice-pop').hidden = true; openTeamMgr(); return; }
+    store.commitPending(); renderUI();
+  });
+}
+// The team is picked from the roster (👥 Team), never typed: the roster is what decides who can open the practice.
+const MANAGE_TEAMS = '__manage-teams__';
+function renderTeamSelect() {
+  const el = $('#practice-team'), cur = store.practice.team || '';
+  const teams = store.roster.teams.map(t => t.name || '').filter(Boolean);
+  const known = teams.some(n => n.toLowerCase() === cur.toLowerCase());
+  el.innerHTML = [
+    !cur ? `<option value="">${teams.length ? '— pick a team —' : '— no teams yet —'}</option>` : '',
+    ...teams.map(n => `<option value="${escHtml(n)}"${known && n.toLowerCase() === cur.toLowerCase() ? ' selected' : ''}>${escHtml(n)}</option>`),
+    cur && !known ? `<option value="${escHtml(cur)}" selected>${escHtml(cur)} (not on the roster)</option>` : '',
+    `<option value="${MANAGE_TEAMS}">＋ Manage teams…</option>`,
+  ].join('');
+  if (known) el.value = teams.find(n => n.toLowerCase() === cur.toLowerCase());
 }
 for (const [id, key] of SHARE_FIELDS) { // stored as lowercased arrays — these people may open the practice
   const el = $(id);
@@ -1574,7 +1592,7 @@ function openTeamMgr() {
   $('#teammgr').hidden = false;
   renderTeamMgr();
 }
-function closeTeamMgr() { $('#teammgr').hidden = true; }
+function closeTeamMgr() { $('#teammgr').hidden = true; renderUI(); } // the team picker and stage box follow the roster
 
 function renderTeamMgr() {
   const t = currentMgrTeam();
@@ -1645,7 +1663,7 @@ $('#team-del').addEventListener('click', () => {
 $('#team-body').addEventListener('input', e => {
   const el = e.target; const t = currentMgrTeam();
   if (!t || !el.dataset.field) return;
-  if (el.dataset.field === 'teamname') { t.name = el.value; store.saveRoster(); return; }
+  if (el.dataset.field === 'teamname') { renameFrom ??= t.name; t.name = el.value; store.saveRoster(); return; }
   const row = el.closest('[data-cid],[data-kid],[data-pid]');
   if (!row) return;
   const obj = row.dataset.cid ? t.coaches.find(c => c.id === row.dataset.cid)
@@ -1655,7 +1673,16 @@ $('#team-body').addEventListener('input', e => {
   obj[el.dataset.field] = el.value;
   store.saveRoster();
 });
-$('#team-body').addEventListener('change', e => { if (e.target.dataset.field === 'teamname') renderTeamMgr(); }); // the team select shows the new name
+let renameFrom = null; // a roster team's name before the current edit: its practices are renamed with it
+$('#team-body').addEventListener('change', e => {
+  if (e.target.dataset.field !== 'teamname') return;
+  const from = renameFrom, to = e.target.value.trim(); renameFrom = null;
+  if (from && to && from.trim().toLowerCase() !== to.toLowerCase()) {
+    for (const p of store.data.practices) if ((p.team || '').trim().toLowerCase() === from.trim().toLowerCase()) { p.team = to; p.updatedAt = Date.now(); store.onSave?.(p); }
+    store.persist();
+  }
+  renderTeamMgr(); // the team select shows the new name
+});
 $('#team-body').addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn?.dataset.act) return;
   const t = currentMgrTeam(); if (!t) return;
@@ -2843,7 +2870,7 @@ function wirePopover(btnSel, popSel, focusSel) {
     if (e.key === 'Escape') { e.stopPropagation(); pop.hidden = true; btn.focus(); }
   });
 }
-wirePopover('#btn-new-practice', '#practice-pop', '#practice-team');
+wirePopover('#btn-new-practice', '#practice-pop', '#practice-date');
 /** Add a drill and open its list row in edit mode, name selected and ready to type over. */
 function addDrillAndRename() {
   finishActive();
@@ -2858,9 +2885,9 @@ function addDrillAndRename() {
 }
 $('#btn-create-practice').addEventListener('click', () => {
   finishActive();
-  store.addPractice(newPractice(store.practice.team || ''));
+  store.addPractice(newPractice(store.practice.team || store.roster.teams[0]?.name || ''));
   sel = null; stopAnim(); renderAll();
-  $('#practice-team').focus(); $('#practice-team').select(); // popover stays open on the fresh practice
+  $('#practice-date').focus(); // popover stays open on the fresh practice
 });
 $('#btn-dup-practice').addEventListener('click', () => {
   const copy = JSON.parse(JSON.stringify(store.practice));

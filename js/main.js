@@ -4,7 +4,7 @@ import { renderObjects, standaloneSVG, SKATER_COLORS, ZONE_COLORS, ARROW_STYLES,
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, cloneObjects, migrateDrill, syncFollowers } from './store.js';
 import { loadConfig, firebaseBackend, createSync } from './cloud.js';
-import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute } from './access.js';
+import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, MAX_VIDEO_SECS, VIDEO_MAX_WIDTH } from './video.js';
@@ -2943,6 +2943,12 @@ const activeDrills = p => p.drills.filter(d => !d.hidden);
 const parseStart = p => /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null;
 const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
 const ampm = m => (Math.floor(m / 60) % 24) < 12 ? 'am' : 'pm';
+/** "Mon, Sep 21" — the viewer always says which day of the week a practice is. */
+const dayDate = (date, long = false) => /^\d{4}-\d{2}-\d{2}$/.test(date || '')
+  ? new Date(date + 'T12:00').toLocaleDateString(undefined, long ? { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric' })
+  : (date || 'no date');
+const startLabel = x => { const m = parseStart(x); return m != null ? `${clock(m)}${ampm(m)}` : ''; };
+const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
 const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '')
   ? new Date(date + 'T12:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
   : (date || '');
@@ -3063,7 +3069,7 @@ function presentHTML(p) {
   return `
     <div class="pr-head">
     <div class="pr-team">${escHtml(p.team || 'Practice')}</div>
-    <div class="pr-meta">${escHtml(longDate(p.date))}${startMin != null ? `; ${clock(startMin)}${ampm(startMin)}` : ''}</div>
+    <div class="pr-meta">${escHtml(dayDate(p.date, true))}${startMin != null ? ` · ${clock(startMin)}${ampm(startMin)}` : ''}</div>
     ${p.coaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
     <div class="pr-meta">${drills.length} drills · ${total} min${startMin != null ? ` · start @ ${clock(startMin)}` : ''}</div>
     </div>
@@ -3153,11 +3159,13 @@ function presentDoc(p) {
   flushViewQueue();
   loadMyFeedback(p);
   clearInterval(nowTimer); nowTimer = setInterval(tickNow, 15000); tickNow();
+  paintWhen();
 }
 let presentPractice = null; // the practice on screen, for the audit log
 /** While the practice is happening (its date is today), the drill on the clock right now says so, with the minutes it has left. */
 let nowTimer = 0;
 function tickNow() {
+  paintWhen(); // midnight moves the calendar on
   const p = presentPractice, now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const min = now.getHours() * 60 + now.getMinutes();
@@ -3486,6 +3494,7 @@ function leavePractice() {
   stopPresentAnims(); presentUnsub?.(); presentUnsub = null; presentKey = null; presentShownId = null; presentPractice = null;
   presentViewIO?.disconnect(); clearTimeout(viewTimer); clearInterval(nowTimer); closeFeedback();
   if (showingPractice) { showingPractice = false; $('#present-body').innerHTML = ''; applyPresentMode(); }
+  paintWhen();
 }
 /** The copy of a practice this device kept from the last visit (rink mode) — shown with a note about why it is not live. */
 function showCachedPractice(pid, note) {
@@ -3535,7 +3544,7 @@ function refreshScreen() {
   applyPresentMode();
   const offlineMsg = `Couldn't connect. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again.${cloudBootError ? ` (${cloudBootError})` : ''}`;
   switch (r.screen) {
-    case 'practice': showPractice(r); break;
+    case 'practice': showPractice(r); paintWhen(); break; // the list may have changed under an open practice (a newer one released)
     case 'list': leavePractice(); showList(r); break;
     case 'request': leavePractice(); showRequest(); break;
     case 'unavailable':
@@ -3606,26 +3615,64 @@ function showPractice(r) {
   });
 }
 
+/** The practices this person can open on /coach or /team: { pid, role, team, date, time }. The planner previewing one practice (`all`) can step through drafts too. */
+function practiceItems(as, { all = false } = {}) {
+  if (who.persona === 'planner') {
+    return store.data.practices.filter(p => all || (as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft'))
+      .map(p => ({ pid: p.id, role: as, team: p.team, date: p.date, time: p.time }));
+  }
+  return Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
+}
+const itemPath = (as, x) => routePath({ view: as === 'coach' && x.role === 'coach' ? 'coach' : 'team', pid: x.pid }); // a coach's parent-only practices open as the team sees them
+
+/**
+ * Which practice is this? The bar under the top bar says team · weekday, date · time, with the earlier / later practice of
+ * that team either side. And when it is not the one the calendar points at — the next practice (today's counts all
+ * day), else the most recent — a red banner says so and jumps there: nobody runs last week's plan by mistake.
+ */
+let whenTarget = null;
+function paintWhen() {
+  const p = showingPractice ? presentPractice : null;
+  const bar = $('#present-when'), warn = $('#present-warn');
+  const was = `${bar.hidden}${warn.hidden}`;
+  if (!p) { bar.hidden = true; warn.hidden = true; whenTarget = null; }
+  else {
+    const sameTeam = x => String(x.team || '').trim().toLowerCase() === String(p.team || '').trim().toLowerCase();
+    const items = practiceItems(presentAudience, { all: true }).filter(sameTeam).sort(byCalendar);
+    const i = items.findIndex(x => x.pid === p.id);
+    const prev = i > 0 ? items[i - 1] : null, next = i >= 0 ? items[i + 1] || null : null;
+    const say = x => `${dayDate(x.date)}${startLabel(x) ? ` · ${startLabel(x)}` : ''}`;
+    bar.hidden = false;
+    $('#when-label').innerHTML = `${escHtml(p.team || 'Practice')} <span class="muted">·</span> ${escHtml(say(p))}`;
+    for (const [btn, x, word] of [[$('#when-prev'), prev, 'Earlier'], [$('#when-next'), next, 'Later']]) {
+      btn.disabled = !x; btn.dataset.to = x ? itemPath(presentAudience, x) : '';
+      btn.title = x ? `${word} practice — ${say(x)}` : `No ${word.toLowerCase()} practice`;
+    }
+    const today = todayISO(), focus = i >= 0 ? calendarFocus(items, today) : null;
+    whenTarget = focus && focus.pid !== p.id ? itemPath(presentAudience, focus) : null;
+    warn.hidden = !whenTarget;
+    if (whenTarget) {
+      const upcoming = (focus.date || '') >= today;
+      warn.textContent = `${byCalendar(p, focus) < 0 ? '⚠ This is an older practice' : '⚠ This is a future practice'} (${dayDate(p.date)}). `
+        + `${upcoming ? (focus.date === today ? 'Today’s practice' : 'The next practice') : 'The most recent practice'} is ${say(focus)} — tap to open it.`;
+    }
+  }
+  if (was !== `${bar.hidden}${warn.hidden}`) layoutPresent();
+}
+$('#when-prev').addEventListener('click', e => { if (e.currentTarget.dataset.to) navigate(e.currentTarget.dataset.to); });
+$('#when-next').addEventListener('click', e => { if (e.currentTarget.dataset.to) navigate(e.currentTarget.dataset.to); });
+$('#when-label').addEventListener('click', () => $('#present-home').click());
+$('#present-warn').addEventListener('click', () => { if (whenTarget) navigate(whenTarget); });
+
 /** /coach and /team: every practice released to this person, upcoming first — one bookmark for the whole season. */
 function showList(r) {
   const as = r.as;
-  let items;
-  if (who.persona === 'planner') {
-    items = store.data.practices.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
-      .map(p => ({ pid: p.id, role: as, team: p.team, date: p.date, time: p.time }));
-  } else {
-    items = Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
-  }
-  const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const byDate = (a, b) => `${a.date || ''} ${a.time || ''}`.localeCompare(`${b.date || ''} ${b.time || ''}`);
-  const upcoming = items.filter(x => (x.date || '') >= today).sort(byDate), past = items.filter(x => (x.date || '') < today).sort(byDate).reverse();
-  const row = x => {
-    const min = parseStart(x);
-    const view = as === 'coach' && x.role === 'coach' ? 'coach' : 'team'; // a coach's parent-only practices open as the team sees them
-    return `<a class="pl-item" href="${routePath({ view, pid: x.pid })}" data-nav>
-      <b>${escHtml(x.team || 'Practice')}</b><span>${escHtml(x.date ? longDate(x.date) : 'no date')}${min != null ? ` · ${clock(min)}${ampm(min)}` : ''}</span>
+  const items = practiceItems(as);
+  const today = todayISO();
+  const upcoming = items.filter(x => (x.date || '') >= today).sort(byCalendar), past = items.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
+  const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
+      <b>${escHtml(x.team || 'Practice')}</b><span>${escHtml(dayDate(x.date, true))}${startLabel(x) ? ` · ${startLabel(x)}` : ''}</span>
       ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
-  };
   $('#present-title').textContent = who.persona === 'planner' ? `Practices — ${as} view` : 'Practices';
   $('#present-gate').hidden = true; presentNote(inboxStale ? 'Offline — this is the list from your last visit.' : '');
   $('#present-body').innerHTML = `<div class="pl-list">

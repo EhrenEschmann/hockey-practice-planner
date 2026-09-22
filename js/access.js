@@ -67,6 +67,14 @@ export function inboxDocs(roster, practices) {
   return out;
 }
 
+/** Calendar order: by date, then start time (undated practices first). */
+export const byCalendar = (a, b) => `${a.date || ''} ${a.time || ''}`.localeCompare(`${b.date || ''} ${b.time || ''}`);
+/** The practice the calendar points at on `today` (YYYY-MM-DD): the next one — today's counts all day — else the most recent. */
+export function calendarFocus(items, today) {
+  const sorted = [...items].sort(byCalendar);
+  return sorted.find(x => (x.date || '') >= today) || sorted.at(-1) || null;
+}
+
 /** Where a URL points: { view: 'root' | 'editor' | 'coach' | 'team' | 'request' | 'unknown', pid, did, legacy }. */
 export function parseRoute({ pathname = '/', hash = '' } = {}) {
   let h = hash;

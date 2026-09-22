@@ -20,6 +20,7 @@ const U = {
 const today = new Date(), iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const drill = (id, name, extra = {}) => ({ id, name, duration: 10, notes: `notes for ${name}`, view: { x: 0, y: 0, w: 200, h: 85 }, objects: [], ...extra });
 const SEED = { ownerUid: 'own', currentId: 'p1', practices: [
+  { id: 'p0', team: 'Mites', date: iso(new Date(+today - 7 * 86400000)), time: '17:00', stage: 'team', updatedAt: 5, drills: [drill('d0', 'Last week')] },
   { id: 'p1', team: 'Mites', date: iso(today), time: '17:00', stage: 'team', updatedAt: 5, sharedWith: ['guest@example.com'], drills: [drill('d1', 'Warmup'), drill('d2', 'Secret', { hidden: true }), drill('d3', 'Scrimmage')] },
   { id: 'p2', team: 'Mites', date: iso(new Date(+today + 86400000)), stage: 'coaches', updatedAt: 5, drills: [drill('d4', 'Edges')] },
   { id: 'p3', team: 'Mites', date: iso(new Date(+today + 2 * 86400000)), stage: 'draft', updatedAt: 5, drills: [drill('d5', 'Draft drill')] }],
@@ -77,8 +78,8 @@ try {
   const pub = cloud.db.get('published/p1');
   ok('the published copy has no access lists, no hidden drill, and names its owner', !('sharedWith' in pub) && !('stage' in pub) && pub.drills.length === 2 && pub.owner === 'own', pub);
   ok('access lists come from the roster (+ extras), lower-cased, coach wins over team', JSON.stringify(cloud.db.get('access/p1')) === JSON.stringify({ stage: 'team', coach: ['coach.a@example.com', 'coachb@example.com', 'guest@example.com'], team: ['parent@example.com'] }), cloud.db.get('access/p1'));
-  ok('each person gets a list document with their persona', cloud.db.get('inbox/coach.a@example.com')?.persona === 'coach' && Object.keys(cloud.db.get('inbox/coach.a@example.com').practices).length === 2
-    && cloud.db.get('inbox/parent@example.com')?.persona === 'team' && Object.keys(cloud.db.get('inbox/parent@example.com').practices).join() === 'p1', cloud.db.get('inbox/parent@example.com'));
+  ok('each person gets a list document with their persona', cloud.db.get('inbox/coach.a@example.com')?.persona === 'coach' && Object.keys(cloud.db.get('inbox/coach.a@example.com').practices).length === 3
+    && cloud.db.get('inbox/parent@example.com')?.persona === 'team' && Object.keys(cloud.db.get('inbox/parent@example.com').practices).sort().join() === 'p0,p1', cloud.db.get('inbox/parent@example.com'));
 
   console.log('anonymous');
   const anon = await browser(null, { signInAs: U.parent });
@@ -92,7 +93,7 @@ try {
   console.log('coach');
   const coachA = await browser(U.coachA);
   await coachA.open('/'); s = await coachA.state();
-  ok('coach on "/" → /coach, a list of their practices, upcoming first', s.path === '/coach' && s.list.join() === '/coach/p1,/coach/p2', s);
+  ok('coach on "/" → /coach, a list of their practices, upcoming first', s.path === '/coach' && s.list.join() === '/coach/p1,/coach/p2,/coach/p0', s);
   await coachA.open('/editor'); s = await coachA.state();
   ok('coach on /editor → /coach; the editor is neither shown nor built', s.path === '/coach' && !s.editor && !s.editorBuilt, s);
   await coachA.open('/coach/p2'); s = await coachA.state();
@@ -116,7 +117,7 @@ try {
   console.log('team');
   const parent = await browser(U.parent);
   await parent.open('/'); s = await parent.state();
-  ok('parent on "/" → /team with the one released practice', s.path === '/team' && s.list.join() === '/team/p1', s);
+  ok('parent on "/" → /team with the released practices', s.path === '/team' && s.list.join() === '/team/p1,/team/p0', s);
   await parent.open('/coach/p1'); s = await parent.state();
   ok('parent on a coach link → the matching team link', s.path === '/team/p1' && s.cards.length === 3 && s.fb === 0, s);
   await parent.ev('history.back()'); await sleep(800); await parent.settle();
@@ -128,6 +129,21 @@ try {
   await parent.open('/#view=own/p1'); ok('old #view= link → the new URL (and on to /team for a parent)', (await parent.path()) === '/team/p1', await parent.path());
   await coachA.open('/#team%3Down%2Fp1'); ok('old percent-encoded #team= link → /team/p1', (await coachA.path()) === '/team/p1', await coachA.path());
   await coachA.open('/coach/p1/extra/bits'); ok('unknown path → "/" → home', (await coachA.path()) === '/coach', await coachA.path());
+
+  console.log('which practice is this: team · weekday, date · time, earlier / later, and the red banner');
+  const when = b => b.ev(`({ label: document.querySelector('#present-when').hidden ? null : document.querySelector('#when-label').textContent, prev: !document.querySelector('#when-prev').disabled, next: !document.querySelector('#when-next').disabled,
+    warn: document.querySelector('#present-warn').hidden ? null : document.querySelector('#present-warn').textContent })`);
+  const wd = d => d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  await coachA.open('/coach/p1'); let w = await when(coachA);
+  ok('today\'s practice: team, weekday + date, start time; earlier and later practices offered; no banner', w.label === `Mites · ${wd(today)} · 5:00pm` && w.prev && w.next && w.warn === null, w);
+  await coachA.click('#when-next'); await coachA.until(`location.pathname === '/coach/p2'`, 'later practice'); await coachA.settle(); w = await when(coachA);
+  ok('a future practice gets the red banner naming today\'s', /future practice/.test(w.warn || '') && w.warn.includes(`Today’s practice is ${wd(today)} · 5:00pm`) && !w.next, w);
+  await coachA.click('#present-warn'); await coachA.until(`location.pathname === '/coach/p1'`, 'banner jumps to the practice on the calendar'); await coachA.settle();
+  await coachA.click('#when-prev'); await coachA.until(`location.pathname === '/coach/p0'`, 'earlier practice'); await coachA.settle(); w = await when(coachA);
+  ok('an older practice gets the red banner too', /older practice/.test(w.warn || '') && !w.prev && w.next, w);
+  await parent.open('/team/p1'); w = await when(parent);
+  ok('a parent steps only through what is released to the team (no peeking at tomorrow\'s)', w.prev && !w.next && w.warn === null, w);
+  await parent.open('/team'); ok('no practice bar or banner on the list', (await when(parent)).label === null && (await when(parent)).warn === null);
 
   console.log('planner: feedback, previews');
   await planner.open('/editor/p1');
@@ -141,7 +157,7 @@ try {
   await planner.open('/coach/p3'); s = await planner.state();
   ok('planner previews a draft as coaches will see it', s.path === '/coach/p3' && s.cards[0] === '1. Draft drill' && /coach view/.test(s.title) && s.fb === 0, s);
   await planner.open('/team'); s = await planner.state();
-  ok('planner previews the team\'s list: released practices only', s.list.join() === '/team/p1', s);
+  ok('planner previews the team\'s list: released practices only', s.list.join() === '/team/p1,/team/p0', s);
 
   console.log('request access');
   const gran = await browser(U.stranger);

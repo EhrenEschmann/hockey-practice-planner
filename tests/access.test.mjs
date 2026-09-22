@@ -1,6 +1,6 @@
 // Unit tests for js/access.js — the redirect matrix (requirements §5) and who-gets-what.   Run: npm run test:unit
 import assert from 'node:assert/strict';
-import { stageOf, accessFor, publishedCopy, inboxDocs, parseRoute, routePath, resolveRoute } from '../js/access.js';
+import { calendarFocus, stageOf, accessFor, publishedCopy, inboxDocs, parseRoute, routePath, resolveRoute } from '../js/access.js';
 
 const at = (pathname, hash = '') => parseRoute({ pathname, hash });
 const go = (path, who, hash) => { const r = resolveRoute(at(path, hash), who); return r.go || `${r.screen}${r.as ? `:${r.as}` : ''}${r.pid ? `:${r.pid}` : ''}`; };
@@ -55,4 +55,10 @@ assert.equal(inbox.get('head@x.io').practices.p1.role, 'coach');
 assert.deepEqual(inbox.get('mom@x.io'), { persona: 'team', practices: { p1: { role: 'team', team: 'mites', date: '2026-09-21', time: '' } } });
 assert.deepEqual(inbox.get('sq@x.io'), { persona: 'coach', practices: { p2: { role: 'coach', team: 'Squirts', date: '', time: '' } } });
 assert.ok(inbox.has('guest@x.io') && !inbox.has(''), 'extras are known people; blank emails are nobody');
+// the practice the calendar points at: the next one (today's counts all day), else the most recent
+const cal = [{ pid: 'old', date: '2026-09-14', time: '17:00' }, { pid: 'am', date: '2026-09-21', time: '07:00' }, { pid: 'pm', date: '2026-09-21', time: '17:00' }, { pid: 'next', date: '2026-09-23' }];
+assert.equal(calendarFocus(cal, '2026-09-21').pid, 'am');
+assert.equal(calendarFocus(cal, '2026-09-22').pid, 'next');
+assert.equal(calendarFocus(cal, '2026-10-01').pid, 'next', 'nothing upcoming: the most recent');
+assert.equal(calendarFocus([], '2026-10-01'), null);
 console.log('access.js: all assertions passed');

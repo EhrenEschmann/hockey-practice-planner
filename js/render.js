@@ -305,8 +305,8 @@ const draw = {
   coach(o, sel, opts) {
     const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.black;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
-    const h = sel ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects)
-    const wps = opts.numberWaypoints ? wpLabels(o) : '';
+    const h = sel && opts.showPaths !== false ? handles(o.path || []) : ''; // the path itself draws in the underlay (see renderObjects); hidden paths hide their waypoints too
+    const wps = opts.numberWaypoints && opts.showPaths !== false ? wpLabels(o) : '';
     // Tackle pad: a padded bumper held out in the facing direction.
     const hd = o.pad && opts.sim ? opts.sim.skaterPose(o.id, 0).heading * 180 / Math.PI : 0;
     const pad = o.pad ? `<g transform="rotate(${n(hd)})"><rect x="1.9" y="-1.8" width="1.15" height="3.6" rx=".55" fill="#c05621" stroke="#7a3a12" stroke-width=".22"/></g>` : '';
@@ -326,12 +326,12 @@ const draw = {
 
   skater(o, sel, opts) {
     const color = SKATER_COLORS[o.color] || o.color || SKATER_COLORS.blue;
-    const h = sel && !o.follow ? handles(o.path || []) : ''; // path draws in the underlay; a follower's route is edited via its leader
+    const h = sel && !o.follow && opts.showPaths !== false ? handles(o.path || []) : ''; // path draws in the underlay; a follower's route is edited via its leader; hidden paths hide their waypoints too
     const body = o.role === 'G'
       ? `<rect class="body" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".7" fill="${color}"/>`
       : `<circle class="body" r="1.75" fill="${color}"/>`;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
-    const wps = opts.numberWaypoints ? wpLabels(o) : '';
+    const wps = opts.numberWaypoints && opts.showPaths !== false ? wpLabels(o) : '';
     const heading0 = opts.sim ? opts.sim.skaterPose(o.id, 0).heading * 180 / Math.PI : 0; // body facing: path tangent (flipped when backward), or facing when standing
     return `<g class="obj skater" data-id="${o.id}">${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">

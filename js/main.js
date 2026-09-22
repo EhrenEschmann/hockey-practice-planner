@@ -1471,12 +1471,54 @@ $('#btn-undo').addEventListener('click', doUndo);
 $('#btn-redo').addEventListener('click', doRedo);
 
 // ---------- practice / plan sidebar ----------
+// The practice picker: the last six practices (newest first) with the one that is open marked, its stage and any
+// unread coach feedback, and the way to create a new practice — team, date and time first, then it exists.
+const PLIST_N = 6;
+let plistAll = false;
 function renderPracticeSelect() {
-  const s = $('#practice-select');
-  const mark = p => `${{ draft: '', coaches: ' · with coaches', team: ' · released' }[stageOf(p)]}${openFeedbackFor(p.id).length ? ` · 💬${openFeedbackFor(p.id).length}` : ''}`;
-  s.innerHTML = store.data.practices.map(p => `<option value="${p.id}">${escHtml(practiceLabel(p) + mark(p))}</option>`).join('');
-  s.value = store.data.currentId;
+  const cur = store.practice;
+  $('#plist-current').textContent = practiceLabel(cur) + (openFeedbackFor(cur.id).length ? ` · 💬${openFeedbackFor(cur.id).length}` : '');
+  if ($('#plist-pop').hidden) return;
+  const all = [...store.data.practices].sort((a, b) => byCalendar(b, a));
+  const shown = plistAll ? all : all.slice(0, PLIST_N);
+  const stName = { draft: 'draft', coaches: 'with coaches', team: 'released' };
+  $('#plist-items').innerHTML = shown.map(p => {
+    const st = stageOf(p), fb = openFeedbackFor(p.id).length;
+    return `<button class="plist-item${p.id === cur.id ? ' current' : ''}" data-pid="${p.id}" title="${escHtml(practiceLabel(p))}">
+      <b>${escHtml(p.team || 'No team')}</b><span class="when">${escHtml(whenLabel(p))}</span>
+      ${fb ? `<span class="fb">💬${fb}</span>` : ''}<span class="st ${st}">${stName[st]}</span></button>`;
+  }).join('');
+  const more = $('#plist-more');
+  more.hidden = all.length <= PLIST_N;
+  more.textContent = plistAll ? `Show the last ${PLIST_N} only` : `Show all ${all.length} practices…`;
 }
+$('#plist-items').addEventListener('click', e => {
+  const b = e.target.closest('.plist-item'); if (!b) return;
+  finishActive(); store.switchPractice(b.dataset.pid); sel = null; stopAnim();
+  $('#plist-pop').hidden = true; renderAll();
+});
+$('#plist-more').addEventListener('click', () => { plistAll = !plistAll; renderPracticeSelect(); });
+$('#plist-create').addEventListener('click', () => {
+  const f = $('#plist-form'), teams = store.roster.teams.map(t => t.name || '').filter(Boolean);
+  if (!teams.length) { $('#plist-pop').hidden = true; alert('Add a team under 👥 Team first — a practice belongs to a team, and the roster is who gets it.'); openTeamMgr(); return; }
+  const cur = store.practice.team || '';
+  $('#new-team').innerHTML = teams.map(n => `<option value="${escHtml(n)}"${n.toLowerCase() === cur.toLowerCase() ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
+  $('#new-date').value = todayISO(); $('#new-time').value = store.practice.time || '';
+  f.hidden = false; $('#plist-create').hidden = true;
+  $('#new-date').focus();
+});
+$('#plist-cancel').addEventListener('click', () => { $('#plist-form').hidden = true; $('#plist-create').hidden = false; });
+$('#plist-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const team = $('#new-team').value, date = $('#new-date').value, time = $('#new-time').value;
+  if (!team || !date || !time) return; // `required` — the browser has already said which
+  finishActive();
+  const p = newPractice(team); p.date = date; p.time = time;
+  store.addPractice(p);
+  sel = null; stopAnim();
+  $('#plist-form').hidden = true; $('#plist-create').hidden = false; $('#plist-pop').hidden = true;
+  renderAll();
+});
 const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const PRACTICE_FIELDS = [['#practice-team', 'team'], ['#practice-date', 'date'], ['#practice-time', 'time'], ['#practice-coaches', 'coaches']];
@@ -2851,7 +2893,6 @@ function focusProp(key) {
 }
 
 // ---------- practice library / import / export ----------
-$('#practice-select').addEventListener('change', e => { finishActive(); store.switchPractice(e.target.value); sel = null; stopAnim(); renderAll(); });
 // Details tucked behind buttons: "+ Practice" (topbar) and "+ Drill" (viewbar) each open a popover.
 const popovers = [];
 function closePopovers() { for (const pop of popovers) pop.hidden = true; }
@@ -2871,6 +2912,7 @@ function wirePopover(btnSel, popSel, focusSel) {
   });
 }
 wirePopover('#btn-new-practice', '#practice-pop', '#practice-date');
+wirePopover('#btn-practices', '#plist-pop', '#plist-create');
 /** Add a drill and open its list row in edit mode, name selected and ready to type over. */
 function addDrillAndRename() {
   finishActive();
@@ -2883,12 +2925,6 @@ function addDrillAndRename() {
   const el = $('#drill-list li.editing .dname');
   if (el) { el.focus(); el.select(); }
 }
-$('#btn-create-practice').addEventListener('click', () => {
-  finishActive();
-  store.addPractice(newPractice(store.practice.team || store.roster.teams[0]?.name || ''));
-  sel = null; stopAnim(); renderAll();
-  $('#practice-date').focus(); // popover stays open on the fresh practice
-});
 $('#btn-dup-practice').addEventListener('click', () => {
   const copy = JSON.parse(JSON.stringify(store.practice));
   copy.id = uid(); copy.date = new Date().toISOString().slice(0, 10);

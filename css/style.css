@@ -49,7 +49,27 @@ textarea{resize:vertical}
 .ctx-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);width:56px;flex:none}
 .ctx-unit{color:var(--muted);font-size:12px}
 .ctx-pos{font-variant-numeric:tabular-nums;color:var(--muted);min-width:32px;text-align:center}
-#practice-wrap{position:relative}
+#plist-wrap,#practice-wrap{position:relative}
+#btn-practices{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#plist-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:320px;max-height:min(78vh,700px);overflow-y:auto;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+#plist-pop h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+#plist-items{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.plist-item{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;padding:7px 9px;background:var(--panel);border:1px solid var(--border);border-radius:8px}
+.plist-item.current{border-color:var(--accent);background:#1e2a44}
+.plist-item b{flex:none}
+.plist-item .when{flex:1;min-width:0;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.plist-item .st{flex:none;font-size:11px;color:var(--muted)}
+.plist-item .st.team{color:#34d399}
+.plist-item .st.coaches{color:#e6c15a}
+.plist-item .fb{flex:none;font-size:11px;color:var(--accent-2)}
+#plist-more{background:transparent;border-color:transparent;color:var(--accent-2);font-size:12px;padding:2px 4px;margin-bottom:6px}
+#plist-more[hidden]{display:none}
+#plist-create{width:100%}
+#plist-form{margin-top:10px;border-top:1px solid var(--border);padding-top:10px}
+#plist-form[hidden]{display:none}
+#plist-form .field input,#plist-form .field select{width:100%}
+#plist-form .row{display:flex;gap:6px}
+#plist-form .row button{flex:1}
 #practice-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:250px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
 #practice-pop{width:300px;max-height:min(78vh,700px);overflow-y:auto}
 #practice-pop h3{margin:14px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}

@@ -50,7 +50,7 @@ async function browser(user, { signInAs = null, seed = null } = {}) {
     settle: async () => { for (let i = 0; i < 60; i++) { await sleep(150); if (await ev(`!!document.querySelector('#present') && !['Checking your sign-in…','Loading…'].includes(document.querySelector('#present-gate').hidden ? '' : document.querySelector('#present-msg').textContent)`)) break; } await sleep(250); },
     until: async (expr, what, ms = 6000) => { for (let t = 0; t < ms; t += 150) { if (await ev(expr)) return true; await sleep(150); } fail(`timed out: ${what}`); return false; },
     path: () => ev('location.pathname + location.hash'),
-    state: () => ev(`({ path: location.pathname, editor: getComputedStyle(document.querySelector('#layout')).display !== 'none', editorBuilt: document.querySelector('#practice-select').options.length > 0,
+    state: () => ev(`({ path: location.pathname, editor: getComputedStyle(document.querySelector('#layout')).display !== 'none', editorBuilt: !!document.querySelector('#plist-current').textContent,
       msg: document.querySelector('#present-gate').hidden || document.querySelector('#present').hidden ? null : document.querySelector('#present-msg').textContent,
       title: document.querySelector('#present-title').textContent, cards: [...document.querySelectorAll('#present-body .pr-drill header b')].map(x => x.textContent),
       list: [...document.querySelectorAll('#present-body .pl-item')].map(x => x.getAttribute('href')), fb: document.querySelectorAll('#present-body .pr-fb').length,
@@ -152,7 +152,7 @@ try {
   console.log('planner: feedback, previews');
   await planner.open('/editor/p1');
   await planner.until(`document.querySelector('#btn-feedback').textContent.includes('1')`, 'feedback badge');
-  ok('planner sees unresolved feedback on the practice and on the drill', await planner.ev(`document.querySelector('#drill-list .dfb')?.textContent === '💬1' && document.querySelector('#practice-select').selectedOptions[0].textContent.includes('💬1')`));
+  ok('planner sees unresolved feedback on the practice and on the drill', await planner.ev(`document.querySelector('#drill-list .dfb')?.textContent === '💬1' && document.querySelector('#plist-current').textContent.includes('💬1')`));
   await planner.click('#btn-feedback');
   ok('feedback panel shows who said what, by drill', await planner.ev(`document.querySelector('#feedback-body').textContent.includes('Too long for mites') && document.querySelector('#feedback-body').textContent.includes('Coach A') && document.querySelector('.fb-group h3').textContent.includes('1. Warmup')`));
   await planner.click('#feedback-body [data-fact="resolve"]');

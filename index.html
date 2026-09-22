@@ -16,9 +16,24 @@
 
 <header id="topbar">
   <div class="brand">🏒 Practice Planner</div>
-  <select id="practice-select" title="Switch practice"></select>
+  <div id="plist-wrap">
+    <button id="btn-practices" title="Your practices — switch, or create a new one"><span id="plist-current"></span> ▾</button>
+    <div id="plist-pop" hidden>
+      <h3>Practices</h3>
+      <div id="plist-items"></div>
+      <button id="plist-more" class="small-link" hidden></button>
+      <button id="plist-create" class="primary">＋ Create practice</button>
+      <form id="plist-form" hidden>
+        <h3>New practice</h3>
+        <label class="field"><span>Team</span><select id="new-team" required></select></label>
+        <label class="field"><span>Date</span><input id="new-date" type="date" required></label>
+        <label class="field"><span>Start time</span><input id="new-time" type="time" required></label>
+        <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="plist-cancel">Cancel</button></div>
+      </form>
+    </div>
+  </div>
   <div id="practice-wrap">
-    <button id="btn-new-practice" title="Practice details / new practice">+ Practice</button>
+    <button id="btn-new-practice" title="Details of the practice that is open: team, date, time, coaches, sharing">✎ Practice</button>
     <div id="practice-pop" hidden>
       <h3>Current practice</h3>
       <label class="field"><span>Team</span><select id="practice-team" title="Which team this practice is for — the roster under 👥 Team decides who can open it"></select></label>
@@ -46,7 +61,6 @@
       </div>
       <h3>Who has looked</h3>
       <button id="btn-views" title="The audit log: every drill view and play by the coaches and families you shared this practice with, with names and times">👁 Views log</button>
-      <button id="btn-create-practice" class="primary">＋ Create new practice</button>
     </div>
   </div>
   <button id="btn-team" title="Manage your team: coaches with emails, players with parent / grandparent contacts — the roster decides who can open released practices. Access requests show up here.">👥 Team</button>

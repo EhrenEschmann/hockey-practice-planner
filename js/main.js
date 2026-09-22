@@ -3,7 +3,7 @@ import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
 import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, usDate, cloneObjects, migrateDrill, syncFollowers } from './store.js';
-import { loadConfig, firebaseBackend, createSync } from './cloud.js';
+import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
@@ -3689,7 +3689,8 @@ function refreshScreen() {
     case 'signin':
       if (route.pid && showCachedPractice(route.pid, 'sign in when online to get updates.')) break;
       leavePractice(); $('#present-title').textContent = '';
-      presentMsg(signInError ? `Sign-in failed: ${signInError}` : route.view === 'editor' || route.view === 'root'
+      presentMsg(signInError ? `Sign-in failed: ${signInError}` : inAppBrowser() ? `This link opened inside another app's browser, where Google sign-in doesn't work. Open it in ${/iPhone|iPad/.test(navigator.userAgent) ? 'Safari' : 'Chrome'} instead — tap the ⋯ or share button and choose “Open in browser”, or copy the address: ${location.origin}${location.pathname}`
+        : route.view === 'editor' || route.view === 'root'
         ? 'Sign in to continue.' : 'Practice plans are shared with the team. Sign in with the Google account your coach has on the team list.', { signIn: true });
       break;
     case 'offline':
@@ -4205,7 +4206,14 @@ const openPresentation = view => window.open(`${location.origin}${routePath({ vi
 $('#btn-present').addEventListener('click', () => openPresentation('coach'));
 $('#btn-open-team').addEventListener('click', () => openPresentation('team'));
 $('#btn-open-coach').addEventListener('click', () => openPresentation('coach'));
-$('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${e?.message || e}`, { signIn: true })));
+$('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true })));
+/** A page inside another app (a team-chat app's built-in browser): Google refuses to sign anyone in there. */
+function inAppBrowser() {
+  const ua = navigator.userAgent || '';
+  if (/\bwv\b|; wv\)/.test(ua)) return true;                                   // Android WebView
+  if (/FBAN|FBAV|Instagram|Line\/|Snapchat|Messenger|GSA\//.test(ua)) return true; // apps known to embed one
+  return /iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua); // iOS: any browser but Safari / real browser apps
+}
 $('#present-tolist').addEventListener('click', e => navigate(e.currentTarget.dataset.to || '/'));
 $('#present-reload').addEventListener('click', () => location.reload()); // a failed module import stays failed for the page's lifetime: start over
 /** Copy one of the two links: /coach/<id> or /team/<id>. Who can open it is decided by the stage and the roster, not by having the link. */
@@ -4371,7 +4379,7 @@ function paintInboxButtons() {
     onRoster: () => { if (!$('#teammgr').hidden) renderTeamMgr(); }, // roster edited on another device
   });
   cloudSync = sync; cloudBackend = backend; cloudBoot = 'ready';
-  $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
+  $('#btn-signin').addEventListener('click', () => sync.signIn().catch(e => renderCloudStatus(sync, 'error', friendlyAuthError(e))));
   $('#btn-signout').addEventListener('click', () => sync.signOut().catch(e => renderCloudStatus(sync, 'error', e?.message || String(e))));
   renderCloudStatus(sync, 'signedout');
   refreshScreen();

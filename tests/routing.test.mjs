@@ -160,7 +160,8 @@ try {
   ok('pressing ▶ logs a play', viewsOf('coach.a@example.com').some(v => v.action === 'play' && v.drillId === 'd1'), viewsOf('coach.a@example.com'));
   await coachA.click('#present-body .pr-react-btn'); await sleep(400);
   ok('a reaction after practice is logged', viewsOf('coach.a@example.com').some(v => v.action === 'react' && v.emoji === '😀'), viewsOf('coach.a@example.com'));
-  since = Date.now(); await parent.ev(`localStorage.setItem('hpp.viewmode', 'focus')`); await parent.open('/team/p1'); await sleep(2600); // focus mode: the one card on screen
+  since = Date.now(); await parent.ev(`localStorage.setItem('hpp.viewmode', 'focus')`); await parent.open('/team/p1');
+  await parent.ev(`document.querySelector('#present-jump').click(); document.querySelector('#present-picker-list li[data-i="0"]').click()`); await sleep(2600); // focus mode: the card on screen (after 5 PM the link lands on Dismissal, so pick the first drill)
   ok('a parent in rink mode logs the drill on screen, as the team', viewsOf('parent@example.com').some(v => v.action === 'view' && v.audience === 'team'), viewsOf('parent@example.com'));
   await parent.click('#present-next'); await sleep(2600);
   ok('…and the next one after swiping', viewsOf('parent@example.com').filter(v => v.action === 'view').length === 2, viewsOf('parent@example.com'));

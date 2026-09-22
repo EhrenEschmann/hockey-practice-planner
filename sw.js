@@ -27,6 +27,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  if (req.url.includes('/__/')) return; // Firebase's own pages on this site (the sign-in handler): never cached, never served from cache
   const sameOrigin = req.url.startsWith(self.location.origin);
   if (!sameOrigin && !RUNTIME_HOSTS.some(h => req.url.startsWith(h))) return; // auth/Firestore traffic passes straight through
   e.respondWith(networkFirst(req));

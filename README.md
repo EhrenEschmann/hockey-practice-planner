@@ -20,7 +20,7 @@ Practices auto-save to Firebase so they follow you between devices. Without a co
 2. Enable **Authentication → Sign-in method → Google**.
 3. Create a **Firestore** database and paste [firestore.rules](firestore.rules) as its rules (only the planner emails listed in `isPlanner()` can write anything; coaches and families read only the published copy of practices released to them — see **Sharing** below).
 4. `cp js/firebase-config.example.js js/firebase-config.js` and paste the config in. (The file is git-ignored; putting it at the project root as `firebase-config.js` works too.)
-5. Reload: a **Sign in** button appears in the top bar.
+5. Reload: a **Sign in** button appears in the top bar. On the live site sign-in goes through the auth handler Firebase Hosting serves on the site's own domain (`/__/auth/`), so Safari and in-app browsers that wall off third-party storage don't lose it halfway; phones sign in with a full-page redirect, desktops with a popup. A link opened inside another app's built-in browser (a team-chat app) can't sign in at all — Google refuses embedded browsers — and the page says to open it in Safari or Chrome.
 
 **Sharing: who sees what, and where** (the full spec is [docs/requirements-routing-auth.md](docs/requirements-routing-auth.md)).
 

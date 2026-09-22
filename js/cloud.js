@@ -37,16 +37,32 @@ export async function firebaseBackend(config) {
   const [{ initializeApp }, auth, fs] = await Promise.all([
     import(`${SDK}firebase-app.js`), import(`${SDK}firebase-auth.js`), import(`${SDK}firebase-firestore.js`),
   ]);
+  // Sign-in runs through Firebase's auth handler page. Served from this very site (Firebase Hosting has it at
+  // /__/auth/), it is first-party, so browsers that wall off third-party storage (Safari, in-app browsers) don't
+  // lose the sign-in state halfway — the "missing initial state" error. The config's own authDomain is only used
+  // when the app is served from somewhere else (a dev server, say).
+  if (location.protocol === 'https:' && /\.(web\.app|firebaseapp\.com)$/.test(location.host)) config = { ...config, authDomain: location.host };
   const app = initializeApp(config);
   const a = auth.getAuth(app);
+  // A redirect sign-in comes back here: a failure on the way (or a cancelled chooser) is reported like any other.
+  let authErr = null, onAuthErr = null;
+  auth.getRedirectResult(a).catch(e => { authErr = e; onAuthErr?.(e); });
   const db = fs.getFirestore(app);
   const col = uid => fs.collection(db, 'users', uid, 'practices');
   return {
     onUser(cb) { return auth.onAuthStateChanged(a, u => cb(u ? { uid: u.uid, email: u.email || '', name: u.displayName || u.email || 'Signed in' } : null)); },
+    onAuthError(cb) { onAuthErr = cb; if (authErr) cb(authErr); },
     async signIn() {
       const provider = new auth.GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' }); // always offer the account chooser, so signing out really lets someone switch emails
-      await auth.signInWithPopup(a, provider);
+      // Phones: a full-page redirect (a popup there is a second tab that may never make it back). Desktops: a popup,
+      // which keeps the page — and if the popup is blocked, the redirect instead.
+      if (matchMedia('(pointer: coarse)').matches) return auth.signInWithRedirect(a, provider);
+      try { await auth.signInWithPopup(a, provider); }
+      catch (e) {
+        if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(e?.code)) return auth.signInWithRedirect(a, provider);
+        throw e;
+      }
     },
     async signOut() { await auth.signOut(a); },
     async load(uid) { return (await fs.getDocs(col(uid))).docs.map(d => d.data()); },
@@ -141,6 +157,16 @@ export async function firebaseBackend(config) {
       }, () => { /* roster sync is best-effort; practice sync reports errors */ });
     },
   };
+}
+
+/** Firebase's auth errors, in words a parent can act on. */
+export function friendlyAuthError(e) {
+  const code = e?.code || '';
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request' || code === 'auth/user-cancelled') return 'Sign-in was cancelled.';
+  if (code === 'auth/network-request-failed') return 'No connection — check your internet and try again.';
+  if (code === 'auth/unauthorized-domain') return 'This address is not set up for sign-in yet (the site\'s domain must be authorised in Firebase).';
+  if (code === 'auth/missing-initial-state' || /missing initial state/i.test(e?.message || '')) return 'The browser lost the sign-in halfway (it blocks storage for this site). Open the link in Safari or Chrome itself and try again.';
+  return e?.message || String(e);
 }
 
 /**
@@ -309,6 +335,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
   }
 
   // ----- auth -----
+  backend.onAuthError?.(e => status('error', friendlyAuthError(e)));
   backend.onUser(async u => {
     unsub?.(); unsub = null;
     unsubRoster?.(); unsubRoster = null;

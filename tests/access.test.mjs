@@ -1,6 +1,7 @@
 // Unit tests for js/access.js — the redirect matrix (requirements §5) and who-gets-what.   Run: npm run test:unit
 import assert from 'node:assert/strict';
 import { calendarFocus, stageOf, accessFor, publishedCopy, inboxDocs, parseRoute, routePath, resolveRoute } from '../js/access.js';
+import { newPractice, newDrill, practiceLabel, docTitle, itemNoun, docNoun, isGame } from '../js/store.js';
 
 const at = (pathname, hash = '') => parseRoute({ pathname, hash });
 const go = (path, who, hash) => { const r = resolveRoute(at(path, hash), who); return r.go || `${r.screen}${r.as ? `:${r.as}` : ''}${r.pid ? `:${r.pid}` : ''}`; };
@@ -55,6 +56,20 @@ assert.equal(inbox.get('head@x.io').practices.p1.role, 'coach');
 assert.deepEqual(inbox.get('mom@x.io'), { persona: 'team', practices: { p1: { role: 'team', stage: 'team', team: 'mites', date: '2026-09-21', time: '' } } });
 assert.deepEqual(inbox.get('sq@x.io'), { persona: 'coach', practices: { p2: { role: 'coach', stage: 'coaches', team: 'Squirts', date: '', time: '' } } });
 assert.ok(inbox.has('guest@x.io') && !inbox.has(''), 'extras are known people; blank emails are nobody');
+// a game is a practice document with kind + opponent: it publishes the same way and its inbox card says so
+const game = newPractice('Mites', 'game', 'Hawks'); game.stage = 'team'; game.date = '2026-10-01';
+assert.ok(isGame(game) && !isGame(p1));
+assert.equal(docTitle(game), 'Mites vs Hawks'); assert.equal(docTitle(p1), 'mites');
+assert.equal(practiceLabel(game), 'Mites vs Hawks — 10/01/2026');
+assert.equal(itemNoun(game), 'coaching point'); assert.equal(docNoun(game), 'game'); assert.equal(itemNoun(p1), 'drill');
+assert.equal(game.drills[0].name, 'Coaching point 1');
+assert.equal(game.drills[0].objects.filter(o => o.type === 'net').length, 2, 'a coaching point starts cross-ice with both nets in place');
+assert.equal(game.drills[0].view.w, 106, 'half ice');
+assert.equal(newDrill(3).name, 'Drill 3'); assert.equal(newDrill(3, 'game').name, 'Coaching point 3');
+const gameInbox = inboxDocs(roster, [game]);
+assert.deepEqual(gameInbox.get('mom@x.io').practices[game.id], { role: 'team', stage: 'team', team: 'Mites', date: '2026-10-01', time: '', kind: 'game', opponent: 'Hawks' });
+const gCopy = publishedCopy(game, 'u1');
+assert.equal(gCopy.kind, 'game'); assert.equal(gCopy.opponent, 'Hawks');
 // the practice the calendar points at: the next one (today's counts all day), else the most recent
 const cal = [{ pid: 'old', date: '2026-09-14', time: '17:00' }, { pid: 'am', date: '2026-09-21', time: '07:00' }, { pid: 'pm', date: '2026-09-21', time: '17:00' }, { pid: 'next', date: '2026-09-23' }];
 assert.equal(calendarFocus(cal, '2026-09-21').pid, 'am');

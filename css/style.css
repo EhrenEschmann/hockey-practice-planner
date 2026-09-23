@@ -64,7 +64,7 @@ textarea{resize:vertical}
 .plist-item .fb{flex:none;font-size:11px;color:var(--accent-2)}
 #plist-more{background:transparent;border-color:transparent;color:var(--accent-2);font-size:12px;padding:2px 4px;margin-bottom:6px}
 #plist-more[hidden]{display:none}
-#plist-create{width:100%}
+.plist-new{display:flex;gap:6px}.plist-new button{flex:1}
 #plist-form{margin-top:10px;border-top:1px solid var(--border);padding-top:10px}
 #plist-form[hidden]{display:none}
 #plist-form .field input,#plist-form .field select{width:100%}
@@ -190,6 +190,7 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 .intro-box .row button{font-size:12px}
 .intro-box p{margin:8px 0 0}
 .intro-warn{margin-top:6px;line-height:1.35}
+.intro-sep{border:0;border-top:1px solid var(--border);margin:10px 0 8px}
 /* the intro / video buttons: quiet line icons like the rest of the row; a tint only once there is something recorded */
 #drill-list li button.has-intro{color:#f59e0b}
 #drill-list li button.has-video{color:#a78bfa}

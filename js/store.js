@@ -7,19 +7,39 @@ const UNDO_LIMIT = 100;
 
 export const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
 
-export function newDrill(n = 1) {
+/**
+ * Two kinds of document share everything (drills, sharing, presentation): a practice, and a game — game-prep
+ * material whose "drills" are coaching points. `kind` is absent on a practice; a game has kind 'game' and an opponent.
+ */
+export const isGame = p => p?.kind === 'game';
+export const docNoun = p => (isGame(p) ? 'game' : 'practice');
+export const itemNoun = p => (isGame(p) ? 'coaching point' : 'drill');
+/** The document's name: the team, or for a game "Team vs Opponent". Works on inbox cards too (they carry the same fields). */
+export const docTitle = p => (isGame(p) ? `${p.team || 'Game'} vs ${p.opponent || '?'}` : (p.team || 'Practice'));
+
+export function newDrill(n = 1, kind = null) {
+  if (kind === 'game') return newCoachingPoint(n);
   // Drills start with clean ice — add nets with the Net tool (N) where the drill needs them.
   return { id: uid(), name: `Drill ${n}`, duration: 10, notes: '', view: { ...VIEWS.full }, objects: [] };
 }
+/** A game's coaching point: half ice, set up cross-ice for mites with the two nets in place (nets face across the rink). */
+export function newCoachingPoint(n = 1) {
+  const x = 50; // the middle of the left half, where cross-ice nets sit
+  return { id: uid(), name: `Coaching point ${n}`, duration: 0, notes: '', view: { ...VIEWS.leftHalf }, objects: [
+    { id: uid(), type: 'net', x, y: 6, rot: 90 },
+    { id: uid(), type: 'net', x, y: 79, rot: 270 },
+  ] };
+}
 
-export function newPractice(team = '') {
-  return { id: uid(), team, date: new Date().toISOString().slice(0, 10), drills: [newDrill(1)] };
+export function newPractice(team = '', kind = null, opponent = '') {
+  const base = { id: uid(), team, date: new Date().toISOString().slice(0, 10), drills: [newDrill(1, kind)] };
+  return kind === 'game' ? { ...base, kind: 'game', opponent } : base;
 }
 
 /** How a practice is shown anywhere it needs a label. */
 /** Dates are shown US style, mm/dd/yyyy (stored as yyyy-mm-dd, which sorts). */
 export const usDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? `${date.slice(5, 7)}/${date.slice(8, 10)}/${date.slice(0, 4)}` : (date || '');
-export function practiceLabel(p) { return `${p.team || 'No team'} — ${usDate(p.date) || 'no date'}`; }
+export function practiceLabel(p) { return `${isGame(p) ? docTitle(p) : (p.team || 'No team')} — ${usDate(p.date) || 'no date'}`; }
 
 /**
  * Skaters can share a route: a skater with `follow` skates another skater's path. The route is

@@ -150,6 +150,15 @@ body.panning #rink{cursor:grabbing}
 body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 
 #sidebar{background:var(--panel);border-left:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column}
+/* wide video editing: the rink, toolbar and Selection step aside; the drills pane (with its open 🎬 row) fills the window */
+body.video-wide #layout{grid-template-columns:1fr}
+body.video-wide #toolbar,body.video-wide #stage,body.video-wide #props,body.video-wide #viewbar{display:none}
+body.video-wide #sidebar{border-left:none}
+body.video-wide #plan{flex:1 1 auto}
+body.video-wide #drill-list li.video-editor .intro-box{max-width:1100px;margin:0 auto}
+body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(100vh - 330px);object-fit:contain}
+.vid-head{justify-content:space-between;margin-bottom:6px}
+.vid-wide{font-size:12px;padding:2px 8px}
 #plan{flex:1 1 0;min-height:0;overflow-y:auto}
 .h2-side{display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0}
 #plan-pin{padding:0 6px;font-size:12px;line-height:1.5}

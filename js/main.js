@@ -1909,6 +1909,22 @@ async function uploadPendingIntros() {
 }
 const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — deploy the latest firestore.rules, then Upload now' : '';
 let videoOpenFor = null; // drill whose 🎬 video row is open in the Drills panel
+// Wide video editing: while a 🎬 row is open, the rink and toolbar can step aside so the sidebar gets the whole window. Remembered per browser.
+const VIDEO_WIDE_KEY = 'hpp.ui.videoWide';
+let videoWide = false;
+try { videoWide = localStorage.getItem(VIDEO_WIDE_KEY) === '1'; } catch { /* stay narrow */ }
+function setVideoWide(on) {
+  videoWide = on;
+  try { localStorage.setItem(VIDEO_WIDE_KEY, on ? '1' : '0'); } catch { /* fine */ }
+  renderPlan();
+}
+/** The wide layout applies only while a video row is open; closing the row (or switching drills) brings the rink back. */
+function applyVideoWide() {
+  const on = videoWide && !!videoOpenFor && store.practice.drills.some(d => d.id === videoOpenFor);
+  if (document.body.classList.contains('video-wide') === on) return;
+  document.body.classList.toggle('video-wide', on);
+  drawSelection(); // the canvas changed size
+}
 let vidPending = null;   // a dropped file being prepared: { drillId, file, url, duration, width, height, audio, vo, voSecs, voFit: 'post'|'pre', voRec, voTimer, encoding, error }
 const fmtSecs = t => Number.isFinite(+t) ? `${Math.floor(+t / 60)}:${String(Math.round(+t % 60)).padStart(2, '0')}` : '?:??';
 /** The span a staged video will keep: [start, end) clipped to the file. */
@@ -1988,6 +2004,7 @@ async function videoAction(act, li) {
   const pid = store.practice.id;
   const vp = vidPending?.drillId === d.id ? vidPending : null;
   if (act === 'pick') { li.querySelector('.vid-file')?.click(); return; }
+  if (act === 'wide') { setVideoWide(!videoWide); return; }
   if ((act === 'setstart' || act === 'setend') && vp) {
     const t = li.querySelector('.vid-preview')?.currentTime || 0;
     if (act === 'setstart') { vp.start = Math.round(t * 10) / 10; if (Number.isFinite(vp.end) && vp.end <= vp.start + 0.5) vp.end = NaN; }
@@ -2230,6 +2247,7 @@ function narrationHTML(d) {
 }
 function renderPlan() {
   const p = store.practice;
+  applyVideoWide();
   const total = activeDrills(p).reduce((a, d) => a + (+d.duration || 0), 0);
   const hiddenCount = p.drills.length - activeDrills(p).length;
   const startMin = parseStart(p), game = isGame(p);
@@ -2333,6 +2351,7 @@ function renderPlan() {
       : '';
     const dropHTML = vp ? '' : `<div class="vid-drop">📼 ${up ? 'Drop a new video here to replace it' : 'Drop a video here (any length — trim it or watch the size estimate below)'} or <button data-vact="pick">choose a file</button><input type="file" class="vid-file" accept="video/*,.mov,.mp4,.webm" hidden></div>`;
     const video = videoOpenFor === d.id ? `<li class="video-editor"><div class="intro-box">
+      <div class="row vid-head"><span class="muted small">🎬 Video for this ${itemNoun(p)}</span><button data-vact="wide" class="vid-wide" title="${videoWide ? 'Bring the rink back' : 'Hide the rink so the video editor gets the whole window'}">${videoWide ? '⤡ Show rink' : '⤢ Hide rink'}</button></div>
       ${uploadHTML}${dropHTML}
       <div class="muted small vid-or">— or link one —</div>
       <input class="video-url" data-video="${d.id}" value="${escHtml(d.video || '')}" placeholder="Paste a YouTube, Vimeo or Cloudflare Stream link" spellcheck="false" autocomplete="off">

@@ -7,7 +7,7 @@ import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cl
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
-import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, MAX_VIDEO_SECS, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
+import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
 import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, phoneFriendly, startRecording, blobToBase64, base64ToBlob, CLIP_CLOUD_MAX_BYTES, CLIP_WARN_BYTES, fmtKB } from './clips.js';
 
 const $ = s => document.querySelector(s);
@@ -1816,18 +1816,18 @@ const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — depl
 let videoOpenFor = null; // drill whose 🎬 video row is open in the Drills panel
 let vidPending = null;   // a dropped file being prepared: { drillId, file, url, duration, width, height, audio, vo, voSecs, voFit: 'post'|'pre', voRec, voTimer, encoding, error }
 const fmtSecs = t => Number.isFinite(+t) ? `${Math.floor(+t / 60)}:${String(Math.round(+t % 60)).padStart(2, '0')}` : '?:??';
-/** The span a staged video will keep: [start, end) clipped to the file and to the MAX_VIDEO_SECS cap. */
+/** The span a staged video will keep: [start, end) clipped to the file. */
 function trimSpan(vp) {
   const dur = Number.isFinite(vp.duration) ? vp.duration : Infinity;
   const start = Math.min(Math.max(0, +vp.start || 0), Number.isFinite(dur) ? Math.max(0, dur - 0.5) : Infinity);
   const end = Math.min(Number.isFinite(vp.end) ? vp.end : dur, dur);
   return { start, end: Math.max(start + 0.5, end) };
 }
-/** Seconds of picture a staged video will keep (the trimmed span under the cap), or NaN while the length is unknown. */
+/** Seconds of picture a staged video will keep (the trimmed span), or NaN while the length is unknown. */
 function keptSecs(vp) {
   const { start, end } = trimSpan(vp);
   const keep = Number.isFinite(end) ? end - start : NaN;
-  return Number.isFinite(keep) ? Math.min(keep, MAX_VIDEO_SECS) : NaN;
+  return Number.isFinite(keep) ? keep : NaN;
 }
 /** How far a recorded voiceover runs past the picture (0 when it fits). */
 const voOverrun = vp => vp.audio === 'vo' && vp.vo && Number.isFinite(keptSecs(vp)) ? Math.max(0, vp.voSecs - keptSecs(vp)) : 0;
@@ -1837,7 +1837,7 @@ function trimSummary(vp) {
   const keep = Number.isFinite(end) ? end - start : NaN;
   const kept = keptSecs(vp), over = voOverrun(vp);
   const trimmed = Number.isFinite(vp.duration) && Number.isFinite(keep) && keep < vp.duration - 0.05;
-  return `${trimmed ? `Keeps ${fmtSecs(kept)} of ${fmtSecs(vp.duration)}` : fmtSecs(vp.duration)}${Number.isFinite(keep) && keep > MAX_VIDEO_SECS ? ` — capped at ${MAX_VIDEO_SECS} s` : ''}${over > 0.25 ? ` + ${fmtSecs(over)} of held frame (voice runs longer)` : ''} · ${vp.width}×${vp.height} → ${Math.min(vp.width, VIDEO_MAX_WIDTH)} px wide${Number.isFinite(kept) ? `, about ${estimateMB(vp).toFixed(1)} MB` : ''}`;
+  return `${trimmed ? `Keeps ${fmtSecs(kept)} of ${fmtSecs(vp.duration)}` : fmtSecs(vp.duration)}${over > 0.25 ? ` + ${fmtSecs(over)} of held frame (voice runs longer)` : ''} · ${vp.width}×${vp.height} → ${Math.min(vp.width, VIDEO_MAX_WIDTH)} px wide${Number.isFinite(kept) ? `, about ${estimateMB(vp).toFixed(1)} MB` : ''}`;
 }
 const sizeWarning = mb => mb > VIDEO_WARN_MB ? `<div class="intro-warn warn small">⚠ ${mb.toFixed(1)} MB is a big clip — every coach's phone downloads it once, and it counts against the free Firestore quota. Trim the video or keep the voiceover shorter if you can.</div>` : '';
 const videoKey = (owner, pid, d) => clipKey(`video:${owner}`, pid, d.id, d.upload?.at);
@@ -1961,7 +1961,7 @@ async function videoAction(act, li) {
     const progress = msg => { const el = $('#drill-list .vid-progress'); if (el) el.textContent = msg; };
     try {
       const span = trimSpan(vp);
-      const out = await transcodeVideo(vp.file, { voiceover: vp.audio === 'vo' ? vp.vo : null, voiceoverFit: vp.voFit || 'post', start: span.start, end: Number.isFinite(span.end) ? span.end : null, onProgress: (t, total) => progress(`Encoding… ${t.toFixed(0)} / ${total.toFixed(0)} s`) });
+      const out = await transcodeVideo(vp.file, { voiceover: vp.audio === 'vo' ? vp.vo : null, voiceoverFit: vp.voFit || 'post', start: span.start, end: Number.isFinite(span.end) ? span.end : null, onProgress: (t, total) => progress(`Encoding… ${t.toFixed(0)}${Number.isFinite(total) ? ` / ${total.toFixed(0)}` : ''} s`) });
       const at = Date.now();
       const meta = { mime: out.mime, secs: out.secs, size: out.blob.size, width: out.width, height: out.height };
       try { await idbPutClip(clipKey(`video:${ownerFor()}`, pid, d.id, at), { mime: out.mime, blob: out.blob, secs: out.secs }); } catch { /* the cloud copy still serves this device */ }
@@ -2084,7 +2084,7 @@ function renderPlan() {
   if (list.contains(document.activeElement) && document.activeElement.matches('textarea, input:not([type]), input[type="text"], input[type="number"], input[type="search"]')) return;
   const btns = d => `
       <button data-act="hide" class="${d.hidden ? 'is-hidden' : ''}" title="${d.hidden ? 'Hidden: left out of the plan, print and the coaches’ view — click to put it back' : 'Hide this drill: keep it here to come back to, but leave it out of the plan, print and the coaches’ view'}">${icon(d.hidden ? 'eyeoff' : 'eye')}</button>
-      <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (up to ${MAX_VIDEO_SECS} s, optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
+      <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (any length — it warns when the clip gets big; optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
       <button data-act="intro" class="${d.intro ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="Intro in your voice — recorded here, played before the drill when ▶ is pressed">${icon('mic')}</button>
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
@@ -2158,7 +2158,7 @@ function renderPlan() {
         <div class="row"><button data-vact="play">▶ Watch</button>${up.cloud !== true && cloudBackend?.saveVideo ? '<button data-vact="upload" class="primary">☁ Upload now</button>' : ''}<button data-vact="del">✕ Delete video</button></div>
         <div class="vid-player"></div><div class="vid-progress muted small"></div>`
       : '';
-    const dropHTML = vp ? '' : `<div class="vid-drop">📼 ${up ? 'Drop a new video here to replace it' : `Drop a video here (the picture keeps up to ${MAX_VIDEO_SECS} s; a voiceover can run as long as you like)`} or <button data-vact="pick">choose a file</button><input type="file" class="vid-file" accept="video/*,.mov,.mp4,.webm" hidden></div>`;
+    const dropHTML = vp ? '' : `<div class="vid-drop">📼 ${up ? 'Drop a new video here to replace it' : 'Drop a video here (any length — trim it or watch the size estimate below)'} or <button data-vact="pick">choose a file</button><input type="file" class="vid-file" accept="video/*,.mov,.mp4,.webm" hidden></div>`;
     const video = videoOpenFor === d.id ? `<li class="video-editor"><div class="intro-box">
       ${uploadHTML}${dropHTML}
       <div class="muted small vid-or">— or link one —</div>

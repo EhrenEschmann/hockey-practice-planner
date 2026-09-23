@@ -61,9 +61,9 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 // ---------- uploaded drill videos: dropped in, re-encoded small in the browser, stored as chunks ----------
 // A dropped file is played through a canvas and re-recorded at ≤640 px and a low bitrate, with either its own
-// sound or a recorded voiceover as the audio track. That keeps a 90 s clip to a few MB, which is what makes
+// sound or a recorded voiceover as the audio track. That keeps a minute of video to a few MB, which is what makes
 // hosting it in Firestore (free tier, no storage bucket, no billing account) workable: see cloud.js saveVideo.
-export const MAX_VIDEO_SECS = 90;
+// There is no length cap: the editor estimates the size instead and warns past VIDEO_WARN_MB.
 export const VIDEO_MAX_WIDTH = 640;
 // Rough output sizes at the encoder's bitrates: moving picture ≈ 0.095 MB/s; a held frame costs little more than its audio.
 export const VIDEO_MB_PER_SEC = 0.095, HELD_MB_PER_SEC = 0.02;
@@ -98,17 +98,17 @@ export function probeVideoFile(file) {
 const VIDEO_FORMATS = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
 
 /**
- * Re-encode `file` (first MAX_VIDEO_SECS seconds) at ≤ VIDEO_MAX_WIDTH px. `voiceover` (an audio Blob) replaces
+ * Re-encode `file` (or the trimmed part of it) at ≤ VIDEO_MAX_WIDTH px. `voiceover` (an audio Blob) replaces
  * the original sound when given; a voiceover longer than the picture is never cut — `voiceoverFit` says what
  * the picture does meanwhile: 'post' (default) holds the last frame while the audio finishes, 'pre' starts
  * the audio on the held first frame and lets the picture roll once the audio has caught up.
- * Runs in real time, so a 90 s clip takes ~90 s; onProgress(secs, total) ticks. Resolves { blob, mime, secs, width, height }.
+ * Runs in real time, so a 90 s clip takes ~90 s; onProgress(secs, total) ticks (total is Infinity while the file's length is unknown). Resolves { blob, mime, secs, width, height }.
  */
 export async function transcodeVideo(file, { voiceover = null, voiceoverFit = 'post', start = 0, end = null, onProgress = () => {} } = {}) {
   const meta = await probeVideoFile(file);
   const from = Math.max(0, +start || 0);
   const to = end != null && Number.isFinite(+end) ? +end : (Number.isFinite(meta.duration) ? meta.duration : Infinity);
-  const total = Math.min(Math.max(0.5, to - from), MAX_VIDEO_SECS); // the trimmed span, capped; an unknown length runs to the end
+  const total = Math.max(0.5, to - from); // the trimmed span; an unknown length (Infinity) runs to the end of the file
   const scale = Math.min(1, VIDEO_MAX_WIDTH / meta.width);
   const W = Math.round(meta.width * scale / 2) * 2, H = Math.round(meta.height * scale / 2) * 2; // even sizes for H.264
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;

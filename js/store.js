@@ -1,5 +1,5 @@
 // Persistent state: a library of practices, each with drills. Undo/redo for the current practice.
-import { VIEWS } from './rink.js';
+import { VIEWS, RINK } from './rink.js';
 import { stageOf } from './access.js';
 
 const KEY = 'hpp.v1';
@@ -22,12 +22,19 @@ export function newDrill(n = 1, kind = null) {
   // Drills start with clean ice — add nets with the Net tool (N) where the drill needs them.
   return { id: uid(), name: `Drill ${n}`, duration: 10, notes: '', view: { ...VIEWS.full }, objects: [] };
 }
-/** A game's coaching point: half ice, set up cross-ice for mites with the two nets in place (nets face across the rink). */
+/**
+ * A game's coaching point: the left half of the ice set up for half-ice mites — one net on the goal line, the other
+ * at the near edge of the centre circle facing it, and dividing boards along the centre line whose ends curve in
+ * toward the playing half (no square corners for pucks to die in).
+ */
 export function newCoachingPoint(n = 1) {
-  const x = 50; // the middle of the left half, where cross-ice nets sit
+  const cy = RINK.H / 2, mid = RINK.W / 2, r = 10; // the divider's end curves: radius 10 ft, meeting the side boards 10 ft short of centre
+  const arc = (from, to, steps, cx, cyy) => Array.from({ length: steps + 1 }, (_, i) => { const a = (from + (to - from) * i / steps) * Math.PI / 180; return { x: +(cx + r * Math.cos(a)).toFixed(2), y: +(cyy + r * Math.sin(a)).toFixed(2) }; });
+  const divider = [...arc(-90, 0, 4, mid - r, r), ...arc(0, 90, 4, mid - r, RINK.H - r)]; // top board → curve → straight down the centre line → curve → bottom board
   return { id: uid(), name: `Coaching point ${n}`, duration: 0, notes: '', view: { ...VIEWS.leftHalf }, objects: [
-    { id: uid(), type: 'net', x, y: 6, rot: 90 },
-    { id: uid(), type: 'net', x, y: 79, rot: 270 },
+    { id: uid(), type: 'net', x: 11, y: cy, rot: 0 },             // on the goal line, facing centre
+    { id: uid(), type: 'net', x: mid - 15, y: cy, rot: 180 },     // at the edge of the centre circle, facing the goal line
+    { id: uid(), type: 'barricade', points: divider },
   ] };
 }
 

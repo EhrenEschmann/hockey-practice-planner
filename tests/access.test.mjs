@@ -63,7 +63,10 @@ assert.equal(docTitle(game), 'Mites vs Hawks'); assert.equal(docTitle(p1), 'mite
 assert.equal(practiceLabel(game), 'Mites vs Hawks — 10/01/2026');
 assert.equal(itemNoun(game), 'coaching point'); assert.equal(docNoun(game), 'game'); assert.equal(itemNoun(p1), 'drill');
 assert.equal(game.drills[0].name, 'Coaching point 1');
-assert.equal(game.drills[0].objects.filter(o => o.type === 'net').length, 2, 'a coaching point starts cross-ice with both nets in place');
+const nets = game.drills[0].objects.filter(o => o.type === 'net'), divider = game.drills[0].objects.find(o => o.type === 'barricade');
+assert.deepEqual(nets.map(o => [o.x, o.y, o.rot]), [[11, 42.5, 0], [85, 42.5, 180]], 'nets on the goal line and at the edge of the centre circle, facing each other');
+assert.ok(divider && divider.points[0].y === 0 && divider.points.at(-1).y === 85, 'the divider runs board to board');
+assert.ok(divider.points.every(pt => pt.x <= 100) && divider.points.some(pt => pt.x === 100), 'along the centre line, curving in toward the playing half');
 assert.equal(game.drills[0].view.w, 106, 'half ice');
 assert.equal(newDrill(3).name, 'Drill 3'); assert.equal(newDrill(3, 'game').name, 'Coaching point 3');
 const gameInbox = inboxDocs(roster, [game]);

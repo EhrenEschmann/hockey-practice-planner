@@ -22,6 +22,8 @@
       <h3>Practices</h3>
       <div id="plist-items"></div>
       <button id="plist-more" class="small-link" hidden></button>
+      <button id="plist-trash-toggle" class="small-link" hidden title="Deleted practices and games: restore one, or delete it for good"></button>
+      <div id="plist-trash" hidden></div>
       <div class="row plist-new"><button id="plist-create" class="primary">＋ Create practice</button><button id="plist-create-game" title="Game-prep material: coaching points on a half-ice rink (nets and dividing boards in place), shared with the coaches and the team like a practice">＋ Create game</button></div>
       <form id="plist-form" hidden>
         <h3 id="plist-form-title">New practice</h3>
@@ -68,7 +70,7 @@
   <button id="btn-team" title="Manage your team: coaches with emails, players with parent / grandparent contacts — the roster decides who can open released practices. Access requests show up here.">👥 Team</button>
   <button id="btn-feedback" title="Feedback the coaches left on this practice — only you can read it">💬</button>
   <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
-  <button id="btn-del-practice" title="Delete practice" class="danger">Delete</button>
+  <button id="btn-del-practice" title="Delete — moves it to Deleted in the picker, where it can be restored" class="danger">Delete</button>
   <div class="spacer"></div>
   <button id="btn-undo" title="Undo (Ctrl+Z)"><span data-icon="undo"></span> Undo</button>
   <button id="btn-redo" title="Redo (Ctrl+Y)"><span data-icon="redo"></span> Redo</button>

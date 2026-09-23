@@ -62,6 +62,13 @@ textarea{resize:vertical}
 .plist-item .st.team{color:#34d399}
 .plist-item .st.coaches{color:#e6c15a}
 .plist-item .fb{flex:none;font-size:11px;color:var(--accent-2)}
+#plist-trash{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+#plist-trash-toggle{background:transparent;border-color:transparent;color:var(--muted);font-size:12px;padding:2px 4px;margin-bottom:6px}
+#plist-trash-toggle[hidden],#plist-trash[hidden]{display:none}
+.plist-item.trashed{opacity:.75;cursor:default}
+.plist-item.trashed b{text-decoration:line-through}
+.plist-item .small-link{flex:none;background:transparent;border-color:transparent;font-size:12px;padding:2px 4px;color:var(--accent-2)}
+.plist-item .danger-link{color:#f87171}
 #plist-more{background:transparent;border-color:transparent;color:var(--accent-2);font-size:12px;padding:2px 4px;margin-bottom:6px}
 #plist-more[hidden]{display:none}
 .plist-new{display:flex;gap:6px}.plist-new button{flex:1}

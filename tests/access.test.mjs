@@ -56,6 +56,10 @@ assert.equal(inbox.get('head@x.io').practices.p1.role, 'coach');
 assert.deepEqual(inbox.get('mom@x.io'), { persona: 'team', practices: { p1: { role: 'team', stage: 'team', team: 'mites', date: '2026-09-21', time: '' } } });
 assert.deepEqual(inbox.get('sq@x.io'), { persona: 'coach', practices: { p2: { role: 'coach', stage: 'coaches', team: 'Squirts', date: '', time: '' } } });
 assert.ok(inbox.has('guest@x.io') && !inbox.has(''), 'extras are known people; blank emails are nobody');
+// soft delete: a trashed document is a draft to the outside world — off every list, and its published copy is withdrawn
+assert.equal(stageOf({ stage: 'team', deleted: 1700000000000 }), 'draft');
+assert.equal(stageOf({ stage: 'team' }), 'team');
+assert.equal(inboxDocs(roster, [{ ...p1, deleted: 1 }]).get('mom@x.io').practices.p1, undefined, 'a deleted practice leaves the family lists');
 // a game is a practice document with kind + opponent: it publishes the same way and its inbox card says so
 const game = newPractice('Mites', 'game', 'Hawks'); game.stage = 'team'; game.date = '2026-10-01';
 assert.ok(isGame(game) && !isGame(p1));

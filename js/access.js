@@ -17,6 +17,7 @@ const emails = list => [...new Set((list || []).map(norm).filter(Boolean))];
 
 /** A practice's stage. Practices shared before stages existed keep their audience: a team list → 'team', a coach list → 'coaches'. */
 export function stageOf(p) {
+  if (p?.deleted) return 'draft'; // soft-deleted: pulled back from everyone until it is restored
   if (STAGES.includes(p?.stage)) return p.stage;
   if (p?.sharedTeam?.length) return 'team';
   if (p?.sharedWith?.length) return 'coaches';

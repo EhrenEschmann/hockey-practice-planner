@@ -177,7 +177,7 @@ function updateRoute() {
 /** Open the practice/drill named in the URL; fall back to the last drill viewed in that practice. */
 function applyRoute() {
   const { pid, did } = parseRoute(location);
-  if (pid && pid !== store.data.currentId && store.data.practices.some(x => x.id === pid)) store.switchPractice(pid);
+  if (pid && pid !== store.data.currentId && store.live.some(x => x.id === pid)) store.switchPractice(pid);
   const p = store.practice;
   const want = did || store.data.lastDrill?.[p.id];
   const i = p.drills.findIndex(x => x.id === want);
@@ -1541,19 +1541,40 @@ function renderPracticeSelect() {
   const cur = store.practice;
   $('#plist-current').textContent = practiceLabel(cur) + (openFeedbackFor(cur.id).length ? ` · 💬${openFeedbackFor(cur.id).length}` : '');
   if ($('#plist-pop').hidden) return;
-  const all = [...store.data.practices].sort((a, b) => byCalendar(b, a));
+  const all = [...store.live].sort((a, b) => byCalendar(b, a));
   const shown = plistAll ? all : all.slice(0, PLIST_N);
   const stName = { draft: 'draft', coaches: 'with coaches', team: 'released' };
   $('#plist-items').innerHTML = shown.map(p => {
     const st = stageOf(p), fb = openFeedbackFor(p.id).length;
     return `<button class="plist-item${p.id === cur.id ? ' current' : ''}" data-pid="${p.id}" title="${escHtml(practiceLabel(p))}">
-      <b>${escHtml(p.team || 'No team')}</b><span class="when">${escHtml(whenLabel(p))}</span>
+      <b>${escHtml(isGame(p) ? docTitle(p) : (p.team || 'No team'))}</b><span class="when">${escHtml(whenLabel(p))}</span>
       ${fb ? `<span class="fb">💬${fb}</span>` : ''}<span class="st ${st}">${stName[st]}</span></button>`;
   }).join('');
   const more = $('#plist-more');
   more.hidden = all.length <= PLIST_N;
-  more.textContent = plistAll ? `Show the last ${PLIST_N} only` : `Show all ${all.length} practices…`;
+  more.textContent = plistAll ? `Show the last ${PLIST_N} only` : `Show all ${all.length}…`;
+  // The trash: soft-deleted documents, newest deletion first, each with Restore and Delete forever.
+  const trash = [...store.trashed].sort((a, b) => (+b.deleted || 0) - (+a.deleted || 0));
+  const tb = $('#plist-trash-toggle');
+  tb.hidden = !trash.length;
+  tb.textContent = `${plistTrashOpen ? '▾' : '▸'} Deleted (${trash.length})`;
+  $('#plist-trash').hidden = !trash.length || !plistTrashOpen;
+  $('#plist-trash').innerHTML = trash.map(p => `<div class="plist-item trashed" title="Deleted ${escHtml(stamp(p.deleted))}">
+      <b>${escHtml(isGame(p) ? docTitle(p) : (p.team || 'No team'))}</b><span class="when">${escHtml(whenLabel(p))}</span>
+      <button class="small-link" data-restore="${p.id}" title="Put it back in the list (sharing resumes where it was)">↶ Restore</button>
+      <button class="small-link danger-link" data-purge="${p.id}" title="Delete for good — this cannot be undone">✕ Forever</button></div>`).join('');
 }
+let plistTrashOpen = false;
+$('#plist-trash-toggle').addEventListener('click', () => { plistTrashOpen = !plistTrashOpen; renderPracticeSelect(); });
+$('#plist-trash').addEventListener('click', e => {
+  const r = e.target.closest('[data-restore]'), x = e.target.closest('[data-purge]');
+  if (r) { store.restorePractice(r.dataset.restore); renderPracticeSelect(); return; }
+  if (x) {
+    const p = store.data.practices.find(q => q.id === x.dataset.purge); if (!p) return;
+    if (!confirm(`Delete ${docNoun(p)} "${practiceLabel(p)}" for good? This cannot be undone.`)) return;
+    finishActive(); store.deletePractice(p.id); sel = null; stopAnim(); renderAll(); renderPracticeSelect();
+  }
+});
 $('#plist-items').addEventListener('click', e => {
   const b = e.target.closest('.plist-item'); if (!b) return;
   finishActive(); store.switchPractice(b.dataset.pid); sel = null; stopAnim();
@@ -2484,7 +2505,7 @@ function switchDrill(i) {
 // ---------- drill library (every drill across all practices) ----------
 function libraryCards(filter) {
   const q = filter.trim().toLowerCase();
-  const practices = [...store.data.practices].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const practices = [...store.live].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const cards = [];
   for (const p of practices) for (const d of p.drills || []) {
     if (q && !`${d.name} ${p.team || ''} ${p.date || ''} ${usDate(p.date)}`.toLowerCase().includes(q)) continue;
@@ -3136,8 +3157,10 @@ $('#btn-dup-practice').addEventListener('click', () => {
   finishActive(); store.addPractice(copy); sel = null; stopAnim(); renderAll();
 });
 $('#btn-del-practice').addEventListener('click', () => {
-  if (!confirm(`Delete practice "${practiceLabel(store.practice)}"? This cannot be undone.`)) return;
-  store.deletePractice(store.data.currentId); sel = null; stopAnim(); renderAll();
+  const p = store.practice;
+  const shared = stageOf(p) !== 'draft';
+  if (!confirm(`Delete ${docNoun(p)} "${practiceLabel(p)}"?${shared ? ' Coaches and the team lose access to it.' : ''}\n\nIt moves to Deleted at the bottom of the picker, where you can restore it or delete it for good.`)) return;
+  finishActive(); store.trashPractice(p.id); sel = null; stopAnim(); renderAll();
 });
 
 function download(name, blob) {
@@ -3935,7 +3958,7 @@ function showPractice(r) {
   presentAudience = r.as;
   if (who.persona === 'planner') {
     // The planner previews their own practice straight from the store (drafts included, offline too) — as the audience would get it.
-    const mine = store.data.practices.find(x => x.id === pid);
+    const mine = store.data.practices.find(x => x.id === pid && !x.deleted);
     if (mine) {
       const key = `mine/${r.as}/${pid}/${mine.updatedAt || 0}`;
       if (presentKey === key) return;

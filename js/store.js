@@ -112,8 +112,8 @@ export class Store {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { data = null; }
     this.data = data && Array.isArray(data.practices) ? data : { practices: [], currentId: null };
-    if (!this.data.practices.length) this.data.practices.push(newPractice());
-    if (!this.practice) this.data.currentId = this.data.practices[0].id;
+    if (!this.live.length) this.data.practices.push(newPractice());
+    if (!this.practice || this.practice.deleted) this.data.currentId = this.live[0].id;
     this.migrate();
     this.drillIndex = 0;
     this.undoStack = [];
@@ -122,6 +122,9 @@ export class Store {
   }
 
   get practice() { return this.data.practices.find(p => p.id === this.data.currentId); }
+  /** The documents that are not in the trash — what the picker, the library and the viewers see. */
+  get live() { return this.data.practices.filter(p => !p.deleted); }
+  get trashed() { return this.data.practices.filter(p => p.deleted); }
   get drill() {
     const p = this.practice;
     this.drillIndex = Math.max(0, Math.min(this.drillIndex, p.drills.length - 1));
@@ -218,10 +221,28 @@ export class Store {
     this.switchPractice(p.id);
     this.save(); // a new practice is an edit: stamp it so it is uploaded
   }
+  /** Soft delete: the document stays (and syncs) with a `deleted` stamp, drops out of every list and is pulled back from coaches and the team. */
+  trashPractice(id) {
+    const p = this.data.practices.find(x => x.id === id); if (!p) return;
+    p.deleted = Date.now();
+    p.updatedAt = p.deleted; this.persist(); this.onSave?.(p);
+    if (this.data.currentId === id) this.leaveTrashed();
+  }
+  restorePractice(id) {
+    const p = this.data.practices.find(x => x.id === id); if (!p) return;
+    delete p.deleted;
+    p.updatedAt = Date.now(); this.persist(); this.onSave?.(p);
+  }
+  /** The open document went to the trash: open another live one, or a fresh practice when none is left. */
+  leaveTrashed() {
+    if (!this.live.length) { this.data.practices.push(newPractice()); this.switchPractice(this.live[0].id); this.save(); }
+    else this.switchPractice(this.live[0].id);
+  }
+  /** Delete for good (from the trash): the document and its cloud copy are gone. */
   deletePractice(id) {
     this.data.practices = this.data.practices.filter(p => p.id !== id);
     this.onDelete?.(id);
-    if (!this.data.practices.length) { this.data.practices.push(newPractice()); this.switchPractice(this.data.practices[0].id); this.save(); }
-    else this.switchPractice(this.data.practices[0].id);
+    if (this.data.currentId === id || !this.live.length) this.leaveTrashed();
+    else this.persist();
   }
 }

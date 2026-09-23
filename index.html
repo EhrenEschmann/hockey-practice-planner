@@ -69,6 +69,27 @@
   </div>
   <button id="btn-team" title="Manage your team: coaches with emails, players with parent / grandparent contacts — the roster decides who can open released practices. Access requests show up here.">👥 Team</button>
   <button id="btn-feedback" title="Feedback the coaches left on this practice — only you can read it">💬</button>
+  <div id="ai-wrap">
+    <button id="btn-ai" title="Claude: keep your Anthropic API key here (encrypted) so ✨ Describe can lay out drills and coaching points for you">✨ AI</button>
+    <div id="ai-pop" hidden>
+      <h3>Claude</h3>
+      <div id="ai-status" class="muted small"></div>
+      <div id="ai-unlock" hidden>
+        <label class="field"><span>Passphrase</span><input id="ai-pass-unlock" type="password" autocomplete="current-password" placeholder="Unlock the key on this device"></label>
+        <div class="row"><button id="ai-do-unlock" class="primary">🔓 Unlock</button></div>
+      </div>
+      <details id="ai-setup">
+        <summary class="small">Set or replace the key</summary>
+        <label class="field"><span>Anthropic API key</span><input id="ai-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+        <label class="field"><span>Passphrase</span><input id="ai-pass" type="password" autocomplete="new-password" placeholder="Encrypts the key before it goes to the cloud"></label>
+        <p class="muted small">The key is encrypted in this browser with the passphrase (PBKDF2 + AES-GCM) and only the ciphertext is stored under your account. You enter the passphrase once per device. There is no way to recover a forgotten passphrase — just paste the key again.</p>
+        <div class="row"><button id="ai-save" class="primary">☁ Save encrypted</button></div>
+      </details>
+      <label class="check small" id="ai-remember-wrap"><input type="checkbox" id="ai-remember" checked> Keep it unlocked on this device</label>
+      <div class="row" id="ai-danger"><button id="ai-forget" class="small-link">Lock on this device</button><button id="ai-remove" class="small-link danger-link">Remove from the cloud</button></div>
+      <p class="muted small">Requests go straight from this browser to Anthropic and are billed to that key (Claude Opus 5, a few cents per layout).</p>
+    </div>
+  </div>
   <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
   <button id="btn-del-practice" title="Delete — moves it to Deleted in the picker, where it can be restored" class="danger">Delete</button>
   <div class="spacer"></div>
@@ -190,7 +211,7 @@
     <section id="plan" class="panel">
       <h2><span id="plan-title">Drills</span><span class="h2-side"><span id="plan-total"></span><button id="plan-pin"></button></span></h2>
       <ol id="drill-list"></ol>
-      <div class="row"><button id="btn-add-drill">+ Add drill</button><button id="btn-library" title="Browse every drill from all of your practices and add copies to this one"><span data-icon="library"></span> From library…</button></div>
+      <div class="row"><button id="btn-add-drill">+ Add drill</button><button id="btn-ai-drill" title="Describe a situation and Claude lays it out as a new drill / coaching point">✨ Describe…</button><button id="btn-library" title="Browse every drill from all of your practices and add copies to this one"><span data-icon="library"></span> From library…</button></div>
     </section>
 
   </aside>

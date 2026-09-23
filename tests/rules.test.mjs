@@ -36,6 +36,15 @@ await set('admin', 'inbox/parent@example.com', { persona: 'team' });
 await set('admin', 'inbox/coach.a@example.com', { persona: 'coach' });
 await set('admin', 'published/p1/feedback/cb_d1', { uid: 'cb', email: 'coachb@example.com', text: 'from B', drillId: 'd1' });
 
+await set('admin', 'users/own/private/anthropic', { v: 1, data: 'ciphertext', salt: 's', iv: 'i' });
+console.log('private documents (the encrypted API key record): the planner alone');
+ok('planner reads own private doc', await get(PLANNER, 'users/own/private/anthropic'), ALLOW);
+ok('planner writes own private doc', await set(PLANNER, 'users/own/private/anthropic', { v: 1, data: 'new', salt: 's', iv: 'i' }), ALLOW);
+ok('coach cannot read the planner\'s private doc', await get(COACH_A, 'users/own/private/anthropic'), DENY);
+ok('parent cannot read the planner\'s private doc', await get(PARENT, 'users/own/private/anthropic'), DENY);
+ok('stranger cannot write a private doc under the planner', await set(STRANGER, 'users/own/private/anthropic', { data: 'x' }), DENY);
+ok('planner deletes own private doc', await del(PLANNER, 'users/own/private/anthropic'), ALLOW);
+
 console.log('working document, roster, access lists: planner only');
 ok('planner reads own working doc', await get(PLANNER, 'users/own/practices/p1'), ALLOW);
 ok('planner writes own working doc', await set(PLANNER, 'users/own/practices/p1', { id: 'p1', team: 'Mites' }), ALLOW);

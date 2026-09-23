@@ -30,6 +30,10 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if isPlanner() && request.auth.uid == uid;
     }
+    // Private documents (e.g. the encrypted Anthropic API key record): the planner's own account, nobody else — not even readable by viewers.
+    match /users/{uid}/private/{docId} {
+      allow read, write: if isPlanner() && request.auth.uid == uid;
+    }
     match /users/{uid}/practices/{practiceId} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if isPlanner() && request.auth.uid == uid;

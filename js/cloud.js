@@ -114,6 +114,11 @@ export async function firebaseBackend(config) {
     subscribeRequests(cb) {
       return fs.onSnapshot(fs.collection(db, 'requests'), snap => cb(snap.docs.map(d => d.data()), null), err => cb(null, err));
     },
+    // The planner's private documents (users/{uid}/private/{name}): only the account itself reads or writes them.
+    // Today: 'anthropic' — the encrypted API key record from js/ai.js (ciphertext, salt, iv; never the key itself).
+    async savePrivate(uid, name, data) { await fs.setDoc(fs.doc(db, 'users', uid, 'private', name), data); },
+    async loadPrivate(uid, name) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'private', name)); return s.exists() ? s.data() : null; },
+    async removePrivate(uid, name) { await fs.deleteDoc(fs.doc(db, 'users', uid, 'private', name)); },
     // Intro clips: users/{uid}/practices/{pid}/clips/{drillId} — { mime, data (base64), secs, at }.
     // One small document per clip, so a practice's own document stays light; read rules mirror the practice's.
     async saveClip(uid, pid, did, clip) { await fs.setDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did), clip); },

@@ -8,6 +8,7 @@ import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy,
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
+import { SDK_URL, encryptSecret, decryptSecret, looksLikeKey, systemPrompt, generateLayout, layoutToObjects } from './ai.js';
 import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, phoneFriendly, startRecording, blobToBase64, base64ToBlob, CLIP_CLOUD_MAX_BYTES, CLIP_WARN_BYTES, fmtKB } from './clips.js';
 
 const $ = s => document.querySelector(s);
@@ -149,6 +150,7 @@ function drawSelection() {
 function renderUI() {
   renderPracticeSelect();
   renderPracticeProps();
+  renderAIPop();
   renderPlan();
   renderProps();
   renderAnimBar();
@@ -2235,6 +2237,130 @@ function deleteNarration(d) {
   if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(ownerFor(), pid, clipDocId(d.id, 'narration')).catch(() => {});
   delete d.narration;
 }
+// ---------- ✨ Claude: the API key (encrypted in the cloud, unlocked per device) and "describe a coaching point" ----------
+// js/ai.js does the crypto, the schema and the conversion; this is the UI and the key's life cycle.
+const AI_REC_KEY = 'hpp.ai.enc', AI_KEY_KEY = 'hpp.ai.key', AI_REMEMBER_KEY = 'hpp.ai.remember';
+let aiRecord = null;    // the encrypted record { salt, iv, data … } from the cloud (mirrored in localStorage so a device can unlock offline)
+let aiKey = null;       // the unlocked key, in memory (and on this device when "keep unlocked" is on)
+let aiRecordLoaded = false, aiBusy = '';
+let aiOpen = false;     // the ✨ Describe row is open in the Drills panel
+let aiPrompt = '', aiStatus = '', aiGenerating = false, aiAbort = null;
+let sdkModule = null;   // the Anthropic SDK, imported on first use
+const aiRemember = () => { try { return localStorage.getItem(AI_REMEMBER_KEY) !== '0'; } catch { return true; } };
+try { aiRecord = JSON.parse(localStorage.getItem(AI_REC_KEY) || 'null'); if (aiRemember()) aiKey = localStorage.getItem(AI_KEY_KEY) || null; } catch { /* storage blocked */ }
+const rememberKey = () => { try { if (aiKey && aiRemember()) localStorage.setItem(AI_KEY_KEY, aiKey); else localStorage.removeItem(AI_KEY_KEY); } catch { /* fine */ } };
+/** After sign-in: fetch the encrypted record (the cloud wins over this device's mirror). */
+async function loadAIRecord() {
+  if (aiRecordLoaded || !cloudBackend?.loadPrivate || !cloudSync?.user) return;
+  aiRecordLoaded = true;
+  try {
+    const rec = await cloudBackend.loadPrivate(cloudSync.user.uid, 'anthropic');
+    if (rec?.data) { aiRecord = rec; try { localStorage.setItem(AI_REC_KEY, JSON.stringify(rec)); } catch { /* fine */ } }
+    else if (rec === null) { aiRecord = null; aiKey = null; try { localStorage.removeItem(AI_REC_KEY); localStorage.removeItem(AI_KEY_KEY); } catch { /* fine */ } } // removed on another device
+  } catch { aiRecordLoaded = false; /* offline: keep the mirror */ }
+  renderAIPop();
+}
+function renderAIPop() {
+  const b = $('#btn-ai'); if (!b) return;
+  b.classList.toggle('ready', !!aiKey);
+  b.title = aiKey ? 'Claude is ready — ✨ Describe in the Drills panel lays out drills and coaching points for you' : aiRecord ? 'Claude: unlock your API key on this device' : 'Claude: keep your Anthropic API key here (encrypted) so ✨ Describe can lay out drills and coaching points for you';
+  if ($('#ai-pop').hidden) return;
+  const st = $('#ai-status');
+  st.classList.toggle('warn', !!aiBusy && /✗|⚠/.test(aiBusy));
+  st.textContent = aiBusy || (aiKey ? `🔓 Unlocked on this device${aiRecord ? ' · ☁ encrypted copy in the cloud' : ' · not in the cloud'}${aiRecord?.at ? ` (saved ${stamp(aiRecord.at)})` : ''}` : aiRecord ? `🔒 An encrypted key is in the cloud${aiRecord.at ? ` (saved ${stamp(aiRecord.at)})` : ''} — enter the passphrase to use it here.` : cloudSync?.user ? 'No key yet. Paste your Anthropic API key and choose a passphrase.' : 'Sign in first — the encrypted key is kept under your account.');
+  $('#ai-unlock').hidden = !aiRecord || !!aiKey;
+  $('#ai-setup').open = !aiRecord && !aiKey;
+  $('#ai-remember').checked = aiRemember();
+  $('#ai-forget').hidden = !aiKey;
+  $('#ai-remove').hidden = !aiRecord;
+  $('#ai-save').disabled = !cloudSync?.user;
+}
+$('#ai-remember').addEventListener('change', e => { try { localStorage.setItem(AI_REMEMBER_KEY, e.target.checked ? '1' : '0'); } catch { /* fine */ } rememberKey(); });
+$('#ai-save').addEventListener('click', async () => {
+  const key = $('#ai-key').value.trim(), pass = $('#ai-pass').value;
+  if (!looksLikeKey(key)) { aiBusy = '✗ That does not look like an Anthropic API key (they start with sk-ant-).'; renderAIPop(); return; }
+  if (pass.length < 6) { aiBusy = '✗ Choose a passphrase of at least 6 characters.'; renderAIPop(); return; }
+  if (!cloudSync?.user) { aiBusy = '✗ Sign in first.'; renderAIPop(); return; }
+  aiBusy = 'Encrypting…'; renderAIPop();
+  try {
+    const rec = await encryptSecret(key, pass);
+    await cloudBackend.savePrivate(cloudSync.user.uid, 'anthropic', rec);
+    aiRecord = rec; aiKey = key; aiBusy = '';
+    try { localStorage.setItem(AI_REC_KEY, JSON.stringify(rec)); } catch { /* fine */ }
+    rememberKey();
+    $('#ai-key').value = ''; $('#ai-pass').value = '';
+  } catch (e) { aiBusy = `✗ Could not save: ${e?.message || e}${cloudHint(e?.message)}`; }
+  renderAIPop(); renderPlan();
+});
+$('#ai-do-unlock').addEventListener('click', async () => {
+  const pass = $('#ai-pass-unlock').value; if (!pass) return;
+  aiBusy = 'Unlocking…'; renderAIPop();
+  try { aiKey = await decryptSecret(aiRecord, pass); aiBusy = ''; rememberKey(); $('#ai-pass-unlock').value = ''; }
+  catch (e) { aiBusy = `✗ ${e?.message || e}`; }
+  renderAIPop(); renderPlan();
+});
+$('#ai-pass-unlock').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#ai-do-unlock').click(); } });
+$('#ai-forget').addEventListener('click', () => { aiKey = null; try { localStorage.removeItem(AI_KEY_KEY); } catch { /* fine */ } aiBusy = ''; renderAIPop(); renderPlan(); });
+$('#ai-remove').addEventListener('click', async () => {
+  if (!confirm('Remove the encrypted key from the cloud and forget it on this device? Other devices lose it too once they sync.')) return;
+  try { if (cloudBackend?.removePrivate && cloudSync?.user) await cloudBackend.removePrivate(cloudSync.user.uid, 'anthropic'); } catch (e) { aiBusy = `✗ Could not remove: ${e?.message || e}`; renderAIPop(); return; }
+  aiRecord = null; aiKey = null; aiBusy = '';
+  try { localStorage.removeItem(AI_REC_KEY); localStorage.removeItem(AI_KEY_KEY); } catch { /* fine */ }
+  renderAIPop(); renderPlan();
+});
+/** The ✨ Describe row at the end of the Drills list. */
+function aiEditorHTML(p) {
+  if (!aiOpen) return '';
+  const noun = itemNoun(p);
+  return `<li class="ai-editor"><div class="intro-box">
+      <div class="row vid-head"><span class="muted small">✨ Describe a ${noun} — Claude lays it out</span><button data-aiact="close" title="Close">✕</button></div>
+      <textarea class="ai-prompt" placeholder="${escHtml(isGame(p) ? 'e.g. 2-on-1 rush from the divider: D backs in, F1 carries wide, F2 drives the far post for a pass and shot' : 'e.g. Half-ice 3-on-2 with a backchecker: F1 carries from the corner, D gap up, coach dumps a second puck in')}" ${aiGenerating ? 'disabled' : ''}>${escHtml(aiPrompt)}</textarea>
+      <div class="row">${aiGenerating
+        ? '<button data-aiact="cancel">■ Cancel</button>'
+        : `<button data-aiact="generate" class="primary" ${aiKey ? '' : 'disabled'}>✨ Add as a new ${noun}</button>${aiKey ? '' : '<button data-aiact="setup">Set up the key first…</button>'}`}
+      </div>
+      <div class="ai-status muted small${/✗/.test(aiStatus) ? ' warn' : ''}">${escHtml(aiStatus || (isGame(p) ? 'The nets and the dividing boards are already in place; describe the situation and the players.' : 'Describe the drill: who, where, what happens. Ctrl+Enter generates.'))}</div>
+    </div></li>`;
+}
+async function aiAction(act, li) {
+  if (act === 'close') { if (aiAbort) aiAbort.abort(); aiOpen = false; aiStatus = ''; renderPlan(); return; }
+  if (act === 'setup') { $('#btn-ai').click(); return; }
+  if (act === 'cancel') { aiAbort?.abort(); return; }
+  if (act !== 'generate' || aiGenerating) return;
+  const p = store.practice;
+  aiPrompt = li.querySelector('.ai-prompt')?.value.trim() || aiPrompt;
+  if (!aiPrompt) { aiStatus = '✗ Describe the situation first.'; renderPlan(); return; }
+  if (!aiKey) { aiStatus = '✗ Unlock or set up the API key under ✨ AI first.'; renderPlan(); return; }
+  unfocusList();
+  aiGenerating = true; aiStatus = 'Asking Claude…'; aiAbort = new AbortController(); renderPlan();
+  try {
+    if (!sdkModule) { aiStatus = 'Loading the Claude SDK…'; renderPlan(); sdkModule = await import(SDK_URL); aiStatus = 'Asking Claude…'; renderPlan(); }
+    const draft = newDrill(p.drills.length + 1, p.kind); // a game's coaching point brings its nets and divider; Claude is told they are there
+    const sys = systemPrompt({ game: isGame(p), view: draft.view, existing: draft.objects.filter(o => o.type === 'net').map(o => ({ type: o.type, x: o.x, y: o.y, rot: o.rot })) });
+    const { layout, usage } = await generateLayout({ sdk: sdkModule, apiKey: aiKey, prompt: aiPrompt, system: sys, signal: aiAbort.signal });
+    const objects = layoutToObjects(layout, { uid, zoneColors: ZONE_COLORS });
+    if (!objects.length) throw new Error('Claude returned an empty layout — try describing the players and where they start');
+    draft.name = String(layout.name || draft.name).slice(0, 80);
+    draft.notes = String(layout.notes || '');
+    draft.objects = [...draft.objects, ...objects];
+    migrateDrill(draft);
+    finishActive();
+    commit(() => { p.drills.push(draft); store.drillIndex = p.drills.length - 1; });
+    sel = null; stopAnim();
+    const cost = usage ? ` · ${usage.input_tokens + usage.output_tokens} tokens` : '';
+    aiStatus = `✓ Added "${draft.name}" — ${objects.filter(o => o.type === 'skater').length} skaters, ${objects.filter(o => o.type === 'puck').length} pucks${cost}. Press ▶ to check the timing, then adjust anything on the ice.`;
+    renderAll();
+  } catch (e) {
+    const msg = e?.name === 'AbortError' || /abort/i.test(e?.message || '') ? 'Cancelled.' : e?.status === 401 ? 'Anthropic rejected the API key — check it under ✨ AI.' : e?.status === 429 ? 'Rate limited by Anthropic — wait a moment and try again.' : e?.status === 400 && /credit|billing/i.test(e?.message || '') ? 'The Anthropic account has no credit — add some in the console.' : (e?.message || String(e));
+    aiStatus = `✗ ${msg}`;
+  }
+  aiGenerating = false; aiAbort = null;
+  renderPlan();
+}
+$('#btn-ai-drill').addEventListener('click', e => { e.stopPropagation(); aiOpen = !aiOpen; aiStatus = ''; renderPlan(); if (aiOpen) $('#drill-list .ai-prompt')?.focus(); });
+$('#drill-list').addEventListener('input', e => { if (e.target.matches('.ai-prompt')) aiPrompt = e.target.value; });
+$('#drill-list').addEventListener('keydown', e => { if (e.target.matches('.ai-prompt') && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); aiAction('generate', e.target.closest('li')); } });
+
 /** The voice-over section of a drill's 🎙 row: record over the animation, listen, upload, delete. */
 function narrationHTML(d) {
   const n = d.narration, rec = anim.recNarr?.drillId === d.id, busy = !!introRec || (anim.recNarr && !rec);
@@ -2367,7 +2493,7 @@ function renderPlan() {
       ${v && !up ? videoPlayerHTML(v) : ''}
     </div></li>` : '';
     return row + notes + intro + video;
-  }).join('');
+  }).join('') + aiEditorHTML(p);
 }
 
 // Drag to reorder drills (↑/↓ buttons remain for touch).
@@ -2375,7 +2501,7 @@ let dragDrill = null; // index being dragged
 const clearDropMarks = () => $$('#drill-list li').forEach(li => li.classList.remove('dragging', 'drop-above', 'drop-below'));
 $('#drill-list').addEventListener('dragstart', e => {
   const li = e.target.closest('li');
-  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor, .video-editor')) { e.preventDefault(); return; }
+  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor, .video-editor, .ai-editor')) { e.preventDefault(); return; }
   dragDrill = +li.dataset.index;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', ''); // Firefox requires data for a drag to start
@@ -2388,7 +2514,7 @@ $('#drill-list').addEventListener('dragover', e => {
   clearDropMarks();
   $(`#drill-list li[data-index="${dragDrill}"]:not(.notes-editor)`)?.classList.add('dragging');
   const li = e.target.closest('li');
-  if (!li || li.matches('.notes-editor, .intro-editor, .video-editor') || +li.dataset.index === dragDrill) return;
+  if (!li || li.matches('.notes-editor, .intro-editor, .video-editor, .ai-editor') || +li.dataset.index === dragDrill) return;
   const r = li.getBoundingClientRect();
   li.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
 });
@@ -2399,7 +2525,7 @@ $('#drill-list').addEventListener('drop', e => {
   const p = store.practice;
   const from = dragDrill;
   dragDrill = null; clearDropMarks();
-  if (!li || li.matches('.notes-editor, .intro-editor, .video-editor')) return;
+  if (!li || li.matches('.notes-editor, .intro-editor, .video-editor, .ai-editor')) return;
   const r = li.getBoundingClientRect();
   let to = +li.dataset.index + (e.clientY < r.top + r.height / 2 ? 0 : 1);
   if (to > from) to--;
@@ -2414,7 +2540,7 @@ $('#drill-list').addEventListener('drop', e => {
 $('#drill-list').addEventListener('dragend', () => { dragDrill = null; clearDropMarks(); });
 
 // Inline notes editing (live) — name/minutes only commit via the edit row's Save button.
-$('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea, .video-url')) store.beginPending(); });
+$('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea:not(.ai-prompt), .video-url')) store.beginPending(); });
 $('#drill-list').addEventListener('dragover', e => { const z = e.target.closest('.vid-drop'); if (!z) return; e.preventDefault(); z.classList.add('over'); });
 $('#drill-list').addEventListener('dragleave', e => { e.target.closest('.vid-drop')?.classList.remove('over'); });
 $('#drill-list').addEventListener('drop', e => {
@@ -2464,7 +2590,7 @@ $('#drill-list').addEventListener('keydown', e => {
 // Double-click a drill row: rename it inline (same as the ✎ button).
 $('#drill-list').addEventListener('dblclick', e => {
   const li = e.target.closest('li');
-  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor, .video-editor')) return;
+  if (!li || li.classList.contains('editing') || li.matches('.notes-editor, .intro-editor, .video-editor, .ai-editor')) return;
   if (e.target.closest('button,input,textarea')) return;
   const i = +li.dataset.index;
   if (!store.practice.drills[i]) return;
@@ -2484,11 +2610,12 @@ $('#drill-list').addEventListener('click', e => {
   const p = store.practice;
   if (li.matches('.intro-editor')) { introAction(btn?.dataset.iact, li); return; }
   if (li.matches('.video-editor')) { if (btn?.dataset.vact) videoAction(btn.dataset.vact, li); return; }
+  if (li.matches('.ai-editor')) { if (btn?.dataset.aiact) aiAction(btn.dataset.aiact, li); return; }
   if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#drill-list .video-url')?.focus(); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
   if (act === 'feedback') { openFeedbackPanel(); return; }
   if (act === 'hide') { const d = p.drills[i]; commit(() => { if (d.hidden) delete d.hidden; else d.hidden = true; }); renderAll(); return; }
-  if (li.matches('.notes-editor, .intro-editor, .video-editor')) return;
+  if (li.matches('.notes-editor, .intro-editor, .video-editor, .ai-editor')) return;
   finishActive();
   if (act === 'save' || act === 'cancel') {
     const row = $('#drill-list li.editing');
@@ -3164,6 +3291,7 @@ function wirePopover(btnSel, popSel, focusSel) {
   });
 }
 wirePopover('#btn-new-practice', '#practice-pop', '#practice-date');
+wirePopover('#btn-ai', '#ai-pop', '#ai-pass-unlock');
 wirePopover('#btn-practices', '#plist-pop', '#plist-create');
 /** Add a drill and open its list row in edit mode, name selected and ready to type over. */
 function addDrillAndRename() {
@@ -4644,6 +4772,7 @@ function paintInboxButtons() {
       signInError = state === 'error' && !sync.user ? detail || '' : '';
       if (sync.user) { try { if (isOwner(sync.user)) localStorage.setItem('hpp.owner', '1'); else localStorage.removeItem('hpp.owner'); } catch { /* storage blocked */ } }
       if (sync.user && isOwner(sync.user) && state === 'saved' && !uploadsChecked) { uploadsChecked = true; uploadPendingIntros(); } // first quiet moment after sign-in
+      if (sync.user && isOwner(sync.user)) loadAIRecord(); // the encrypted key record, once per sign-in
       watchInbox(); watchPlannerFeeds();
       refreshScreen(); // who is signed in decides the screen
     },

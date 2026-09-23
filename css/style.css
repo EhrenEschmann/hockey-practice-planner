@@ -49,7 +49,7 @@ textarea{resize:vertical}
 .ctx-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);width:56px;flex:none}
 .ctx-unit{color:var(--muted);font-size:12px}
 .ctx-pos{font-variant-numeric:tabular-nums;color:var(--muted);min-width:32px;text-align:center}
-#plist-wrap,#practice-wrap{position:relative}
+#plist-wrap,#practice-wrap,#ai-wrap{position:relative}
 #btn-practices{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 #plist-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:320px;max-height:min(78vh,700px);overflow-y:auto;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
 #plist-pop h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
@@ -79,6 +79,16 @@ textarea{resize:vertical}
 #plist-form .row button{flex:1}
 #practice-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:250px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
 #practice-pop{width:300px;max-height:min(78vh,700px);overflow-y:auto}
+#ai-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:320px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+#ai-pop details{margin:8px 0}
+#ai-pop summary{cursor:pointer;color:var(--accent-2);margin-bottom:6px}
+#ai-status{margin-bottom:8px;line-height:1.4}
+#ai-status.warn{color:#f59e0b}
+#ai-danger{margin-top:6px}
+#btn-ai.ready{color:#34d399}
+#drill-list li.ai-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default;display:block}
+#drill-list li.ai-editor textarea{width:100%;font-size:12.5px;min-height:64px}
+.ai-status{margin-top:6px;line-height:1.4}
 #practice-pop h3{margin:14px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
 #practice-pop h3:first-child{margin-top:0}
 #practice-pop .row{display:flex;gap:6px;margin-bottom:4px}

@@ -10,7 +10,7 @@
     "icons": "node scripts/build-icons.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-hpp \"node tests/rules.test.mjs\"",
     "test:routes": "node tests/routing.test.mjs",
-    "test:unit": "node tests/access.test.mjs",
+    "test:unit": "node tests/access.test.mjs && node tests/ai.test.mjs",
     "test": "npm run check && npm run test:unit && npm run test:routes && npm run test:rules"
   },
   "devDependencies": {

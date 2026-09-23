@@ -65,6 +65,11 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 // hosting it in Firestore (free tier, no storage bucket, no billing account) workable: see cloud.js saveVideo.
 export const MAX_VIDEO_SECS = 90;
 export const VIDEO_MAX_WIDTH = 640;
+// Rough output sizes at the encoder's bitrates: moving picture ≈ 0.095 MB/s; a held frame costs little more than its audio.
+export const VIDEO_MB_PER_SEC = 0.095, HELD_MB_PER_SEC = 0.02;
+export const VIDEO_WARN_MB = 8; // beyond this a clip is slow on a phone's data plan and heavy in Firestore: warn, don't refuse
+/** Estimated encoded size in MB for `movingSecs` of video plus `heldSecs` of a held frame (a voiceover running longer than the picture). */
+export const estimateVideoMB = (movingSecs, heldSecs = 0) => (Math.max(0, +movingSecs || 0) * VIDEO_MB_PER_SEC) + (Math.max(0, +heldSecs || 0) * HELD_MB_PER_SEC);
 
 /** Read a dropped file's duration and size (rejects files the browser can't decode). */
 export function probeVideoFile(file) {
@@ -94,10 +99,12 @@ const VIDEO_FORMATS = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;code
 
 /**
  * Re-encode `file` (first MAX_VIDEO_SECS seconds) at ≤ VIDEO_MAX_WIDTH px. `voiceover` (an audio Blob) replaces
- * the original sound when given. Runs in real time, so a 90 s clip takes ~90 s; onProgress(secs, total) ticks.
- * Resolves { blob, mime, secs, width, height }.
+ * the original sound when given; a voiceover longer than the picture is never cut — `voiceoverFit` says what
+ * the picture does meanwhile: 'post' (default) holds the last frame while the audio finishes, 'pre' starts
+ * the audio on the held first frame and lets the picture roll once the audio has caught up.
+ * Runs in real time, so a 90 s clip takes ~90 s; onProgress(secs, total) ticks. Resolves { blob, mime, secs, width, height }.
  */
-export async function transcodeVideo(file, { voiceover = null, start = 0, end = null, onProgress = () => {} } = {}) {
+export async function transcodeVideo(file, { voiceover = null, voiceoverFit = 'post', start = 0, end = null, onProgress = () => {} } = {}) {
   const meta = await probeVideoFile(file);
   const from = Math.max(0, +start || 0);
   const to = end != null && Number.isFinite(+end) ? +end : (Number.isFinite(meta.duration) ? meta.duration : Infinity);
@@ -151,15 +158,24 @@ export async function transcodeVideo(file, { voiceover = null, start = 0, end = 
   if (from > 0) await new Promise(res => { src.onseeked = () => { src.onseeked = null; res(); }; src.currentTime = from; });
   else src.currentTime = 0;
   await ac.resume();
-  await src.play();
-  if (voNode) voNode.start();
+  // Timeline: the voiceover runs from 0 to voLen. The picture starts at `lead` (0 unless the audio is longer and
+  // fits 'pre'), plays for `total` (or until the file ends), and then holds its last frame until the audio is done.
+  const voLen = voNode ? voNode.buffer.duration : 0;
+  const lead = voNode && voiceoverFit === 'pre' ? Math.max(0, voLen - total) : 0;
+  const outLen = Math.max(total, voLen);
+  let playing = false, videoDone = false;
+  if (!lead) { await src.play(); playing = true; }
   const t0 = performance.now();
+  if (voNode) voNode.start();
+  const elapsed = () => (performance.now() - t0) / 1000;
   await new Promise(res => {
     const tick = () => {
-      const t = src.currentTime - from;
-      ctx2d.drawImage(src, 0, 0, W, H);
-      onProgress(Math.min(Math.max(0, t), total), total);
-      if (src.ended || t >= total) { res(); return; }
+      const e = elapsed();
+      if (!playing && e >= lead) { playing = true; src.play().catch(() => { videoDone = true; }); }
+      ctx2d.drawImage(src, 0, 0, W, H); // a held frame is redrawn every tick so the capture stream keeps emitting it
+      if (playing && !videoDone && (src.ended || src.currentTime - from >= total)) { videoDone = true; src.pause(); }
+      onProgress(Math.min(e, outLen), outLen);
+      if (videoDone && (!voNode || e >= voLen)) { res(); return; }
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -170,7 +186,7 @@ export async function transcodeVideo(file, { voiceover = null, start = 0, end = 
   await stopped;
   ac.close();
   URL.revokeObjectURL(meta.url);
-  const secs = Math.round(Math.min(total, (performance.now() - t0) / 1000) * 10) / 10;
+  const secs = Math.round(Math.min(outLen, elapsed()) * 10) / 10;
   return { blob: new Blob(chunks, { type: mime }), mime, secs, width: W, height: H };
 }
 

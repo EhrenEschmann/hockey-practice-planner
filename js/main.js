@@ -7,8 +7,8 @@ import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cl
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
-import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, MAX_VIDEO_SECS, VIDEO_MAX_WIDTH } from './video.js';
-import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, phoneFriendly, startRecording, blobToBase64, base64ToBlob } from './clips.js';
+import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, MAX_VIDEO_SECS, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
+import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, phoneFriendly, startRecording, blobToBase64, base64ToBlob, CLIP_CLOUD_MAX_BYTES, CLIP_WARN_BYTES, fmtKB } from './clips.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1814,7 +1814,7 @@ async function uploadPendingIntros() {
 }
 const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — deploy the latest firestore.rules, then Upload now' : '';
 let videoOpenFor = null; // drill whose 🎬 video row is open in the Drills panel
-let vidPending = null;   // a dropped file being prepared: { drillId, file, url, duration, width, height, audio, vo, voSecs, voRec, encoding, error }
+let vidPending = null;   // a dropped file being prepared: { drillId, file, url, duration, width, height, audio, vo, voSecs, voFit: 'post'|'pre', voRec, voTimer, encoding, error }
 const fmtSecs = t => Number.isFinite(+t) ? `${Math.floor(+t / 60)}:${String(Math.round(+t % 60)).padStart(2, '0')}` : '?:??';
 /** The span a staged video will keep: [start, end) clipped to the file and to the MAX_VIDEO_SECS cap. */
 function trimSpan(vp) {
@@ -1823,13 +1823,23 @@ function trimSpan(vp) {
   const end = Math.min(Number.isFinite(vp.end) ? vp.end : dur, dur);
   return { start, end: Math.max(start + 0.5, end) };
 }
+/** Seconds of picture a staged video will keep (the trimmed span under the cap), or NaN while the length is unknown. */
+function keptSecs(vp) {
+  const { start, end } = trimSpan(vp);
+  const keep = Number.isFinite(end) ? end - start : NaN;
+  return Number.isFinite(keep) ? Math.min(keep, MAX_VIDEO_SECS) : NaN;
+}
+/** How far a recorded voiceover runs past the picture (0 when it fits). */
+const voOverrun = vp => vp.audio === 'vo' && vp.vo && Number.isFinite(keptSecs(vp)) ? Math.max(0, vp.voSecs - keptSecs(vp)) : 0;
+const estimateMB = vp => estimateVideoMB(keptSecs(vp), voOverrun(vp));
 function trimSummary(vp) {
   const { start, end } = trimSpan(vp);
   const keep = Number.isFinite(end) ? end - start : NaN;
-  const kept = Number.isFinite(keep) ? Math.min(keep, MAX_VIDEO_SECS) : NaN;
+  const kept = keptSecs(vp), over = voOverrun(vp);
   const trimmed = Number.isFinite(vp.duration) && Number.isFinite(keep) && keep < vp.duration - 0.05;
-  return `${trimmed ? `Keeps ${fmtSecs(kept)} of ${fmtSecs(vp.duration)}` : fmtSecs(vp.duration)}${Number.isFinite(keep) && keep > MAX_VIDEO_SECS ? ` — capped at ${MAX_VIDEO_SECS} s` : ''} · ${vp.width}×${vp.height} → ${Math.min(vp.width, VIDEO_MAX_WIDTH)} px wide${Number.isFinite(kept) ? `, about ${(kept * 0.095).toFixed(1)} MB` : ''}`;
+  return `${trimmed ? `Keeps ${fmtSecs(kept)} of ${fmtSecs(vp.duration)}` : fmtSecs(vp.duration)}${Number.isFinite(keep) && keep > MAX_VIDEO_SECS ? ` — capped at ${MAX_VIDEO_SECS} s` : ''}${over > 0.25 ? ` + ${fmtSecs(over)} of held frame (voice runs longer)` : ''} · ${vp.width}×${vp.height} → ${Math.min(vp.width, VIDEO_MAX_WIDTH)} px wide${Number.isFinite(kept) ? `, about ${estimateMB(vp).toFixed(1)} MB` : ''}`;
 }
+const sizeWarning = mb => mb > VIDEO_WARN_MB ? `<div class="intro-warn warn small">⚠ ${mb.toFixed(1)} MB is a big clip — every coach's phone downloads it once, and it counts against the free Firestore quota. Trim the video or keep the voiceover shorter if you can.</div>` : '';
 const videoKey = (owner, pid, d) => clipKey(`video:${owner}`, pid, d.id, d.upload?.at);
 /** A dropped or chosen file becomes the row's preview, ready to encode. */
 async function stageVideoFile(d, file) {
@@ -1846,6 +1856,7 @@ async function stageVideoFile(d, file) {
 }
 function stopDubPreview(vp, preview) {
   vp.previewing = false;
+  clearTimeout(vp.leadTimer);
   if (vp.dubAudio) { vp.dubAudio.pause(); URL.revokeObjectURL(vp.dubAudio.src); vp.dubAudio = null; }
   if (preview) { preview.onended = null; preview.ontimeupdate = null; preview.onpause = null; preview.pause(); preview.muted = false; }
 }
@@ -1889,40 +1900,59 @@ async function videoAction(act, li) {
     renderPlan(); return;
   }
   if (vp?.previewing && act !== 'vopreview') stopDubPreview(vp, li.querySelector('.vid-preview'));
-  if (act === 'cancel') { if (vp?.voRec) { try { await vp.voRec.stop(); } catch { /* fine */ } } if (vp?.url) URL.revokeObjectURL(vp.url); vidPending = null; renderPlan(); return; }
-  if (act === 'vorec' && vp) { // talk over the video: it plays silently from the top while the mic records
-    try { vp.voRec = await startRecording({ maxSecs: MAX_VIDEO_SECS + 1 }); } catch (e) { vp.error = `Microphone not available: ${e?.message || e}`; renderPlan(); return; }
+  if (act === 'cancel') { clearInterval(vp?.voTimer); if (vp?.voRec) { try { await vp.voRec.stop(); } catch { /* fine */ } } if (vp?.url) URL.revokeObjectURL(vp.url); vidPending = null; renderPlan(); return; }
+  if (act === 'vorec' && vp) { // talk over the video: it plays silently from the top while the mic records — and keeps recording after the picture ends
+    try { vp.voRec = await startRecording(); } catch (e) { vp.error = `Microphone not available: ${e?.message || e}`; renderPlan(); return; }
+    vp.voPastEnd = false;
     renderPlan(); // the row now shows ■ Stop — play the (re-drawn) preview silently from the top
     const preview = $('#drill-list .vid-preview'); if (!preview) return;
     const span = trimSpan(vp);
+    const kept = keptSecs(vp);
     preview.muted = true; preview.currentTime = span.start;
-    preview.onended = () => videoAction('vostop', $('#drill-list .video-editor'));
-    preview.ontimeupdate = () => { if (preview.currentTime >= span.end) { preview.ontimeupdate = null; videoAction('vostop', $('#drill-list .video-editor')); } };
+    const pictureOver = () => { preview.ontimeupdate = null; preview.onended = null; preview.pause(); vp.voPastEnd = true; };
+    preview.onended = pictureOver;
+    preview.ontimeupdate = () => { if (preview.currentTime >= span.end || (Number.isFinite(kept) && preview.currentTime - span.start >= kept)) pictureOver(); };
     preview.play().catch(() => {});
+    clearInterval(vp.voTimer);
+    vp.voTimer = setInterval(() => { // live readout: seconds, and once the picture is over, how the extra audio will be fitted
+      const r = vp.voRec; if (!r) { clearInterval(vp.voTimer); return; }
+      const t = (performance.now() - r.since) / 1000;
+      const b = $('#drill-list [data-vact="vostop"]'); if (b) b.textContent = `■ Stop (${t.toFixed(0)} s)`;
+      const st = $('#drill-list .vo-status'); if (!st) return;
+      if (!vp.voPastEnd) { st.textContent = '● Recording — the video is playing silently, talk over it'; return; }
+      const over = Number.isFinite(kept) ? Math.max(0, t - kept) : 0;
+      const mb = estimateVideoMB(kept, over);
+      st.innerHTML = `● Still recording — the picture has ended; ${(vp.voFit || 'post') === 'pre' ? 'the first' : 'the last'} frame will hold for the extra ${fmtSecs(over)}${mb > VIDEO_WARN_MB ? ` <span class="warn">⚠ about ${mb.toFixed(1)} MB</span>` : ''}`;
+    }, 250);
     return;
   }
   if (act === 'vopreview' && vp?.vo) { // hear the dub before encoding: the muted video and the recording run together from the in point
     const preview = li.querySelector('.vid-preview'); if (!preview) return;
     if (vp.previewing) { stopDubPreview(vp, preview); renderPlan(); return; }
     const span = trimSpan(vp);
+    const lead = vp.voFit === 'pre' ? voOverrun(vp) : 0; // 'pre': the picture waits on its first frame until the voice has caught up
     vp.dubAudio = new Audio(URL.createObjectURL(vp.vo));
     vp.previewing = true;
     renderPlan();
     const pv = $('#drill-list .vid-preview'); if (!pv) return;
     pv.muted = true; pv.currentTime = span.start;
     const stop = () => { stopDubPreview(vp, pv); renderPlan(); };
-    pv.onended = stop;
-    pv.ontimeupdate = () => { if (pv.currentTime >= span.end) stop(); };
-    pv.onpause = () => { if (vp.previewing && !pv.ended && pv.currentTime < span.end) stop(); }; // the user pressed pause on the player
-    await pv.play().catch(() => {});
+    let vidDone = false, audDone = false;
+    const maybeDone = () => { if (vidDone && audDone) stop(); };
+    pv.onended = () => { vidDone = true; maybeDone(); };
+    pv.ontimeupdate = () => { if (!vidDone && pv.currentTime >= span.end) { vidDone = true; pv.pause(); maybeDone(); } }; // 'post': hold the last frame while the voice finishes
+    pv.onpause = () => { if (vp.previewing && !vidDone && !pv.ended && pv.currentTime < span.end) stop(); }; // the user pressed pause on the player
+    vp.dubAudio.onended = () => { audDone = true; maybeDone(); };
+    if (lead) vp.leadTimer = setTimeout(() => { if (vp.previewing) pv.play().catch(() => {}); }, lead * 1000);
+    else await pv.play().catch(() => {});
     vp.dubAudio.play().catch(() => {});
     return;
   }
   if (act === 'vostop' && vp?.voRec) {
-    const r = vp.voRec; vp.voRec = null;
+    const r = vp.voRec; vp.voRec = null; clearInterval(vp.voTimer); vp.voTimer = null;
     const preview = $('#drill-list .vid-preview'); if (preview) { preview.pause(); preview.onended = null; preview.ontimeupdate = null; preview.muted = false; }
     const { blob, secs } = await r.stop();
-    if (blob.size && secs >= 0.5) { vp.vo = blob; vp.voSecs = secs; vp.audio = 'vo'; }
+    if (blob.size && secs >= 0.5) { vp.vo = blob; vp.voSecs = secs; vp.audio = 'vo'; vp.voFit = vp.voFit || 'post'; }
     renderPlan();
     return;
   }
@@ -1931,7 +1961,7 @@ async function videoAction(act, li) {
     const progress = msg => { const el = $('#drill-list .vid-progress'); if (el) el.textContent = msg; };
     try {
       const span = trimSpan(vp);
-      const out = await transcodeVideo(vp.file, { voiceover: vp.audio === 'vo' ? vp.vo : null, start: span.start, end: Number.isFinite(span.end) ? span.end : null, onProgress: (t, total) => progress(`Encoding… ${t.toFixed(0)} / ${total.toFixed(0)} s`) });
+      const out = await transcodeVideo(vp.file, { voiceover: vp.audio === 'vo' ? vp.vo : null, voiceoverFit: vp.voFit || 'post', start: span.start, end: Number.isFinite(span.end) ? span.end : null, onProgress: (t, total) => progress(`Encoding… ${t.toFixed(0)} / ${total.toFixed(0)} s`) });
       const at = Date.now();
       const meta = { mime: out.mime, secs: out.secs, size: out.blob.size, width: out.width, height: out.height };
       try { await idbPutClip(clipKey(`video:${ownerFor()}`, pid, d.id, at), { mime: out.mime, blob: out.blob, secs: out.secs }); } catch { /* the cloud copy still serves this device */ }
@@ -1971,6 +2001,12 @@ async function videoAction(act, li) {
     renderPlan();
   }
 }
+/** The size warning for an intro clip: getting big, or already too big for its single cloud document. */
+function clipSizeWarning(bytes) {
+  if (!(bytes > CLIP_WARN_BYTES)) return '';
+  if (bytes > CLIP_CLOUD_MAX_BYTES) return `⚠ ${fmtKB(bytes)} is too big for the cloud copy (${fmtKB(CLIP_CLOUD_MAX_BYTES)} at most) — coaches won’t get it. Stop and record a shorter intro.`;
+  return `⚠ Getting big: ${fmtKB(bytes)} of the ${fmtKB(CLIP_CLOUD_MAX_BYTES)} the cloud copy can hold.`;
+}
 let introOpenFor = null; // drill whose 🎙 recorder is open in the Drills panel
 let introRec = null;      // an in-progress recording: { drillId, stop(), since, timer }
 /** The recorder row's buttons: record / stop / listen / delete a drill's intro clip. */
@@ -1980,14 +2016,14 @@ async function introAction(iact, li) {
   const status = msg => { const el = $('#drill-list .intro-status'); if (el) el.textContent = msg; };
   if (iact === 'rec') {
     if (introRec) return;
-    try { introRec = await startRecording({ maxSecs: 90 }); }
+    try { introRec = await startRecording(); }
     catch (e) { status(`Microphone not available: ${e?.message || e}`); return; }
     introRec.drillId = d.id;
     renderPlan();
-    introRec.timer = setInterval(() => {
-      const t = (performance.now() - introRec.since) / 1000;
-      const b = $('#drill-list [data-iact="stop"]'); if (b) b.textContent = `■ Stop (${t.toFixed(0)} s)`;
-      if (t >= 90) introAction('stop', li);
+    introRec.timer = setInterval(() => { // no length cap: the readout warns as the clip nears what one cloud document can hold
+      const t = (performance.now() - introRec.since) / 1000, bytes = introRec.size();
+      const b = $('#drill-list [data-iact="stop"]'); if (b) b.textContent = `■ Stop (${t.toFixed(0)} s · ${fmtKB(bytes)})`;
+      const w = $('#drill-list .intro-size-warn'); if (w) { const msg = clipSizeWarning(bytes); w.innerHTML = msg; w.hidden = !msg; }
     }, 500);
   } else if (iact === 'stop') {
     if (!introRec) return;
@@ -2074,6 +2110,7 @@ function renderPlan() {
     const recording = introRec?.drillId === d.id;
     const intro = introOpenFor === d.id ? `<li class="intro-editor"><div class="intro-box">
       <div class="intro-status muted small">${recording ? '● Recording — speak now' : d.intro ? `Intro recorded · ${(+d.intro.secs || 0).toFixed(1)} s${d.intro.size ? ` · ${Math.max(1, Math.round(d.intro.size / 1024))} KB` : ''}${d.intro.cloud === true ? ' · ☁ in the cloud' : ''}${canPlay(d.intro.mime) ? '' : ' · this browser can’t play that format'}` : canRecord() ? 'No intro yet — record yourself introducing this drill.' : 'This browser can’t record audio.'}</div>
+      <div class="intro-warn warn small intro-size-warn"${(recording ? '' : clipSizeWarning(d.intro?.size)) ? '' : ' hidden'}>${recording ? '' : clipSizeWarning(d.intro?.size)}</div>
       ${d.intro && !recording && !phoneFriendly(d.intro.mime) ? `<div class="intro-warn warn small">⚠ Recorded in a format iPhones can’t play (${escHtml(d.intro.mime)}) — press Re-record; this version records one that plays everywhere.</div>` : ''}
       ${d.intro && !recording && d.intro.cloud !== true ? `<div class="intro-warn warn small">⚠ ${d.intro.cloud === false ? `Not in the cloud — coaches can’t hear it${d.intro.cloudError ? ` (${escHtml(d.intro.cloudError)}${cloudHint(d.intro.cloudError)})` : ''}` : 'Cloud copy unknown — recorded before this version'}</div>` : ''}
       <div class="row">
@@ -2082,7 +2119,7 @@ function renderPlan() {
         ${d.intro && !recording && d.intro.cloud !== true && cloudBackend?.saveClip ? '<button data-iact="upload" class="primary">☁ Upload now</button>' : ''}
         <button data-iact="del" ${d.intro && !recording ? '' : 'disabled'}>✕ Delete</button>
       </div>
-      <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here and on the coaches’ phones — unless 🔊 voice is muted. Up to 90 s.</p>
+      <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here and on the coaches’ phones — unless 🔊 voice is muted. No length limit — it warns when a clip gets too big for the cloud.</p>
     </div></li>` : '';
     const v = d.video ? videoEmbed(d.video) : null;
     const vp = vidPending?.drillId === d.id ? vidPending : null, up = d.upload;
@@ -2098,23 +2135,30 @@ function renderPlan() {
           <button data-vact="setend" ${vp.encoding ? 'disabled' : ''}>end here ⟶</button>
         </div>
         <div class="intro-status muted small vid-summary">${trimSummary(vp)}</div>
+        ${vp.encoding || vp.voRec ? '' : sizeWarning(estimateMB(vp))}
         <div class="row">
           <label class="check small"><input type="radio" name="vidaudio" value="keep" ${vp.audio !== 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> keep its sound</label>
           <label class="check small"><input type="radio" name="vidaudio" value="vo" ${vp.audio === 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> my voice instead</label>
         </div>
         ${vp.audio === 'vo' && !vp.encoding ? `<div class="row">${vp.voRec
-          ? '<button data-vact="vostop" class="danger">■ Stop</button><span class="muted small">● Recording — the video is playing silently, talk over it</span>'
-          : `<button data-vact="vorec">● ${vp.vo ? 'Re-record' : 'Record'} voiceover</button>${vp.vo ? `<button data-vact="vopreview">${vp.previewing ? '■ Stop preview' : '▶ Preview with my voice'}</button>` : ''}<span class="muted small">${vp.vo ? `${vp.voSecs.toFixed(1)} s recorded` : 'plays the video (silently) while you talk'}</span>`}</div>` : ''}
+          ? '<button data-vact="vostop" class="danger">■ Stop</button><span class="vo-status muted small">● Recording — the video is playing silently, talk over it</span>'
+          : `<button data-vact="vorec">● ${vp.vo ? 'Re-record' : 'Record'} voiceover</button>${vp.vo ? `<button data-vact="vopreview">${vp.previewing ? '■ Stop preview' : '▶ Preview with my voice'}</button>` : ''}<span class="muted small">${vp.vo ? `${vp.voSecs.toFixed(1)} s recorded${voOverrun(vp) > 0.25 ? ` — ${fmtSecs(voOverrun(vp))} longer than the picture` : ''}` : 'plays the video (silently) while you talk; keep talking after it ends if you like'}</span>`}</div>
+        ${vp.vo && !vp.voRec && voOverrun(vp) > 0.25 ? `<div class="row vo-fit" title="Your voice runs longer than the picture. Neither is cut: choose which frame holds still for the extra time.">
+          <span class="muted small">Extra voice</span>
+          <label class="check small"><input type="radio" name="vofit" value="pre" ${vp.voFit === 'pre' ? 'checked' : ''}> before the video — hold the first frame</label>
+          <label class="check small"><input type="radio" name="vofit" value="post" ${vp.voFit !== 'pre' ? 'checked' : ''}> after the video — hold the last frame</label>
+        </div>` : ''}` : ''}
         <div class="row">${vp.encoding
           ? '<span class="vid-progress muted small">Starting the encoder…</span>'
           : `<button data-vact="encode" class="primary" ${vp.audio === 'vo' && !vp.vo ? 'disabled title="Record the voiceover first"' : ''}>⬆ Encode &amp; upload</button><button data-vact="cancel">Cancel</button>`}</div>`)
       : up
       ? `<div class="intro-status muted small">Uploaded video · ${fmtSecs(up.secs)} · ${(up.size / 1048576).toFixed(1)} MB · ${up.width}×${up.height}${up.cloud === true ? ' · ☁ in the cloud' : ''}</div>
         ${up.cloud !== true ? `<div class="intro-warn warn small">⚠ Not in the cloud — coaches can’t see it${up.cloudError ? ` (${escHtml(up.cloudError)}${cloudHint(up.cloudError)})` : ''}</div>` : ''}
+        ${sizeWarning((+up.size || 0) / 1048576)}
         <div class="row"><button data-vact="play">▶ Watch</button>${up.cloud !== true && cloudBackend?.saveVideo ? '<button data-vact="upload" class="primary">☁ Upload now</button>' : ''}<button data-vact="del">✕ Delete video</button></div>
         <div class="vid-player"></div><div class="vid-progress muted small"></div>`
       : '';
-    const dropHTML = vp ? '' : `<div class="vid-drop">📼 ${up ? 'Drop a new video here to replace it' : `Drop a video here (up to ${MAX_VIDEO_SECS} s)`} or <button data-vact="pick">choose a file</button><input type="file" class="vid-file" accept="video/*,.mov,.mp4,.webm" hidden></div>`;
+    const dropHTML = vp ? '' : `<div class="vid-drop">📼 ${up ? 'Drop a new video here to replace it' : `Drop a video here (the picture keeps up to ${MAX_VIDEO_SECS} s; a voiceover can run as long as you like)`} or <button data-vact="pick">choose a file</button><input type="file" class="vid-file" accept="video/*,.mov,.mp4,.webm" hidden></div>`;
     const video = videoOpenFor === d.id ? `<li class="video-editor"><div class="intro-box">
       ${uploadHTML}${dropHTML}
       <div class="muted small vid-or">— or link one —</div>
@@ -2182,6 +2226,7 @@ $('#drill-list').addEventListener('drop', e => {
 $('#drill-list').addEventListener('change', e => {
   if (e.target.matches('.vid-file')) { const d = store.practice.drills.find(x => x.id === videoOpenFor); if (d) stageVideoFile(d, e.target.files?.[0]); }
   if (e.target.matches('input[name="vidaudio"]') && vidPending) { vidPending.audio = e.target.value; renderPlan(); }
+  if (e.target.matches('input[name="vofit"]') && vidPending) { if (vidPending.previewing) stopDubPreview(vidPending, $('#drill-list .vid-preview')); vidPending.voFit = e.target.value; renderPlan(); }
   if (e.target.matches('.vid-in, .vid-out') && vidPending) { unfocusList(); renderPlan(); }
 });
 $('#drill-list').addEventListener('input', e => {

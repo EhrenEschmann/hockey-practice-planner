@@ -51,8 +51,16 @@ export function canPlay(mime) {
   return !!(codecs ? a.canPlayType(`${container}; codecs="${codecs}"`) : a.canPlayType(container));
 }
 
-/** Start recording from the microphone; `stop()` resolves { blob, mime, secs }. Stops itself at maxSecs. */
-export async function startRecording({ maxSecs = 90 } = {}) {
+/**
+ * One intro clip is stored as a single Firestore document (base64 inside a 1 MiB doc), so its raw size has a
+ * ceiling; recording itself is not capped — the recorder warns as a clip approaches it.
+ */
+export const CLIP_CLOUD_MAX_BYTES = 760_000; // ≈ 1 MiB × ¾ minus metadata: the most that still fits one document
+export const CLIP_WARN_BYTES = 500_000;      // where the recorder starts warning that the clip is getting big
+export const fmtKB = bytes => `${Math.max(1, Math.round((+bytes || 0) / 1024))} KB`;
+
+/** Start recording from the microphone; `stop()` resolves { blob, mime, secs }; `size()` is the bytes so far. No length cap unless maxSecs is given. */
+export async function startRecording({ maxSecs = Infinity } = {}) {
   // Speech only: one channel at a speech sample rate, with the browser's noise suppression on.
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   let known = null;
@@ -93,8 +101,12 @@ export async function startRecording({ maxSecs = 90 } = {}) {
       res({ blob: new Blob(chunks, { type: mime }), mime, secs: Math.round((performance.now() - t0) / 100) / 10 });
     };
   });
-  const timer = setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, maxSecs * 1000);
-  return { stop() { clearTimeout(timer); if (rec.state === 'recording') rec.stop(); else if (rec.state === 'inactive') { /* already stopped by an error: onstop has resolved or will */ } return done; }, since: t0 };
+  const timer = Number.isFinite(maxSecs) ? setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, maxSecs * 1000) : null;
+  return {
+    stop() { if (timer) clearTimeout(timer); if (rec.state === 'recording') rec.stop(); else if (rec.state === 'inactive') { /* already stopped by an error: onstop has resolved or will */ } return done; },
+    size: () => chunks.reduce((a, c) => a + c.size, 0),
+    since: t0,
+  };
 }
 
 export const blobToBase64 = blob => new Promise((res, rej) => {

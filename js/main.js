@@ -416,15 +416,20 @@ function deleteObject(id) {
 function select(id) { sel = id; renderCanvas(); renderProps(); }
 
 /** A placement is done: hand control back to the Select tool with the new object selected. */
-// Tools that stay selected after a placement ("keep placing"), so a row of tires takes one click each.
-const keepTool = { tire: false };
-try { keepTool.tire = localStorage.getItem('hpp.keep.tire') === '1'; } catch { /* fine */ }
-$('#tire-keep').checked = keepTool.tire;
-$('#tire-keep').addEventListener('change', e => {
-  keepTool.tire = e.target.checked;
-  try { localStorage.setItem('hpp.keep.tire', keepTool.tire ? '1' : '0'); } catch { /* fine */ }
-  if (tool === 'tire') $('#hint').textContent = HINTS.tire + (keepTool.tire ? ' · keeps placing until you press V' : '');
-});
+// Tools that stay selected after a placement ("keep placing"): a row of tires, or a line of skaters, takes one click each.
+// With the skater option on, a click on open ice always places a new skater (finishing the one before as it stands); a
+// skater's path is drawn by clicking the skater itself, which extends its path as it always has.
+const keepTool = { tire: false, skater: false };
+let skaterExtending = false; // the active skater was clicked to extend its path (so, with keep placing on, clicks add waypoints)
+for (const [t, box] of [['tire', '#tire-keep'], ['skater', '#skater-keep']]) {
+  try { keepTool[t] = localStorage.getItem(`hpp.keep.${t}`) === '1'; } catch { /* fine */ }
+  $(box).checked = keepTool[t];
+  $(box).addEventListener('change', e => {
+    keepTool[t] = e.target.checked;
+    try { localStorage.setItem(`hpp.keep.${t}`, keepTool[t] ? '1' : '0'); } catch { /* fine */ }
+    if (tool === t) $('#hint').textContent = HINTS[t] + (keepTool[t] ? ' · keeps placing until you press V' : '');
+  });
+}
 function placed(id) {
   select(id);
   if (tool !== 'select' && !keepTool[tool]) setTool('select');
@@ -523,12 +528,15 @@ function onPointerDown(e) {
       if (isPlayer(o) && o.id !== activeSkater) {
         if (o.follow) { select(o.id); $('#hint').textContent = `${playerName(o)} follows ${playerName(getObj(o.follow))}'s path — set "Same path as" to their own path to draw one.`; break; }
         o.path ||= [];
-        activeSkater = o.id; select(o.id);
-      } else if (activeSkater && getObj(activeSkater)) {
+        activeSkater = o.id; skaterExtending = true; select(o.id);
+      } else if (activeSkater && getObj(activeSkater) && (!keepTool.skater || skaterExtending || o?.id === activeSkater)) {
+        // Draw the path. With "keep placing" on, only after a skater was clicked to extend its path (or when clicking
+        // the active skater itself) — otherwise a click on open ice is the next skater.
         drag = { type: 'freehand', id: activeSkater, pts: [raw], start: p };
       } else {
+        if (activeSkater) finishActive(); // keep placing: the skater before stands where it is, this click is a new one
         const s = addObject(makePlaceable('skater', p));
-        activeSkater = s.id; select(s.id);
+        activeSkater = s.id; skaterExtending = false; select(s.id);
       }
       break;
     }

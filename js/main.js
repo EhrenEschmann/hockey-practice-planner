@@ -3145,7 +3145,8 @@ function wireVideos(p) {
           const entry = await fetchUpload(presentOwner, p.id, d, (i, n) => { btn.textContent = `Downloading ${i} / ${n}…`; });
           if (!sec.classList.contains('video-open')) return; // closed while loading
           if (!entry) { btn.textContent = '⚠ video not available — tap ↻ to resync, or check the connection'; btn.hidden = false; sec.classList.remove('video-open'); layoutPresent(); return; }
-          box.insertAdjacentHTML('beforeend', `<div class="video-box"><video src="${entry.url}" controls playsinline ${auto ? '' : 'autoplay'} preload="auto"></video></div>`); // an auto-opened player waits for a tap: phones block sound without one
+          const autoplay = !auto && (presentMode !== 'focus' || sec.classList.contains('current')); // an auto-opened player waits for a tap (phones block sound without one); so does one whose drill was left while it loaded
+          box.insertAdjacentHTML('beforeend', `<div class="video-box"><video src="${entry.url}" controls playsinline ${autoplay ? 'autoplay' : ''} preload="auto"></video></div>`);
           if (d.intro) introBeforeVideo(box.querySelector('video'), sec, p, d);
         } else box.insertAdjacentHTML('beforeend', videoPlayerHTML({ kind: box.dataset.kind, src: box.dataset.src, host: box.dataset.host }));
       }
@@ -3154,6 +3155,17 @@ function wireVideos(p) {
       layoutPresent();
     };
     btn.addEventListener('click', () => toggle());
+    // Leaving the drill stops its video: an uploaded clip pauses where it is; an embedded player (YouTube etc.) can't be
+    // paused from outside its frame, so it is unloaded and put back, stopped, when the drill comes on screen again.
+    sec._stopMedia = () => {
+      const vid = box.querySelector('video'); if (vid) { vid.pause(); return; }
+      if (box.querySelector('iframe')) { box.querySelector('.video-box')?.remove(); sec._mediaReopen = true; }
+    };
+    sec._resumeMedia = () => {
+      if (!sec._mediaReopen) return;
+      sec._mediaReopen = false;
+      if (sec.classList.contains('video-open') && !box.querySelector('.video-box')) box.insertAdjacentHTML('beforeend', videoPlayerHTML({ kind: box.dataset.kind, src: box.dataset.src, host: box.dataset.host }));
+    };
     if (videoOnly) { sec.classList.add('video-only'); toggle({ auto: true }); }
   }
 }
@@ -3430,6 +3442,7 @@ function wirePresentAnims(p) {
           ib.innerHTML = icon('pause');
           cur = playClip(entry, { onEnd: () => { cur = null; ib.innerHTML = icon('play'); } });
         });
+        sec._pause = () => { if (cur) cur.stop(); }; // leaving the drill stops the intro
       } else bar.remove();
       continue;
     }
@@ -4006,7 +4019,10 @@ function showDrill(i) {
   if (cards[presentIndex]?.classList.contains('current') === false) stopReading(); // moving to another drill
   cards.forEach((c, k) => {
     const cur = k === presentIndex;
-    if (!cur && presentMode === 'focus') { c._pause?.(); c._pauseIntro?.(); }
+    if (presentMode === 'focus') { // moving on stops whatever the drill being left is playing: animation, intro clip, video
+      if (!cur) { c._pause?.(); c._pauseIntro?.(); c._stopMedia?.(); }
+      else c._resumeMedia?.();
+    }
     c.classList.toggle('current', cur);
   });
   const nameOf = c => c.querySelector('header b')?.textContent || '';

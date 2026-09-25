@@ -12,7 +12,7 @@ export const DEFAULT_SHOT_SPEED = 90;              // ft/s
  * `lead` ft ahead of the body centre and `lat` ft to the side, so the puck leads the skater.
  */
 export const CARRY = {
-  lead: 4.5,    // ft ahead of the body centre
+  lead: 3.6,    // ft ahead of the body centre (on the blade of the stick drawn in render.js)
   rest: 1.3,    // lateral position on a straight (forehand side)
   max: 2.3,     // furthest the puck swings to either side
   tau: 2,       // ft of travel over which the puck eases toward its target side
@@ -69,6 +69,13 @@ export function carriedPuckPos(pose) {
   const lead = pose.lead ?? CARRY.lead;
   return { x: pose.x + c * lead - s * pose.lat, y: pose.y + s * lead + c * pose.lat };
 }
+
+/**
+ * Where a skater's stick points, in degrees for an SVG rotate(): the body heading swung toward the puck's side
+ * (`lat` / `lead` in the skater's frame), so the blade follows the puck while stickhandling and rests on the
+ * forehand side when there is nothing to carry.
+ */
+export const stickRotation = pose => ((pose.heading + Math.atan2(pose.lat ?? CARRY.rest, pose.lead ?? CARRY.lead)) * 180 / Math.PI).toFixed(1);
 
 const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
 

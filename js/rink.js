@@ -43,6 +43,12 @@ export const SVG_STYLE = `
   .path-hit{fill:none;stroke:#000;stroke-width:2.6;stroke-opacity:0;pointer-events:stroke}
   .arrow-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .skater-body .body{stroke:#fff;stroke-width:.3}
+  .stick-outline{fill:none;stroke:#111;stroke-width:.78;stroke-linecap:round;stroke-linejoin:round}
+  .stick-outline.blade{stroke-width:1}
+  .stick-outline.paddle{stroke-width:.9}
+  .stick-shaft{fill:none;stroke:#e9d9b8;stroke-width:.36;stroke-linecap:round}
+  .stick-blade{fill:none;stroke:#3a3a3a;stroke-width:.5;stroke-linecap:round}
+  .stick-paddle{fill:none;stroke:#e9d9b8;stroke-width:.44;stroke-linecap:round}
   .skater-body.sliding .body{stroke-dasharray:.6 .4}
   .skater-body text{font-family:system-ui,sans-serif;pointer-events:none}
   .coach-body .body{stroke:#fff;stroke-width:.35}

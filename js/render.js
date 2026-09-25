@@ -1,6 +1,6 @@
 // Pure SVG-string rendering of drill objects.
 import { smoothPath, closestOnPolyline } from './geometry.js';
-import { makeSim, skaterPoints } from './sim.js';
+import { makeSim, skaterPoints, stickRotation, CARRY } from './sim.js';
 export { skaterPoints };
 
 // The jersey colours a skater can be given. Coaches are drawn dark by default (COACH_COLOR) but can take any of these.
@@ -336,16 +336,37 @@ const draw = {
       : `<circle class="body" r="1.75" fill="${color}"/>`;
     const textFill = (o.color === 'white' || o.color === 'yellow') ? '#111' : '#fff';
     const wps = opts.numberWaypoints && (opts.showPaths !== false || sel) ? wpLabels(o) : ''; // numbered waypoints only along a path that is on screen
-    const heading0 = opts.sim ? opts.sim.skaterPose(o.id, 0).heading * 180 / Math.PI : 0; // body facing: path tangent (flipped when backward), or facing when standing
+    // The stick, seen from above, shows which way the skater faces: it points along the body heading (path tangent,
+    // flipped when backward, or the facing when standing), swung toward the puck's side so the blade meets a carried
+    // puck (CARRY.lead ft ahead). The whole group is rotated per frame by animateFrame (js/main.js).
+    const dir0 = opts.sim ? stickRotation(opts.sim.skaterPose(o.id, 0)) : stickRotation({ heading: 0 });
     return `<g class="obj skater" data-id="${o.id}">${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         <ellipse class="shadow" rx="1.9" ry="1.2" fill="#000" fill-opacity=".22" style="display:none"/>
-        <g class="dir" transform="rotate(${n(heading0)})"><polygon points="1.2,-.8 2.75,0 1.2,.8" fill="${color}" stroke="#fff" stroke-width=".22"/></g>
+        <g class="dir" transform="rotate(${dir0})">${o.role === 'G' ? goalieStick() : playerStick()}</g>
         <g class="figure">${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text></g>
       </g>
     </g>`;
   },
 };
+
+/**
+ * A player's stick seen from above: a long straight shaft from the hands at the body's edge, then the blade — a hook
+ * that turns off the heel to one side and curves out to the toe. Drawn along +x with the blade passing the spot a
+ * carried puck sits (CARRY.lead ft out, on the puck's side of the group's rotation). A white halo keeps it crisp over lines.
+ */
+function playerStick() {
+  const b = CARRY.lead, s = -0.5; // the shaft runs slightly to one side so the blade's curve wraps the puck spot
+  const shaft = `M1.2,${s} L${n(b - 0.45)},${s}`;
+  const blade = `M${n(b - 0.55)},${s} Q${n(b + 0.35)},${s} ${n(b + 0.95)},${n(s + 0.7)}`; // heel → curved blade → toe
+  // Outlined: a dark outline under a lighter shaft and a taped (dark) blade.
+  return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline blade" d="${blade}"/><path class="stick-shaft" d="${shaft}"/><path class="stick-blade" d="${blade}"/>`;
+}
+/** A goalie's stick from above: shaft, the thicker paddle, and a flat blade lying across the ice at the end. */
+function goalieStick() {
+  const shaft = 'M1.2,.15 L2.6,.5', paddle = 'M2.5,.47 L3.8,.8', blade = 'M3.7,.8 Q4.5,1.1 5.3,.7';
+  return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline paddle" d="${paddle}"/><path class="stick-outline blade" d="${blade}"/><path class="stick-shaft" d="${shaft}"/><path class="stick-paddle" d="${paddle}"/><path class="stick-blade" d="${blade}"/>`;
+}
 
 /** The slab of a raised pad, drawn above skaters (see renderObjects). */
 function raisedPadTop(o) {

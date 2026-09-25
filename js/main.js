@@ -1,7 +1,7 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
-import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
+import { makeSim, facingOf, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, usDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
@@ -1083,7 +1083,7 @@ function returnFrame(dr, sm, root, fx, tr, t0 = sm.duration()) {
         const sh = el.querySelector('.shadow'); if (sh) sh.style.display = 'none';
         // face where they're going: home while returning, then their start-of-drill facing
         const heading = kk < 1 && d > 0.01 ? Math.atan2(b.y - a.y, b.x - a.x) : sm.skaterPose(o.id, 0).heading;
-        el.querySelector('.dir')?.setAttribute('transform', `rotate(${(heading * 180 / Math.PI).toFixed(1)})`);
+        el.querySelector('.dir')?.setAttribute('transform', `rotate(${stickRotation({ heading })})`);
       }
     } else if (o.type === 'puck') {
       const a = sm.puckPos(o.id, T), b = sm.puckPos(o.id, 0);
@@ -1116,7 +1116,7 @@ function animateFrame(dr, sm, root, fx, t, playing) {
       if (b) p = { ...p, x: p.x + b.x, y: p.y + b.y };
       if (knock?.id === o.id) p = { ...p, x: p.x + knock.x, y: p.y + knock.y };
       if (el && o.type === 'skater') el.classList.toggle('hit', knock?.id === o.id);
-      if (el && o.type === 'skater') el.querySelector('.dir')?.setAttribute('transform', `rotate(${(p.heading * 180 / Math.PI).toFixed(1)})`);
+      if (el && o.type === 'skater') el.querySelector('.dir')?.setAttribute('transform', `rotate(${stickRotation(p)})`);
       if (el && o.type === 'skater') {
         // Under a raised pad the skater slides: body stretched along their heading and flattened.
         const sliding = raised.some(pd => underPad(p, pd, 1));

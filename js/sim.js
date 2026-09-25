@@ -65,16 +65,14 @@ export function skaterPoints(o) { return [{ x: o.x, y: o.y }, ...(o.path || [])]
 
 /**
  * World position of a carried puck for a skater pose {x, y, heading (rad), lat, lead?}. The stick (render.js) points
- * at the puck's spot, so the puck is nudged off the blade to the side it is being handled on — forehand (the concave
- * face, on the skater's right) when `lat` is positive, backhand when negative — easing through the middle as it crosses.
+ * at the puck's spot; the puck is then nudged forward, off the front face of the blade in the direction the body
+ * faces, so a skater carrying it is seen pushing it ahead rather than standing on it.
  */
-export const PUCK_OFF_BLADE = 0.55; // ft the drawn puck sits off the blade's face
+export const PUCK_OFF_BLADE = 0.55; // ft the drawn puck sits ahead of the blade
 export function carriedPuckPos(pose) {
   const c = Math.cos(pose.heading), s = Math.sin(pose.heading);
-  const lead = pose.lead ?? CARRY.lead, lat = pose.lat ?? CARRY.rest;
-  const phi = pose.heading + Math.atan2(lat, lead); // the stick's axis
-  const k = Math.max(-1, Math.min(1, lat / 0.6)) * PUCK_OFF_BLADE;
-  return { x: pose.x + c * lead - s * lat - Math.sin(phi) * k, y: pose.y + s * lead + c * lat + Math.cos(phi) * k };
+  const lead = (pose.lead ?? CARRY.lead) + PUCK_OFF_BLADE, lat = pose.lat ?? CARRY.rest;
+  return { x: pose.x + c * lead - s * lat, y: pose.y + s * lead + c * lat };
 }
 
 /**

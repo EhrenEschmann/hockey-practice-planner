@@ -343,7 +343,7 @@ const draw = {
     return `<g class="obj skater" data-id="${o.id}">${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         <ellipse class="shadow" rx="1.9" ry="1.2" fill="#000" fill-opacity=".22" style="display:none"/>
-        <g class="dir" transform="rotate(${dir0})">${o.role === 'G' ? goalieStick() : playerStick()}</g>
+        <g class="dir" transform="rotate(${dir0})">${o.role === 'G' ? goalieStick(color) : playerStick(color)}</g>
         <g class="figure">${body}<text y=".7" font-size="1.9" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text></g>
       </g>
     </g>`;
@@ -355,17 +355,31 @@ const draw = {
  * that turns off the heel to one side and curves out to the toe. Drawn along +x with the blade passing the spot a
  * carried puck sits (CARRY.lead ft out, on the puck's side of the group's rotation). A white halo keeps it crisp over lines.
  */
-function playerStick() {
-  const b = CARRY.lead, s = -0.5; // the shaft runs slightly to one side so the blade's curve wraps the puck spot
-  const shaft = `M1.2,${s} L${n(b - 0.45)},${s}`;
-  const blade = `M${n(b - 0.55)},${s} Q${n(b + 0.35)},${s} ${n(b + 0.95)},${n(s + 0.7)}`; // heel → curved blade → toe
-  // Outlined: a dark outline under a lighter shaft and a taped (dark) blade.
-  return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline blade" d="${blade}"/><path class="stick-shaft" d="${shaft}"/><path class="stick-blade" d="${blade}"/>`;
+function playerStick(color) {
+  const b = CARRY.lead, s = -0.45; // the shaft runs slightly to one side so the blade's curve wraps the puck spot
+  const shaft = `M1.3,${s} L${n(b - 0.4)},${s}`;
+  const heel = { x: b - 0.5, y: s }, ctrl = { x: b + 0.3, y: s }, toe = { x: b + 0.8, y: s + 0.6 }; // heel → curved blade → toe
+  const blade = `M${n(heel.x)},${n(heel.y)} Q${n(ctrl.x)},${n(ctrl.y)} ${n(toe.x)},${n(toe.y)}`;
+  // Outlined: a dark outline under a lighter shaft and blade; the blade is taped wrap by wrap, heel and toe left bare.
+  return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline blade" d="${blade}"/><path class="stick-shaft" d="${shaft}"/><path class="stick-blade" d="${blade}"/>${tape(heel, ctrl, toe, color)}`;
 }
 /** A goalie's stick from above: shaft, the thicker paddle, and a flat blade lying across the ice at the end. */
-function goalieStick() {
-  const shaft = 'M1.2,.15 L2.6,.5', paddle = 'M2.5,.47 L3.8,.8', blade = 'M3.7,.8 Q4.5,1.1 5.3,.7';
-  return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline paddle" d="${paddle}"/><path class="stick-outline blade" d="${blade}"/><path class="stick-shaft" d="${shaft}"/><path class="stick-paddle" d="${paddle}"/><path class="stick-blade" d="${blade}"/>`;
+function goalieStick(color) {
+  const shaft = 'M1.3,.15 L2.4,.45', paddle = 'M2.3,.42 L3.4,.72';
+  const heel = { x: 3.3, y: 0.72 }, ctrl = { x: 4.0, y: 0.98 }, toe = { x: 4.7, y: 0.62 };
+  const blade = `M${n(heel.x)},${n(heel.y)} Q${n(ctrl.x)},${n(ctrl.y)} ${n(toe.x)},${n(toe.y)}`;
+  return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline paddle" d="${paddle}"/><path class="stick-outline blade" d="${blade}"/><path class="stick-shaft" d="${shaft}"/><path class="stick-paddle" d="${paddle}"/><path class="stick-blade" d="${blade}"/>${tape(heel, ctrl, toe, color)}`;
+}
+/** Tape on the middle of a blade (a quadratic curve heel → ctrl → toe): one short line across the blade per wrap in the skater's colour, a touch see-through; the heel and toe end bare. */
+function tape(heel, ctrl, toe, color) {
+  const at = t => ({ x: (1 - t) ** 2 * heel.x + 2 * (1 - t) * t * ctrl.x + t * t * toe.x, y: (1 - t) ** 2 * heel.y + 2 * (1 - t) * t * ctrl.y + t * t * toe.y });
+  const tan = t => ({ x: 2 * (1 - t) * (ctrl.x - heel.x) + 2 * t * (toe.x - ctrl.x), y: 2 * (1 - t) * (ctrl.y - heel.y) + 2 * t * (toe.y - ctrl.y) });
+  const wraps = [];
+  for (let t = 0.24; t <= 0.78; t += 0.09) { // the taped stretch: about the middle half of the blade
+    const p = at(t), d = tan(t), len = Math.hypot(d.x, d.y) || 1, nx = -d.y / len * 0.27, ny = d.x / len * 0.27;
+    wraps.push(`M${n(p.x - nx)},${n(p.y - ny)} L${n(p.x + nx)},${n(p.y + ny)}`);
+  }
+  return `<path class="stick-tape" d="${wraps.join(' ')}" stroke="${color}"/>`;
 }
 
 /** The slab of a raised pad, drawn above skaters (see renderObjects). */

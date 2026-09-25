@@ -12,7 +12,7 @@ export const DEFAULT_SHOT_SPEED = 90;              // ft/s
  * `lead` ft ahead of the body centre and `lat` ft to the side, so the puck leads the skater.
  */
 export const CARRY = {
-  lead: 3.6,    // ft ahead of the body centre (on the blade of the stick drawn in render.js)
+  lead: 3.1,    // ft ahead of the body centre (on the blade of the stick drawn in render.js)
   rest: 1.3,    // lateral position on a straight (forehand side)
   max: 2.3,     // furthest the puck swings to either side
   tau: 2,       // ft of travel over which the puck eases toward its target side
@@ -63,11 +63,18 @@ export function jumpHeight(pose, pad, reach = 1.5) {
 /** A skater's full path: its own position followed by its waypoints. */
 export function skaterPoints(o) { return [{ x: o.x, y: o.y }, ...(o.path || [])]; }
 
-/** World position of a carried puck for a skater pose {x, y, heading (rad), lat, lead?}. */
+/**
+ * World position of a carried puck for a skater pose {x, y, heading (rad), lat, lead?}. The stick (render.js) points
+ * at the puck's spot, so the puck is nudged off the blade to the side it is being handled on — forehand (the concave
+ * face, on the skater's right) when `lat` is positive, backhand when negative — easing through the middle as it crosses.
+ */
+export const PUCK_OFF_BLADE = 0.55; // ft the drawn puck sits off the blade's face
 export function carriedPuckPos(pose) {
   const c = Math.cos(pose.heading), s = Math.sin(pose.heading);
-  const lead = pose.lead ?? CARRY.lead;
-  return { x: pose.x + c * lead - s * pose.lat, y: pose.y + s * lead + c * pose.lat };
+  const lead = pose.lead ?? CARRY.lead, lat = pose.lat ?? CARRY.rest;
+  const phi = pose.heading + Math.atan2(lat, lead); // the stick's axis
+  const k = Math.max(-1, Math.min(1, lat / 0.6)) * PUCK_OFF_BLADE;
+  return { x: pose.x + c * lead - s * lat - Math.sin(phi) * k, y: pose.y + s * lead + c * lat + Math.cos(phi) * k };
 }
 
 /**

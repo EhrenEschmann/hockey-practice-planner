@@ -834,6 +834,7 @@ document.addEventListener('keydown', e => {
   if (!editorOn) return;
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
+  if (!$('#settings').hidden) { if (e.key === 'Escape') closeSettings(); return; }
   if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
   if (!$('#feedback').hidden) { if (e.key === 'Escape') $('#feedback').hidden = true; return; }
   if (e.key === ' ' && !isEditing()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; } return; }
@@ -1741,6 +1742,34 @@ function openTeamMgr() {
 }
 function closeTeamMgr() { $('#teammgr').hidden = true; renderUI(); } // the team picker and stage box follow the roster
 
+// ---------- ⚙ Settings: the Claude key (see the ✨ section further down) and this device's preferences in one place ----------
+// Each preference already has its own control somewhere (toolbar checkboxes, the pane pin, the 🎬 row, the voice
+// toggle, the presenter's mode switch); the settings panel mirrors them and drives the same handlers.
+function openSettings() { finishActive(); closePopovers(); $('#settings').hidden = false; renderSettings(); }
+function closeSettings() { $('#settings').hidden = true; renderUI(); }
+function renderSettings() {
+  if ($('#settings').hidden) return;
+  const u = cloudSync?.user;
+  $('#settings-who').textContent = u ? u.email : cloudBoot === 'none' ? 'local only' : 'not signed in';
+  $('#settings-account').textContent = u ? `Signed in as ${u.name || u.email} (${u.email})${isOwner(u) ? ' — the planner' : ''}. Sign out is on the top bar.` : cloudBoot === 'none' ? 'No Firebase configured: everything stays on this device.' : 'Not signed in — practices, games and the Claude key are saved to the cloud once you sign in (top bar).';
+  const vals = { 'tire-keep': keepTool.tire, 'skater-keep': keepTool.skater, 'plan-pin': $('#sidebar').classList.contains('plan-unpinned') === false, 'video-wide': videoWide, voice: voiceOn, viewmode: presentMode === 'list' ? 'list' : 'focus' };
+  for (const el of $$('#settings [data-set]')) { if (el.type === 'checkbox') el.checked = !!vals[el.dataset.set]; else el.value = vals[el.dataset.set]; }
+  renderAIPop();
+}
+$('#settings').addEventListener('change', e => {
+  const k = e.target.dataset.set; if (!k) return;
+  const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  if (k === 'tire-keep' || k === 'skater-keep') { const box = $(`#${k}`); if (box.checked !== v) { box.checked = v; box.dispatchEvent(new Event('change')); } }
+  else if (k === 'plan-pin') { if ($('#sidebar').classList.contains('plan-unpinned') === v) $('#plan-pin').click(); }
+  else if (k === 'video-wide') setVideoWide(v);
+  else if (k === 'voice') setVoice(v);
+  else if (k === 'viewmode') { presentMode = v; try { localStorage.setItem('hpp.viewmode', v); } catch { /* fine */ } }
+  renderSettings();
+});
+$('#btn-settings').addEventListener('click', e => { e.stopPropagation(); if ($('#settings').hidden) openSettings(); else closeSettings(); });
+$('#settings-close').addEventListener('click', closeSettings);
+$('#settings').addEventListener('click', e => { if (e.target === $('#settings')) closeSettings(); }); // a click on the backdrop closes it
+
 function renderTeamMgr() {
   const t = currentMgrTeam();
   teamSelId = t?.id || null;
@@ -2261,10 +2290,10 @@ async function loadAIRecord() {
   renderAIPop();
 }
 function renderAIPop() {
-  const b = $('#btn-ai'); if (!b) return;
+  const b = $('#btn-settings'); if (!b) return;
   b.classList.toggle('ready', !!aiKey);
-  b.title = aiKey ? 'Claude is ready — ✨ Describe in the Drills panel lays out drills and coaching points for you' : aiRecord ? 'Claude: unlock your API key on this device' : 'Claude: keep your Anthropic API key here (encrypted) so ✨ Describe can lay out drills and coaching points for you';
-  if ($('#ai-pop').hidden) return;
+  b.title = `Settings: your Claude API key (${aiKey ? 'ready' : aiRecord ? 'locked on this device' : 'not set up'}), editor and presentation preferences`;
+  if ($('#settings').hidden) return;
   const st = $('#ai-status');
   st.classList.toggle('warn', !!aiBusy && /✗|⚠/.test(aiBusy));
   st.textContent = aiBusy || (aiKey ? `🔓 Unlocked on this device${aiRecord ? ' · ☁ encrypted copy in the cloud' : ' · not in the cloud'}${aiRecord?.at ? ` (saved ${stamp(aiRecord.at)})` : ''}` : aiRecord ? `🔒 An encrypted key is in the cloud${aiRecord.at ? ` (saved ${stamp(aiRecord.at)})` : ''} — enter the passphrase to use it here.` : cloudSync?.user ? 'No key yet. Paste your Anthropic API key and choose a passphrase.' : 'Sign in first — the encrypted key is kept under your account.');
@@ -2324,7 +2353,7 @@ function aiEditorHTML(p) {
 }
 async function aiAction(act, li) {
   if (act === 'close') { if (aiAbort) aiAbort.abort(); aiOpen = false; aiStatus = ''; renderPlan(); return; }
-  if (act === 'setup') { $('#btn-ai').click(); return; }
+  if (act === 'setup') { openSettings(); return; }
   if (act === 'cancel') { aiAbort?.abort(); return; }
   if (act !== 'generate' || aiGenerating) return;
   const p = store.practice;
@@ -3291,7 +3320,7 @@ function wirePopover(btnSel, popSel, focusSel) {
   });
 }
 wirePopover('#btn-new-practice', '#practice-pop', '#practice-date');
-wirePopover('#btn-ai', '#ai-pop', '#ai-pass-unlock');
+
 wirePopover('#btn-practices', '#plist-pop', '#plist-create');
 /** Add a drill and open its list row in edit mode, name selected and ready to type over. */
 function addDrillAndRename() {

@@ -69,29 +69,9 @@
   </div>
   <button id="btn-team" title="Manage your team: coaches with emails, players with parent / grandparent contacts — the roster decides who can open released practices. Access requests show up here.">👥 Team</button>
   <button id="btn-feedback" title="Feedback the coaches left on this practice — only you can read it">💬</button>
-  <div id="ai-wrap">
-    <button id="btn-ai" title="Claude: keep your Anthropic API key here (encrypted) so ✨ Describe can lay out drills and coaching points for you">✨ AI</button>
-    <div id="ai-pop" hidden>
-      <h3>Claude</h3>
-      <div id="ai-status" class="muted small"></div>
-      <div id="ai-unlock" hidden>
-        <label class="field"><span>Passphrase</span><input id="ai-pass-unlock" type="password" autocomplete="current-password" placeholder="Unlock the key on this device"></label>
-        <div class="row"><button id="ai-do-unlock" class="primary">🔓 Unlock</button></div>
-      </div>
-      <details id="ai-setup">
-        <summary class="small">Set or replace the key</summary>
-        <label class="field"><span>Anthropic API key</span><input id="ai-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
-        <label class="field"><span>Passphrase</span><input id="ai-pass" type="password" autocomplete="new-password" placeholder="Encrypts the key before it goes to the cloud"></label>
-        <p class="muted small">The key is encrypted in this browser with the passphrase (PBKDF2 + AES-GCM) and only the ciphertext is stored under your account. You enter the passphrase once per device. There is no way to recover a forgotten passphrase — just paste the key again.</p>
-        <div class="row"><button id="ai-save" class="primary">☁ Save encrypted</button></div>
-      </details>
-      <label class="check small" id="ai-remember-wrap"><input type="checkbox" id="ai-remember" checked> Keep it unlocked on this device</label>
-      <div class="row" id="ai-danger"><button id="ai-forget" class="small-link">Lock on this device</button><button id="ai-remove" class="small-link danger-link">Remove from the cloud</button></div>
-      <p class="muted small">Requests go straight from this browser to Anthropic and are billed to that key (Claude Opus 5, a few cents per layout).</p>
-    </div>
-  </div>
   <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
   <button id="btn-del-practice" title="Delete — moves it to Deleted in the picker, where it can be restored" class="danger">Delete</button>
+  <button id="btn-settings" title="Settings: your Claude API key, editor and presentation preferences">⚙ Settings</button>
   <div class="spacer"></div>
   <button id="btn-undo" title="Undo (Ctrl+Z)"><span data-icon="undo"></span> Undo</button>
   <button id="btn-redo" title="Redo (Ctrl+Y)"><span data-icon="redo"></span> Redo</button>
@@ -228,6 +208,55 @@
       <button id="lib-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
     </div>
     <div id="lib-grid"></div>
+  </div>
+</div>
+<div id="settings" hidden>
+  <div class="lib-panel">
+    <div class="lib-head">
+      <b>⚙ Settings</b>
+      <span class="muted small" id="settings-who"></span>
+      <span class="spacer"></span>
+      <button id="settings-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
+    </div>
+    <div id="settings-body">
+      <section class="set-sec" id="ai-pop">
+        <h3>✨ Claude</h3>
+        <p class="muted small">Powers ✨ Describe in the Drills panel. The key is yours from the Claude developer console; it is kept encrypted under your account and unlocked per device.</p>
+
+      <div id="ai-status" class="muted small"></div>
+      <div id="ai-unlock" hidden>
+        <label class="field"><span>Passphrase</span><input id="ai-pass-unlock" type="password" autocomplete="current-password" placeholder="Unlock the key on this device"></label>
+        <div class="row"><button id="ai-do-unlock" class="primary">🔓 Unlock</button></div>
+      </div>
+      <details id="ai-setup">
+        <summary class="small">Set or replace the key</summary>
+        <label class="field"><span>Anthropic API key</span><input id="ai-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+        <label class="field"><span>Passphrase</span><input id="ai-pass" type="password" autocomplete="new-password" placeholder="Encrypts the key before it goes to the cloud"></label>
+        <p class="muted small">The key is encrypted in this browser with the passphrase (PBKDF2 + AES-GCM) and only the ciphertext is stored under your account. You enter the passphrase once per device. There is no way to recover a forgotten passphrase — just paste the key again.</p>
+        <div class="row"><button id="ai-save" class="primary">☁ Save encrypted</button></div>
+      </details>
+      <label class="check small" id="ai-remember-wrap"><input type="checkbox" id="ai-remember" checked> Keep it unlocked on this device</label>
+      <div class="row" id="ai-danger"><button id="ai-forget" class="small-link">Lock on this device</button><button id="ai-remove" class="small-link danger-link">Remove from the cloud</button></div>
+      <p class="muted small">Requests go straight from this browser to Anthropic and are billed to that key (Claude Opus 5, a few cents per layout).</p>
+      </section>
+      <section class="set-sec">
+        <h3>✏️ Editor <span class="muted small">— this device</span></h3>
+        <label class="check"><input type="checkbox" data-set="tire-keep"> Tires: keep placing after each one</label>
+        <label class="check"><input type="checkbox" data-set="skater-keep"> Skaters: keep placing after each one</label>
+        <label class="check"><input type="checkbox" data-set="plan-pin"> Keep the Drills pane pinned open</label>
+        <label class="check"><input type="checkbox" data-set="video-wide"> Hide the rink while a 🎬 video row is open</label>
+        <label class="check"><input type="checkbox" data-set="voice"> 🔊 Voice: play intros, voice-overs and spoken cues</label>
+      </section>
+      <section class="set-sec">
+        <h3>📱 Presentation <span class="muted small">— this device</span></h3>
+        <label class="field"><span>Default view</span><select data-set="viewmode"><option value="focus">One drill at a time (phone / rink mode)</option><option value="list">The whole plan as a scroll-through</option></select></label>
+      </section>
+      <section class="set-sec">
+        <h3>👤 Account</h3>
+        <div id="settings-account" class="muted small"></div>
+        <p class="muted small">The planner account is fixed in the app (OWNER_EMAILS in js/main.js); everyone else only ever gets the coach or team view. Teams, coaches and families live under 👥 Team.</p>
+      </section>
+    </div>
   </div>
 </div>
 <div id="teammgr" hidden>

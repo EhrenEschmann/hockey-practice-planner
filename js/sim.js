@@ -68,7 +68,7 @@ export function skaterPoints(o) { return [{ x: o.x, y: o.y }, ...(o.path || [])]
  * at the puck's spot; the puck is then nudged forward, off the front face of the blade in the direction the body
  * faces, so a skater carrying it is seen pushing it ahead rather than standing on it.
  */
-export const PUCK_OFF_BLADE = 0.55; // ft the drawn puck sits ahead of the blade
+export const PUCK_OFF_BLADE = 1.35; // ft the drawn puck sits ahead of the blade: blade half-width + puck radius (0.65) + a visible gap
 export function carriedPuckPos(pose) {
   const c = Math.cos(pose.heading), s = Math.sin(pose.heading);
   const lead = (pose.lead ?? CARRY.lead) + PUCK_OFF_BLADE, lat = pose.lat ?? CARRY.rest;

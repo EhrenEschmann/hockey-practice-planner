@@ -48,7 +48,7 @@ export const DRILL_SCHEMA = obj({
   players: { type: 'array', items: obj({
     kind: { type: 'string', enum: ['skater', 'coach'] },
     label: { ...str, description: 'Short label: skaters are numbered per side ("1", "2"…), goalies "G", coaches "C"' },
-    side: { type: ['string', 'null'], enum: ['O', 'D', null], description: 'Offense (blue) or defense (red) for skaters; null for goalies and coaches' },
+    side: { type: 'string', enum: ['O', 'D', 'none'], description: 'Offense (blue) or defense (red) for skaters; "none" for goalies and coaches' },
     role: { type: 'string', enum: ['F', 'D', 'G'], description: 'F forward, D defenceman, G goalie (coaches: F)' },
     x: num, y: num,
     speed: { ...num, description: 'ft/s along the path' },
@@ -128,7 +128,7 @@ export function layoutToObjects(layout, { uid, zoneColors = ZONE_PALETTE } = {})
     if (p.kind === 'coach') out.push({ id, type: 'coach', x: px(p.x), y: py(p.y), label, speed: clampRink(p.speed || 10, 1, 40), delay: clampRink(p.delay, 0, 120), path });
     else {
       const role = ['F', 'D', 'G'].includes(p.role) ? p.role : 'F';
-      const side = role === 'G' ? null : (p.side === 'D' ? 'D' : 'O');
+      const side = role === 'G' ? null : (p.side === 'D' ? 'D' : 'O'); // "none" on a skater still gets a side (offense) so numbering and colour work
       out.push({ id, type: 'skater', x: px(p.x), y: py(p.y), label, color: role === 'G' ? 'green' : side === 'D' ? 'red' : 'blue', role, speed: clampRink(p.speed || 18, 1, 40), delay: clampRink(p.delay, 0, 120), backward: !!p.backward, path, ...(side ? { side } : {}), ...(p.startCue ? { startCue: String(p.startCue) } : {}) });
       skaterIds.add(id);
     }

@@ -26,6 +26,9 @@ const walk = (s, path = '$') => {
   if (s.items) walk(s.items, `${path}[]`);
 };
 walk(DRILL_SCHEMA);
+// the API refuses an enum whose declared type is a union: every enum in the schema must sit on a single type
+const enums = (s, path = '$') => { const out = []; if (s.enum) out.push([path, s]); for (const [k, v] of Object.entries(s.properties || {})) out.push(...enums(v, `${path}.${k}`)); if (s.items) out.push(...enums(s.items, `${path}[]`)); return out; };
+for (const [path, s] of enums(DRILL_SCHEMA)) assert.equal(typeof s.type, 'string', `${path}: enum on a single type`);
 
 // ---- the system prompt names the half-ice setup for games and what is already on the ice
 const sys = systemPrompt({ game: true, view: { x: -3, y: -3, w: 106, h: 91 }, existing: [{ type: 'net', x: 11, y: 42.5, rot: 0 }, { type: 'net', x: 85, y: 42.5, rot: 180 }] });
@@ -39,8 +42,8 @@ const layout = {
     { kind: 'skater', label: '1', side: 'O', role: 'F', x: 95, y: 20, speed: 18, delay: 0, backward: false, startCue: 'Go!', path: [{ x: 60, y: 15, cue: null }, { x: 30, y: 30, cue: 'Shoot' }] },
     { kind: 'skater', label: '2', side: 'O', role: 'F', x: 95, y: 60, speed: 18, delay: 0.5, backward: false, startCue: null, path: [{ x: 40, y: 55, cue: null }] },
     { kind: 'skater', label: '1', side: 'D', role: 'D', x: 60, y: 42, speed: 12, delay: 0, backward: true, startCue: null, path: [{ x: 25, y: 42, cue: null }] },
-    { kind: 'skater', label: 'G', side: null, role: 'G', x: 14.5, y: 42.5, speed: 20, delay: 0, backward: false, startCue: null, path: [] },
-    { kind: 'coach', label: 'C', side: null, role: 'F', x: 250, y: -4, speed: 10, delay: 0, backward: false, startCue: null, path: [] },
+    { kind: 'skater', label: 'G', side: 'none', role: 'G', x: 14.5, y: 42.5, speed: 20, delay: 0, backward: false, startCue: null, path: [] },
+    { kind: 'coach', label: 'C', side: 'none', role: 'F', x: 250, y: -4, speed: 10, delay: 0, backward: false, startCue: null, path: [] },
   ],
   pucks: [{ carrier: '1', x: null, y: null, events: [{ type: 'pass', wp: 1, to: '2', targetX: null, targetY: null }, { type: 'shoot', wp: 1, to: null, targetX: 11, targetY: 44 }, { type: 'pass', wp: 2, to: 'nobody', targetX: null, targetY: null }] },
           { carrier: null, x: 50, y: 10, events: [{ type: 'pickup', wp: 0, to: 'D1', targetX: null, targetY: null }] }],

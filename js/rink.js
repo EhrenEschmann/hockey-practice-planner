@@ -50,6 +50,10 @@ export const SVG_STYLE = `
   .stick-blade{fill:none;stroke:#e9d9b8;stroke-width:.44;stroke-linecap:round}
   .stick-tape{fill:none;stroke-width:.14;stroke-opacity:.75;stroke-linecap:butt}
   .stick-paddle{fill:none;stroke:#e9d9b8;stroke-width:.38;stroke-linecap:round}
+  .stick-outline.gpaddle{stroke-width:1.1;stroke-linecap:butt}
+  .stick-outline.gblade{stroke-width:1.1}
+  .stick-gpaddle{fill:none;stroke:#e9d9b8;stroke-width:.72;stroke-linecap:butt}
+  .stick-gblade{fill:none;stroke:#e9d9b8;stroke-width:.72;stroke-linecap:round}
   .skater-body.sliding .body{stroke-dasharray:.6 .4}
   .skater-body text{font-family:system-ui,sans-serif;pointer-events:none}
   .coach-body .body{stroke:#fff;stroke-width:.35}

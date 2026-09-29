@@ -314,9 +314,12 @@ const draw = {
     // Tackle pad: a padded bumper held out in the facing direction.
     const hd = o.pad && opts.sim ? opts.sim.skaterPose(o.id, 0).heading * 180 / Math.PI : 0;
     const pad = o.pad ? `<g transform="rotate(${n(hd)})"><rect x="1.9" y="-1.8" width="1.15" height="3.6" rx=".55" fill="#c05621" stroke="#7a3a12" stroke-width=".22"/></g>` : '';
+    // A stick (optional): a player's stick, squared to the facing like a goalie's — it turns with the coach and, during
+    // playback, toward the puck (js/main.js animateFrame), never swinging with a carried puck's side.
+    const stick = o.stick ? `<g class="dir" transform="rotate(${opts.sim ? stickRotation(opts.sim.skaterPose(o.id, 0), 'coach') : 0})">${playerStick(color)}</g>` : '';
     return `<g class="obj coach" data-id="${o.id}">${h}${wps}
       <g class="coach-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
-        ${pad}<polygon class="body" points="0,-2.5 2.5,0 0,2.5 -2.5,0" fill="${color}"/>
+        ${pad}${stick}<polygon class="body" points="0,-2.5 2.5,0 0,2.5 -2.5,0" fill="${color}"/>
         <text y=".65" font-size="1.8" text-anchor="middle" fill="${textFill}" font-weight="700">${esc(o.label)}</text>
       </g>
     </g>`;

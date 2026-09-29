@@ -1131,6 +1131,7 @@ function animateFrame(dr, sm, root, fx, t, playing) {
       if (knock?.id === o.id) p = { ...p, x: p.x + knock.x, y: p.y + knock.y };
       if (el && o.type === 'skater') el.classList.toggle('hit', knock?.id === o.id);
       if (el && o.type === 'skater') el.querySelector('.dir')?.setAttribute('transform', `rotate(${stickRotation(p, o.role)})`);
+      if (el && o.type === 'coach' && o.stick) el.querySelector('.dir')?.setAttribute('transform', `rotate(${stickRotation(p, 'coach')})`);
       if (el && o.type === 'skater') {
         // Under a raised pad the skater slides: body stretched along their heading and flattened.
         const sliding = raised.some(pd => underPad(p, pd, 1));
@@ -1159,10 +1160,11 @@ function animateFrame(dr, sm, root, fx, t, playing) {
       const badge = root.querySelector(`[data-id="${o.id}"] .pile-count`);
       if (badge) badge.textContent = Math.max(0, Math.round(+o.count || 0) - (t > 0 ? taken : dr.objects.filter(pk => pk.type === 'puck' && pk.pile === o.id).length));
     }
-    // Goalies square up to the puck as it moves (standing in the crease or on a path of their own); parked at 0 they keep their back to the net.
-    if (o.type === 'skater' && o.role === 'G' && t > 0) {
+    // Goalies (and coaches holding a stick) square up to the puck as it moves — standing or on a path of their own, unless
+    // they are carrying it themselves; parked at 0 they keep their default facing (a goalie's back to the net).
+    if (((o.type === 'skater' && o.role === 'G') || (o.type === 'coach' && o.stick)) && t > 0) {
       const gel = el || root.querySelector(`[data-skater="${o.id}"]`);
-      const h = gel ? goalieSquareTo(sm, dr.objects, p || o, t) : null;
+      const h = gel ? goalieSquareTo(sm, dr.objects, p || o, t, o.id) : null;
       if (h != null) gel.querySelector('.dir')?.setAttribute('transform', `rotate(${stickRotation({ heading: h }, 'G')})`);
     }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);
@@ -2762,7 +2764,7 @@ const PROPS = {
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
     ['backward', 'checkbox', 'Starts skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
-  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['pad', 'checkbox', 'Tackle pad'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
+  coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['pad', 'checkbox', 'Tackle pad'], ['stick', 'checkbox', 'Stick'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
   minicone: [['color', 'color', 'Color']],
   tire: [],

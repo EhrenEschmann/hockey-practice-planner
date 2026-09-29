@@ -80,7 +80,7 @@ export function carriedPuckPos(pose) {
  * (`lat` / `lead` in the skater's frame), so the blade follows the puck while stickhandling and rests on the
  * forehand side when there is nothing to carry.
  */
-export const stickRotation = (pose, role = null) => ((pose.heading + (role === 'G' ? 0 : Math.atan2(pose.lat ?? CARRY.rest, pose.lead ?? CARRY.lead))) * 180 / Math.PI).toFixed(1); // a goalie's stopper squares up to the facing
+export const stickRotation = (pose, role = null) => ((pose.heading + (role === 'G' || role === 'coach' ? 0 : Math.atan2(pose.lat ?? CARRY.rest, pose.lead ?? CARRY.lead))) * 180 / Math.PI).toFixed(1); // goalies' and coaches' sticks square up to the facing
 
 const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -103,10 +103,13 @@ export function facingOf(o, objs = []) {
   } else if (o.type === 'skater' && near) target = near;
   return Math.atan2(target.y - o.y, target.x - o.x);
 }
-/** Where a goalie looks during playback: square to the nearest puck at time t (null when the drill has no puck). */
-export function goalieSquareTo(sm, objs, at, t) {
+/** Where a goalie (or a coach with a stick) looks during playback: square to the nearest puck at time t that they are not carrying themselves (null when there is none). */
+export function goalieSquareTo(sm, objs, at, t, selfId = null) {
   let best = null, bd = Infinity;
-  for (const pk of objs) if (pk.type === 'puck') { const q = sm.puckPos(pk.id, t); const d = G.dist(q, at); if (d < bd) { bd = d; best = q; } }
+  for (const pk of objs) {
+    if (pk.type !== 'puck' || (selfId && sm.puckCarrierAt(pk.id, t) === selfId)) continue;
+    const q = sm.puckPos(pk.id, t); const d = G.dist(q, at); if (d < bd) { bd = d; best = q; }
+  }
   return best ? Math.atan2(best.y - at.y, best.x - at.x) : null;
 }
 

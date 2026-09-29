@@ -128,7 +128,7 @@ function shotOverlay(opts) {
       if (r.type !== 'shoot' || !r.ok || !r.from) continue;
       const pts = r.bank ? [r.from, r.bank, r.to] : [r.from, r.to];
       if (!goalies.some(g => closestOnPolyline(pts, g).dist < 2.8)) continue;
-      lines.push(`<polyline class="shot-line" fill="none" points="${ptsStr(pts)}"/>${arrowHead(pts.slice(-2), '#333', 2)}`);
+      lines.push(`<polyline class="shot-line" fill="none" points="${ptsStr(pts)}"/>${arrowHead(pts.slice(-2), '#8a8f99', 2)}`);
     }
   }
   return lines.length ? `<g class="shot-overlay">${lines.join('')}</g>` : '';
@@ -284,8 +284,8 @@ const draw = {
     const lines = opts.showPaths === false ? '' : ps.info.map((r, i) => {
       if (!r.ok || !r.from) return '';
       if (r.type !== 'pass') {
-        if (!r.bank) return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 2)}`;
-        return `<polyline class="shot-line" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 2)}
+        if (!r.bank) return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#8a8f99', 2)}`;
+        return `<polyline class="shot-line" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#8a8f99', 2)}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;
       }
       // The arrival end of a pass is a handle too: dragging it along the receiver's path times the pass by the

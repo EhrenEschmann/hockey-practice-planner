@@ -111,14 +111,17 @@ export function goalieHome(o, objs) {
 }
 /**
  * Where a goalie (or a coach with a stick) looks during playback: square to the nearest puck at time t that they are
- * not carrying themselves (null when there is none). With a `home` facing (a goalie in their net) the turn is limited
- * to 90° either side of it: a goalie never faces into their own goal — a puck behind the net turns them sideways at most.
+ * not carrying themselves (null when there is none). A shot in flight does not turn them — they stay set on the spot it
+ * was released from until it lands. With a `home` facing (a goalie in their net) the turn is limited to 90° either
+ * side of it: a goalie never faces into their own goal — a puck behind the net turns them sideways at most.
  */
 export function goalieSquareTo(sm, objs, at, t, selfId = null, home = null) {
   let best = null, bd = Infinity;
   for (const pk of objs) {
     if (pk.type !== 'puck' || (selfId && sm.puckCarrierAt(pk.id, t) === selfId)) continue;
-    const q = sm.puckPos(pk.id, t); const d = G.dist(q, at); if (d < bd) { bd = d; best = q; }
+    const seg = sm.puckSegAt(pk.id, t);
+    const q = seg.shot ? seg.shot : sm.puckPos(pk.id, t); // a shot in flight, or lying where it landed: hold on the shooter's release point
+    const d = G.dist(sm.puckPos(pk.id, t), at); if (d < bd) { bd = d; best = q; }
   }
   if (!best) return null;
   const want = Math.atan2(best.y - at.y, best.x - at.x);
@@ -348,6 +351,7 @@ export function makeSim(drill) {
     // A puck taken from a pile starts in the pile (and follows it if the pile is moved).
     const pile = p.pile ? byId(p.pile) : null;
     let loose = pile?.type === 'pile' ? { x: pile.x, y: pile.y } : { x: p.x, y: p.y };
+    let shotFrom = null; // set while the puck lies where a shot left it: goalies stay set on that release point
     const passSpeed = +p.passSpeed || DEFAULT_PASS_SPEED;
     const shotSpeed = +p.shotSpeed || DEFAULT_SHOT_SPEED;
 
@@ -391,7 +395,8 @@ export function makeSim(drill) {
       if (ev.type === 'pickup') {
         if (carrier || !isSkater(ev.skater)) continue;
         const want = evTime(ev.skater, ev), tp = Math.max(t, want);
-        segs.push({ t0: t, t1: tp, kind: 'loose', at: loose });
+        segs.push({ t0: t, t1: tp, kind: 'loose', at: loose, ...(shotFrom ? { shot: shotFrom } : {}) });
+        shotFrom = null;
         t = tp; carrier = ev.skater;
         Object.assign(rec, { ok: true, t: tp, late: tp > want + 1e-6, at: loose, mark: markAt(ev.skater, tp) });
       } else if (!carrier) {
@@ -437,14 +442,14 @@ export function makeSim(drill) {
         const travel = (bank ? G.dist(from, bank) + G.dist(bank, to) : G.dist(from, to)) / shotSpeed;
         if (bank) {
           const tb = tr + G.dist(from, bank) / shotSpeed;
-          segs.push({ t0: tr, t1: tb, kind: 'flying', from, to: bank }, { t0: tb, t1: tr + travel, kind: 'flying', from: bank, to });
-        } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
-        t = tr + travel; carrier = null; loose = to;
+          segs.push({ t0: tr, t1: tb, kind: 'flying', shot: from, from, to: bank }, { t0: tb, t1: tr + travel, kind: 'flying', shot: from, from: bank, to });
+        } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', shot: from, from, to });
+        t = tr + travel; carrier = null; loose = to; shotFrom = from;
         Object.assign(rec, { ok: true, t: tr, from, to, bank, mark: markAt(rec.carrier, tr) });
       }
     }
     if (carrier) pushCarried(Infinity);
-    else segs.push({ t0: t, t1: Infinity, kind: 'loose', at: loose });
+    else segs.push({ t0: t, t1: Infinity, kind: 'loose', at: loose, ...(shotFrom ? { shot: shotFrom } : {}) });
     s = { segs, info, end: segs.at(-1).t0 };
     pucks.set(id, s);
     return s;
@@ -460,6 +465,12 @@ export function makeSim(drill) {
     return { x: seg.from.x + (seg.to.x - seg.from.x) * f, y: seg.from.y + (seg.to.y - seg.from.y) * f };
   }
 
+  /** The puck's movement segment at time t: { kind: 'carried' | 'loose' | 'flying', … }; a shot in flight carries `shot` = where it was released. */
+  function puckSegAt(id, t) {
+    const { segs } = puck(id);
+    for (const s of segs) if (t >= s.t0 && t < s.t1) return s;
+    return segs[segs.length - 1];
+  }
   /** Which skater carries the puck at time t (null if loose/flying). */
   function puckCarrierAt(id, t) {
     for (const s of puck(id).segs) if (t >= s.t0 && t < s.t1) return s.kind === 'carried' ? s.carrier : null;
@@ -576,5 +587,5 @@ export function makeSim(drill) {
     return Math.round(T * 100) / 100;
   }
 
-  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, evTime, puck, puckPos, puckCarrierAt, contacts, contactSync, duration, meetInfo };
+  return { byId, skater, skaterPos, skaterPose, puckAt, skaterEnd, wpTime, evTime, puck, puckPos, puckSegAt, puckCarrierAt, contacts, contactSync, duration, meetInfo };
 }

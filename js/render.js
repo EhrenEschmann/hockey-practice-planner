@@ -378,7 +378,7 @@ function playerStick(color) {
 function goalieStick(color) {
   const shaft = 'M1.1,2.15 L1.7,1.95';                       // a stub of shaft at the blocker hand
   const paddle = { a: { x: 1.7, y: 1.95 }, b: { x: 2.75, y: 1.2 } };  // hand → heel, the wide part
-  const heel = { x: 2.75, y: 1.2 }, ctrl = { x: 3.1, y: -0.15 }, toe = { x: 2.85, y: -1.45 }; // the blade across the front, a little clear of the body
+  const heel = { x: 2.75, y: 1.2 }, ctrl = { x: 3.05, y: 0.35 }, toe = { x: 2.9, y: -0.55 }; // a short blade across the front, a little clear of the body
   const pd = `M${n(paddle.a.x)},${n(paddle.a.y)} L${n(paddle.b.x)},${n(paddle.b.y)}`;
   const blade = `M${n(heel.x)},${n(heel.y)} Q${n(ctrl.x)},${n(ctrl.y)} ${n(toe.x)},${n(toe.y)}`;
   return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline gpaddle" d="${pd}"/><path class="stick-outline gblade" d="${blade}"/>

@@ -91,14 +91,23 @@ export const isPlayer = o => o?.type === 'skater' || o?.type === 'coach';
  * Heading (radians) of a player that is not moving along a path: the explicit `facing` if set, otherwise
  * skaters face the nearest net; goalies and coaches face centre ice.
  */
+export const GOALIE_NET_REACH = 9; // ft: a goalie this close to a net is "in" it and keeps their back to it
 export function facingOf(o, objs = []) {
   if (o.facing !== undefined && o.facing !== null && o.facing !== '') return (+o.facing) * Math.PI / 180;
   let target = { x: 100, y: 42.5 };
-  if (o.type === 'skater' && o.role !== 'G') {
-    let bd = Infinity;
-    for (const x of objs) if (x.type === 'net') { const d = G.dist(x, o); if (d < bd) { bd = d; target = x; } }
-  }
+  let bd = Infinity, near = null;
+  for (const x of objs) if (x.type === 'net') { const d = G.dist(x, o); if (d < bd) { bd = d; near = x; } }
+  if (o.type === 'skater' && o.role === 'G') {
+    // A goalie's back is to their net: they face the way its mouth does. Away from any net, they face centre ice.
+    if (near && bd <= GOALIE_NET_REACH) return ((+near.rot || 0) * Math.PI) / 180;
+  } else if (o.type === 'skater' && near) target = near;
   return Math.atan2(target.y - o.y, target.x - o.x);
+}
+/** Where a goalie looks during playback: square to the nearest puck at time t (null when the drill has no puck). */
+export function goalieSquareTo(sm, objs, at, t) {
+  let best = null, bd = Infinity;
+  for (const pk of objs) if (pk.type === 'puck') { const q = sm.puckPos(pk.id, t); const d = G.dist(q, at); if (d < bd) { bd = d; best = q; } }
+  return best ? Math.atan2(best.y - at.y, best.x - at.x) : null;
 }
 
 /**

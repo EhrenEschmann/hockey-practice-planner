@@ -76,7 +76,7 @@ export const DRILL_SCHEMA = obj({
   labels: { type: 'array', items: obj({ text: str, x: num, y: num }), description: 'Short text annotations on the ice' },
 }, 'One drill or coaching point laid out on the rink');
 
-export const RINK_GUIDE = `Rink coordinates are feet, origin at the top-left corner of a 200 x 85 NHL rink: x runs 0 (left end boards) to 200 (right end boards), y runs 0 (top boards) to 85 (bottom boards). Goal lines are at x = 11 and x = 189 with the nets centred on y = 42.5; a net at x = 11 faces +x (rot 0), one at x = 189 faces −x (rot 180). Blue lines are at x = 75 and 125, the centre red line at x = 100, the centre circle radius 15. End-zone faceoff dots are at (31, 20.5), (31, 64.5), (169, 20.5), (169, 64.5); neutral-zone dots at x = 80 / 120, same y. A goalie standing in a crease is about 3.5 ft in front of the goal line (x ≈ 14.5 or 185.5).`;
+export const RINK_GUIDE = `Rink coordinates are feet, origin at the top-left corner of a 200 x 85 NHL rink: x runs 0 (left end boards) to 200 (right end boards), y runs 0 (top boards) to 85 (bottom boards). Goal lines are at x = 11 and x = 189 with the nets centred on y = 42.5; a net at x = 11 faces +x (rot 0), one at x = 189 faces −x (rot 180). Blue lines are at x = 75 and 125, the centre red line at x = 100, the centre circle radius 15. End-zone faceoff dots are at (31, 20.5), (31, 64.5), (169, 20.5), (169, 64.5); neutral-zone dots at x = 80 / 120, same y. A goalie standing in a crease is about 2.2 ft in front of the goal line, tucked into the net's mouth (x ≈ 13.2 or 186.8).`;
 
 /** The system prompt: rink facts, what is already on the ice, and how the animation reads the numbers. */
 export function systemPrompt({ game = false, view = null, existing = [] } = {}) {

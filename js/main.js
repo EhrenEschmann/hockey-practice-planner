@@ -276,7 +276,7 @@ function newPuck(p, carrier) {
 
 /** Tools that place a single object at a point — usable by click and by dragging the toolbar button onto the ice. */
 const PLACEABLE = new Set(['coach', 'skater', 'goalie', 'cone', 'minicone', 'tire', 'puck', 'pile', 'net', 'raisedpad', 'jumppad', 'contact']);
-const CREASE_DEPTH = 3.5;  // ft in front of the goal line where a goalie stands
+const CREASE_DEPTH = 2.2;  // ft in front of the goal line where a goalie stands — tucked into the mouth of the net
 const NET_SNAP = 8;        // ft: a goalie placed this close to a net goes into its crease
 const MINICONE_SPACING = 3; // ft between small cones when laying a row
 

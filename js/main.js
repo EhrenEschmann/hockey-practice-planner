@@ -1,7 +1,7 @@
 import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
-import { makeSim, facingOf, goalieSquareTo, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
+import { makeSim, facingOf, goalieSquareTo, goalieHome, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, usDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
@@ -1164,7 +1164,7 @@ function animateFrame(dr, sm, root, fx, t, playing) {
     // they are carrying it themselves; parked at 0 they keep their default facing (a goalie's back to the net).
     if (((o.type === 'skater' && o.role === 'G') || (o.type === 'coach' && o.stick)) && t > 0) {
       const gel = el || root.querySelector(`[data-skater="${o.id}"]`);
-      const h = gel ? goalieSquareTo(sm, dr.objects, p || o, t, o.id) : null;
+      const h = gel ? goalieSquareTo(sm, dr.objects, p || o, t, o.id, o.role === 'G' ? goalieHome(p || o, dr.objects) : null) : null;
       if (h != null) gel.querySelector('.dir')?.setAttribute('transform', `rotate(${stickRotation({ heading: h }, 'G')})`);
     }
     if (el) el.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})`);

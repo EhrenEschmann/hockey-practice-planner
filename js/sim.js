@@ -103,14 +103,27 @@ export function facingOf(o, objs = []) {
   } else if (o.type === 'skater' && near) target = near;
   return Math.atan2(target.y - o.y, target.x - o.x);
 }
-/** Where a goalie (or a coach with a stick) looks during playback: square to the nearest puck at time t that they are not carrying themselves (null when there is none). */
-export function goalieSquareTo(sm, objs, at, t, selfId = null) {
+/** A goalie's home facing: out of the mouth of the net they stand in (within GOALIE_NET_REACH), or null away from any net. */
+export function goalieHome(o, objs) {
+  let bd = Infinity, near = null;
+  for (const x of objs) if (x.type === 'net') { const d = G.dist(x, o); if (d < bd) { bd = d; near = x; } }
+  return near && bd <= GOALIE_NET_REACH ? ((+near.rot || 0) * Math.PI) / 180 : null;
+}
+/**
+ * Where a goalie (or a coach with a stick) looks during playback: square to the nearest puck at time t that they are
+ * not carrying themselves (null when there is none). With a `home` facing (a goalie in their net) the turn is limited
+ * to 90° either side of it: a goalie never faces into their own goal — a puck behind the net turns them sideways at most.
+ */
+export function goalieSquareTo(sm, objs, at, t, selfId = null, home = null) {
   let best = null, bd = Infinity;
   for (const pk of objs) {
     if (pk.type !== 'puck' || (selfId && sm.puckCarrierAt(pk.id, t) === selfId)) continue;
     const q = sm.puckPos(pk.id, t); const d = G.dist(q, at); if (d < bd) { bd = d; best = q; }
   }
-  return best ? Math.atan2(best.y - at.y, best.x - at.x) : null;
+  if (!best) return null;
+  const want = Math.atan2(best.y - at.y, best.x - at.x);
+  if (home == null) return want;
+  return home + G.clamp(wrapAngle(want - home), -Math.PI / 2, Math.PI / 2);
 }
 
 /**

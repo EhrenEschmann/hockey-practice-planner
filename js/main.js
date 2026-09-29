@@ -1175,8 +1175,8 @@ function animateFrame(dr, sm, root, fx, t, playing) {
 // A cue lives on the waypoint itself (`pt.cue`, or `startCue` on the player for their start), so it copies,
 // nudges and clones with the path and is timed by the same sim clock as passes and triggered starts.
 const canSpeak = 'speechSynthesis' in window;
-let voiceOn = true;
-try { voiceOn = localStorage.getItem('hpp.voice') !== '0'; } catch { /* storage blocked: on */ }
+const storedVoice = () => { try { return localStorage.getItem('hpp.voice') !== '0'; } catch { return true; } }; // the editor's per-device mute
+let voiceOn = storedVoice();
 let voicePrimed = false;
 const hasCues = dr => dr.objects.some(o => isPlayer(o) && (o.startCue?.trim() || (o.path || []).some(pt => pt.cue?.trim())));
 const hasVoice = dr => (canSpeak && hasCues(dr)) || !!dr.intro || !!dr.narration; // anything the 🔊 toggle would silence
@@ -1309,7 +1309,7 @@ function setVoice(on) {
   voiceOn = on;
   try { localStorage.setItem('hpp.voice', on ? '1' : '0'); } catch { /* fine */ }
   if (!on) hushVoice();
-  for (const b of $$('#anim-voice, .pr-voice')) { b.classList.toggle('active', on); b.textContent = on ? '🔊 voice' : '🔇 muted'; b.title = on ? 'Voice on — click to mute intros and cues' : 'Voice muted on this device — click to hear intros and cues'; }
+  for (const b of $$('#anim-voice')) { b.classList.toggle('active', on); b.textContent = on ? '🔊 voice' : '🔇 muted'; b.title = on ? 'Voice on — click to mute intros and cues' : 'Voice muted on this device — click to hear intros and cues'; }
 }
 /**
  * Narrator for one playback: step(prev, now) speaks and captions every cue whose second falls in (prev, now].
@@ -2528,7 +2528,7 @@ function renderPlan() {
         ${d.intro && !recording && d.intro.cloud !== true && cloudBackend?.saveClip ? '<button data-iact="upload" class="primary">☁ Upload now</button>' : ''}
         <button data-iact="del" ${d.intro && !recording ? '' : 'disabled'}>✕ Delete</button>
       </div>
-      <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here and on the coaches’ phones — unless 🔊 voice is muted. No length limit — it warns when a clip gets too big for the cloud.</p>
+      <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here (unless 🔊 voice is muted in the editor) and always on the coaches’ phones. No length limit — it warns when a clip gets too big for the cloud.</p>
       ${narrationHTML(d)}
     </div></li>` : '';
     const v = d.video ? videoEmbed(d.video) : null;
@@ -3601,7 +3601,6 @@ function introBeforeVideo(vid, sec, p, d) {
     if (cur) { cur.cancelled = true; cur.stop(); return; } // ▶ during the intro: skip it, the video is already going
     if (done || vid.currentTime > 0.5) return;
     done = true; // one intro per opening of the player
-    if (!voiceOn) { if (hasVoice(d)) say('🔇 voice is muted on this phone — tap 🔇 muted to hear the intro', 4000); return; }
     const clip = clipMem.get(keyFor(presentOwner, p.id, d));
     if (!clip) { say('🎙 intro not downloaded yet — tap ↻ to resync', 3500); return; }
     if (!canPlay(clip.mime)) { say(`🎙 intro can’t play on this device (${clip.mime})`, 4000); return; }
@@ -3710,7 +3709,6 @@ function presentHTML(p) {
           <span class="pr-break"></span>
           <select class="pr-speed" title="${d.narration ? 'Speed is fixed: the coach recorded a voice-over at this speed' : 'Playback speed'}" ${d.narration ? 'disabled' : ''}>${['0.25', '0.5', '0.75', '0.9', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
-          ${hasVoice(d) ? `<button class="pr-voice wp-toggle ${voiceOn ? 'active' : ''}" title="${voiceOn ? 'Voice on — click to mute intros and cues' : 'Voice muted on this device — click to hear intros and cues'}">${voiceOn ? '🔊 voice' : '🔇 muted'}</button>` : ''}
           <span class="pr-impact"></span>
         </div>
         <div class="pr-text"><div class="pr-cue" hidden></div>
@@ -3872,7 +3870,6 @@ function wirePresentAnims(p) {
     const btn = bar.querySelector('.pr-play'), tl = bar.querySelector('.pr-tl'), disp = bar.querySelector('.pr-timedisp');
     const cueEl = sec.querySelector('.pr-cue');
     let voice = makeNarrator(drillCues(dcur, sm), text => { cueEl.textContent = text; cueEl.hidden = !text; });
-    bar.querySelector('.pr-voice')?.addEventListener('click', () => setVoice(!voiceOn));
     let spd = +d.animSpeed || 1; // seeded from the drill's saved playback speed
     bar.querySelector('.pr-speed')?.addEventListener('change', e => spd = +e.target.value);
     bar.querySelector('.pr-paths')?.addEventListener('change', e => { // re-render this card with paths on/off
@@ -3944,7 +3941,6 @@ function wirePresentAnims(p) {
       if (a.t >= full) a.t = 0;
       const go = () => { a.fresh = a.t === 0; a.playing = true; a.last = performance.now(); a.raf = requestAnimationFrame(step); startNarr(); draw(); };
       // From the top with a recorded intro (and voice on): the coach speaks first, then the drill runs.
-      if (a.t === 0 && !voiceOn && hasVoice(d)) { cueEl.textContent = '🔇 voice is muted on this phone — tap 🔇 muted to hear the intro and cues'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 4000); }
       const clip = a.t === 0 && voiceOn && d.intro ? clipMem.get(keyFor(presentOwner, p.id, d)) : null;
       if (!clip) {
         if (a.t === 0 && voiceOn && d.intro) { cueEl.textContent = '🎙 intro not downloaded yet — tap ↻ to resync'; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 3500); }
@@ -4156,6 +4152,9 @@ function refreshScreen() {
   }
   screen = r;
   presenting = r.screen !== 'editor';
+  // The viewer always speaks: intros, voice-overs and cues play for coaches and families no matter what this browser's
+  // editor mute says (there is no mute in the viewer). Back in the editor the device's own preference returns.
+  voiceOn = presenting ? true : storedVoice();
   document.body.classList.toggle('presenting', presenting);
   syncEditor(!presenting);
   $('#present').hidden = !presenting;

@@ -80,7 +80,7 @@ export function carriedPuckPos(pose) {
  * (`lat` / `lead` in the skater's frame), so the blade follows the puck while stickhandling and rests on the
  * forehand side when there is nothing to carry.
  */
-export const stickRotation = pose => ((pose.heading + Math.atan2(pose.lat ?? CARRY.rest, pose.lead ?? CARRY.lead)) * 180 / Math.PI).toFixed(1);
+export const stickRotation = (pose, role = null) => ((pose.heading + (role === 'G' ? 0 : Math.atan2(pose.lat ?? CARRY.rest, pose.lead ?? CARRY.lead))) * 180 / Math.PI).toFixed(1); // a goalie's stopper squares up to the facing
 
 const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
 

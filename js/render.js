@@ -339,7 +339,7 @@ const draw = {
     // The stick, seen from above, shows which way the skater faces: it points along the body heading (path tangent,
     // flipped when backward, or the facing when standing), swung toward the puck's side so the blade meets a carried
     // puck (CARRY.lead ft ahead). The whole group is rotated per frame by animateFrame (js/main.js).
-    const dir0 = opts.sim ? stickRotation(opts.sim.skaterPose(o.id, 0)) : stickRotation({ heading: 0 });
+    const dir0 = opts.sim ? stickRotation(opts.sim.skaterPose(o.id, 0), o.role) : stickRotation({ heading: 0 }, o.role);
     return `<g class="obj skater" data-id="${o.id}">${h}${wps}
       <g class="skater-body" data-skater="${o.id}" transform="translate(${n(o.x)} ${n(o.y)})">
         <ellipse class="shadow" rx="1.9" ry="1.2" fill="#000" fill-opacity=".22" style="display:none"/>
@@ -364,22 +364,19 @@ function playerStick(color) {
   return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline blade" d="${blade}"/><path class="stick-shaft" d="${shaft}"/><path class="stick-blade" d="${blade}"/>${tape(heel, ctrl, toe, color)}`;
 }
 /**
- * A goalie's stick from above, unmistakably a goalie's: a short thin shaft, then the wide paddle (drawn as a filled
- * slab with a taped grip band), ending in a long, wide, gently curved blade lying flat across the ice — taped in the
- * team colour through its middle, heel and toe bare — held out to the blocker side.
+ * A goalie's stick from above, short and squared to the facing: the shaft comes off the blocker hand at the body's
+ * right, the wide paddle runs down to the heel at the right-front, and the flat blade lies across the ice in front of
+ * the goalie, heel to toe right to left with a slight curve — taped in the team colour through its middle, ends bare.
+ * It turns with the goalie's facing only (no swing toward the puck, unlike a player's stick).
  */
 function goalieStick(color) {
-  const shaft = 'M1.3,.15 L2.3,.45';
-  const paddle = [{ x: 2.2, y: 0.42 }, { x: 3.7, y: 0.95 }]; // the wide part, shaft to heel
-  const heel = { x: 3.65, y: 1.0 }, ctrl = { x: 4.6, y: 1.45 }, toe = { x: 5.7, y: 1.05 };
+  const shaft = 'M1.1,2.15 L1.7,1.95';                       // a stub of shaft at the blocker hand
+  const paddle = { a: { x: 1.7, y: 1.95 }, b: { x: 2.75, y: 1.2 } };  // hand → heel, the wide part
+  const heel = { x: 2.75, y: 1.2 }, ctrl = { x: 3.1, y: -0.15 }, toe = { x: 2.85, y: -1.45 }; // the blade across the front, a little clear of the body
+  const pd = `M${n(paddle.a.x)},${n(paddle.a.y)} L${n(paddle.b.x)},${n(paddle.b.y)}`;
   const blade = `M${n(heel.x)},${n(heel.y)} Q${n(ctrl.x)},${n(ctrl.y)} ${n(toe.x)},${n(toe.y)}`;
-  const pd = `M${n(paddle[0].x)},${n(paddle[0].y)} L${n(paddle[1].x)},${n(paddle[1].y)}`;
-  // a grip band of tape across the top of the paddle, in the goalie's colour
-  const dx = paddle[1].x - paddle[0].x, dy = paddle[1].y - paddle[0].y, len = Math.hypot(dx, dy), nx = -dy / len * 0.42, ny = dx / len * 0.42;
-  const grip = [0.22, 0.34, 0.46].map(t => { const x = paddle[0].x + dx * t, y = paddle[0].y + dy * t; return `M${n(x - nx)},${n(y - ny)} L${n(x + nx)},${n(y + ny)}`; }).join(' ');
   return `<path class="stick-outline" d="${shaft}"/><path class="stick-outline gpaddle" d="${pd}"/><path class="stick-outline gblade" d="${blade}"/>
-    <path class="stick-shaft" d="${shaft}"/><path class="stick-gpaddle" d="${pd}"/><path class="stick-gblade" d="${blade}"/>
-    <path class="stick-tape" d="${grip}" stroke="${color}"/>${tape(heel, ctrl, toe, color, 0.4)}`;
+    <path class="stick-shaft" d="${shaft}"/><path class="stick-gpaddle" d="${pd}"/><path class="stick-gblade" d="${blade}"/>${tape(heel, ctrl, toe, color, 0.34)}`;
 }
 /** Tape on the middle of a blade (a quadratic curve heel → ctrl → toe): one short line across the blade per wrap in the skater's colour, a touch see-through; the heel and toe end bare. */
 function tape(heel, ctrl, toe, color, half = 0.27) {

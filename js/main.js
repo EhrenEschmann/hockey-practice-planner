@@ -214,7 +214,7 @@ function commit(fn) {
 // ---------- tools ----------
 const HINTS = {
   select: 'Click to select · drag to move · drag handles to reshape · double-click a path to add a waypoint, a waypoint to delete it · Delete removes',
-  pan: 'Drag to pan · wheel to zoom',
+  pan: 'Drag to pan · scroll / two fingers to pan · pinch or Ctrl+scroll to zoom',
   skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater or coach to extend their path',
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
   goalie: 'Click near a net to put a goalie in its crease (facing out) · click open ice for a goalie anywhere',
@@ -807,12 +807,26 @@ function onDblClick() {
   if (activePoly || activeSkater) finishActive();
 }
 
+/**
+ * Wheel / trackpad on the canvas. Two-finger scroll (a plain wheel) pans; a pinch — which browsers deliver as a
+ * wheel with ctrlKey — or Ctrl/⌘ + wheel zooms around the pointer, scaled to how far the wheel moved, so a trackpad's
+ * stream of tiny events zooms gently and a mouse notch zooms about a quarter. Shift + wheel pans sideways.
+ */
 function onWheel(e) {
   e.preventDefault();
-  const p = toRink(e);
-  const f = e.deltaY > 0 ? 1.12 : 1 / 1.12;
-  zoomAt(p, f);
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1; // lines / pages → px
+  if (e.ctrlKey || e.metaKey) {
+    zoomAt(toRink(e), Math.exp(G.clamp(e.deltaY * unit, -60, 60) * 0.004));
+    return;
+  }
+  const v = drill().view, ctm = svg.getScreenCTM();
+  const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit, dy = e.shiftKey && !e.deltaX ? 0 : e.deltaY * unit;
+  v.x += dx / ctm.a; v.y += dy / ctm.d;
+  renderCanvas(); scheduleViewSave();
 }
+let viewSaveTimer = 0;
+/** A wheel gesture fires dozens of times a second: paint every step, save the view once it settles. */
+function scheduleViewSave() { clearTimeout(viewSaveTimer); viewSaveTimer = setTimeout(() => store.save(), 300); }
 
 function zoomAt(p, f) {
   const v = drill().view;
@@ -821,8 +835,7 @@ function zoomAt(p, f) {
   v.x = p.x - (p.x - v.x) * ff;
   v.y = p.y - (p.y - v.y) * ff;
   v.w = nw; v.h = v.h * ff;
-  store.save();
-  renderCanvas();
+  renderCanvas(); scheduleViewSave();
 }
 
 function setView(v) { drill().view = { ...v }; store.save(); renderCanvas(); }

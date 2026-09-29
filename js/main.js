@@ -4196,6 +4196,7 @@ function refreshScreen() {
 
 /** One practice, as /coach/<id> or /team/<id> shows it. */
 function showPractice(r) {
+  ensureLatestViewer(); // a stale page reloads itself (the URL brings it straight back here) before the practice is used
   const pid = r.pid;
   presentAudience = r.as;
   if (who.persona === 'planner') {
@@ -4291,6 +4292,7 @@ $('#present-warn').addEventListener('click', () => { if (whenTarget) navigate(wh
 
 /** /coach and /team: every practice released to this person, upcoming first — one bookmark for the whole season. */
 function showList(r) {
+  ensureLatestViewer();
   const as = r.as;
   const items = practiceItems(as);
   const today = todayISO();
@@ -4472,14 +4474,14 @@ function showDrill(i) {
 }
 
 /** Inline sizing for the two cases CSS can't do alone: the sideways portrait diagram and the phone-landscape row. */
+const ROTATE_GAIN = 1.3; // in portrait, a diagram is turned 90° only when that makes its long side at least this much bigger
 function layoutPresent() {
   if (!presenting) return;
   const focus = presentMode === 'focus' && showingPractice;
   const landscape = focus && inLandscape();
   $('#present').classList.toggle('landscape', landscape);
   const scroll = $('#present-scroll');
-  const curAr = +presentCards()[presentIndex]?.querySelector('.pr-fig')?.dataset.ar || 0;
-  $('#present-rotate').hidden = !focus || landscape || curAr <= 1.05; // only offered when the diagram is wider than tall
+  let rotateHelps = false; // set below for the card on screen: turning it 90° would make it noticeably bigger
   for (const sec of presentCards()) {
     const fig = sec.querySelector('.pr-fig'), layers = fig ? [...fig.querySelectorAll(':scope > svg')] : [];
     const player = sec.querySelector('.pr-video .video-box');
@@ -4509,16 +4511,21 @@ function layoutPresent() {
     for (const el of sec.children) if (el !== fig && el !== text) used += el.offsetHeight;
     const textWant = text ? Math.min(text.scrollHeight, 88) : 0;
     const availH = Math.max(110, scroll.clientHeight - 16 - used - textWant - 28), availW = scroll.clientWidth - 24;
-    if (presentRotate && ar > 1.05) {
+    // Turning a wide diagram 90° so its long side runs down the phone only pays when it comes out noticeably bigger:
+    // a diagram that is nearly square, or a box that is already wide enough, would just gain gutters and shrink.
+    const upright = Math.min(availW, availH * ar), turned = Math.min(availH, availW * ar); // the long side on screen either way
+    rotateHelps = ar > 1.05 && turned >= upright * ROTATE_GAIN;
+    if (presentRotate && rotateHelps) {
       // turned 90°: the rink's long side runs down the phone. Box on screen is w × h; the svg is laid out h × w then rotated.
-      const h = Math.min(availH, availW * ar), w = h / ar;
+      const h = turned, w = h / ar;
       fig.classList.add('rotated');
       fig.style.width = `${w}px`; fig.style.height = `${h}px`;
       layers.forEach(l => { l.style.width = `${h}px`; l.style.height = `${w}px`; });
     } else {
-      fig.style.width = `${Math.min(availW, availH * ar)}px`;
+      fig.style.width = `${upright}px`;
     }
   }
+  $('#present-rotate').hidden = !focus || landscape || !rotateHelps; // only offered when turning would actually help
 }
 
 /** Portrait focus mode: give one media box (an open video) the height left under the title and controls. */
@@ -4885,6 +4892,30 @@ function paintInboxButtons() {
 // ---------- boot ----------
 // Offline support: cache the app shell so the rink works without internet (needs HTTPS or localhost).
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// ---------- keeping the viewer current ----------
+// Every deploy writes version.json (scripts/stamp-version.mjs, run by the hosting predeploy hook). The page notes the
+// stamp it started with and re-reads it whenever the viewer moves to a practice or the list, and when the app comes
+// back to the foreground. A changed stamp means a newer deploy: the page reloads itself — the URL brings it straight
+// back to the same practice — so a phone that has kept the app open for a week never runs a practice on an old viewer.
+// Offline, the service worker hands back the cached stamp, which matches, so nothing happens.
+let appVersion = null;
+async function readVersion() {
+  try { const r = await fetch('/version.json', { cache: 'no-store' }); if (!r.ok) return null; return (await r.json()).v || null; } catch { return null; }
+}
+async function ensureLatestViewer() {
+  const v = await readVersion();
+  if (!v) return;
+  if (!appVersion) { appVersion = v; return; }
+  if (v === appVersion) return;
+  let last = null;
+  try { last = sessionStorage.getItem('hpp.reloadedFor'); sessionStorage.setItem('hpp.reloadedFor', v); } catch { /* fine */ }
+  if (last === v) { appVersion = v; return; } // already reloaded for this stamp once and it still differs: don't loop
+  try { (await navigator.serviceWorker?.getRegistration())?.update(); } catch { /* fine */ }
+  location.reload();
+}
+ensureLatestViewer(); // remember the stamp this page started with
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && presenting) ensureLatestViewer(); });
 hydrateIcons();
 applyRoute();
 setTool('select');

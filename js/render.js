@@ -12,7 +12,7 @@ export const COACH_COLOR = '#222222';
 // Older drills may still carry the retired 'black' / 'white' jerseys: they keep drawing as they were.
 export const skaterHex = o => SKATER_COLORS[o.color] || ({ black: '#222222', white: '#f5f5f5' })[o.color] || o.color || null;
 export const ZONE_COLORS = ['#2b6cb0', '#c05621', '#2f855a', '#805ad5', '#b83280', '#4a5568'];
-export const ARROW_STYLES = { skate: 'Skate', pass: 'Pass (dashed)', shot: 'Shot (thick)', backward: 'Backward (dotted)' };
+export const ARROW_STYLES = { skate: 'Skate', pass: 'Pass (dashed)', shot: 'Shot (thick)', backward: 'Backward (dotted)', line: 'Line (no arrowhead)', dashed: 'Dashed line (no arrowhead)' };
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const n = v => Math.round((+v || 0) * 100) / 100;
@@ -211,10 +211,13 @@ const draw = {
     let dash = '';
     if (o.style === 'pass') dash = 'stroke-dasharray="2 1.5"';
     if (o.style === 'backward') dash = 'stroke-dasharray=".4 1.2"';
-    const width = o.style === 'shot' ? 'stroke-width="1.1"' : '';
+    if (o.style === 'dashed') dash = 'stroke-dasharray="2 1.5"';
+    const plain = o.style === 'line' || o.style === 'dashed'; // a drawn line on the ice: no arrowhead
+    const w = +o.width > 0 ? +o.width : o.style === 'shot' ? 1.1 : 0;
+    const width = w ? `stroke-width="${n(w)}"` : '';
     return `<g class="obj arrow" data-id="${o.id}">
       <polyline class="arrow-line" points="${ptsStr(dense)}" stroke="${color}" ${dash} ${width}/>
-      ${arrowHead(dense, color, o.style === 'shot' ? 2.8 : 2.2)}
+      ${plain ? '' : arrowHead(dense, color, o.style === 'shot' ? 2.8 : Math.max(2.2, w * 2.2))}
       ${sel ? handles(o.points) : ''}
     </g>`;
   },

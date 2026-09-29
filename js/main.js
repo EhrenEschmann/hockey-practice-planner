@@ -218,7 +218,7 @@ const HINTS = {
   skater: 'Click to place a skater, then click (or drag) to add path waypoints · Enter/Esc to finish · click an existing skater or coach to extend their path',
   coach: 'Click to place a coach · or drag the Coach button straight onto the ice',
   goalie: 'Click near a net to put a goalie in its crease (facing out) · click open ice for a goalie anywhere',
-  arrow: 'Click points · double-click or Enter to finish · Esc cancels',
+  arrow: 'Click points · double-click or Enter to finish · Esc cancels · pick Line in the Selection panel for a plain line, and its colour and width there',
   contact: 'Click where two skaters should collide — the two nearest paths are linked and their timing syncs to meet there',
   cone: 'Click to place a cone', tire: 'Click to place a tire',
   minicone: 'Click to place a small cone · drag to lay a row (one every ~3 ft) · a puck carrier stickhandles through them', puck: 'Click a skater or coach to give them a puck · click a pile to take a puck from it · click open ice for a loose puck',
@@ -2779,10 +2779,10 @@ const PROPS = {
   zone: [['label', 'text', 'Title'], ['color', 'zoneswatch', 'Color'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)'],
     ['constraints', 'textarea', 'Constraints — one per line. Drawn in the zone, listed under the drill, and read aloud in the viewer']],
   barricade: [],
-  arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color']],
+  arrow: [['style', 'select:' + Object.entries(ARROW_STYLES).map(([k, v]) => `${k}=${v}`).join(','), 'Style'], ['color', 'color', 'Color'], ['width', 'number', 'Width (ft, blank = normal)']],
   text: [['text', 'text', 'Text'], ['size', 'number', 'Size'], ['color', 'color', 'Color']],
 };
-const TYPE_NAMES = { focus: 'Focus area', contact: 'Contact', skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow', text: 'Text' };
+const TYPE_NAMES = { focus: 'Focus area', contact: 'Contact', skater: 'Skater', coach: 'Coach', cone: 'Cone', minicone: 'Small cone', raisedpad: 'Raised pad', jumppad: 'Jump pad', pile: 'Puck pile', tire: 'Tire', puck: 'Puck', net: 'Net', obstacle: 'Obstacle', zone: 'Zone', barricade: 'Barricade', arrow: 'Arrow / line', text: 'Text' };
 
 function renderProps() {
   const body = $('#props-body');

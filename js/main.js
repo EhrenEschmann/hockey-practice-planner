@@ -4242,7 +4242,7 @@ function showPractice(r) {
 function practiceItems(as) {
   if (who.persona === 'planner') {
     return store.data.practices.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
-      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, date: p.date, time: p.time }));
+      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, date: p.date, time: p.time, ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }));
   }
   return Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
 }
@@ -4260,24 +4260,28 @@ function paintWhen() {
   const was = `${bar.hidden}${warn.hidden}`;
   if (!p) { bar.hidden = true; warn.hidden = true; whenTarget = null; }
   else {
-    // The dropdown lists this team's practices that are released to the team — nothing that is still a draft or
-    // with the coaches, and only the ones this person may open. The practice on screen is always in it, marked
-    // when it is not one of those (a coach reading a plan out for feedback, the planner previewing a draft).
-    const sameTeam = x => String(x.team || '').trim().toLowerCase() === String(p.team || '').trim().toLowerCase();
-    const items = practiceItems(presentAudience).filter(x => sameTeam(x) && x.stage === 'team').sort(byCalendar);
+    // The dropdown lists exactly what has been released to this person: as a coach, every practice and game sent to
+    // the coaches or the team; as a team member, only those released to the team. Never a draft. All teams, so an old
+    // one under a different team name is still a way back. The banner points at the calendar's pick (today's, else
+    // the next, else the most recent) whenever that is not the one on screen.
+    const items = practiceItems(presentAudience).filter(x => x.stage === 'team' || (x.stage === 'coaches' && presentAudience === 'coach')).sort(byCalendar);
     const listed = items.some(x => x.pid === p.id);
-    const today = todayISO(), say = x => whenLabel(x);
+    const today = todayISO();
+    const teams = new Set(items.map(x => String(x.team || '').trim().toLowerCase()));
+    const say = x => `${teams.size > 1 || (x.kind === 'game') ? `${docTitle(x)} · ` : ''}${whenLabel(x)}`;
     bar.hidden = false;
     $('#when-team').textContent = docTitle(p);
     const opt = (x, extra = '') => `<option value="${escHtml(itemPath(presentAudience, x))}"${x.pid === p.id ? ' selected' : ''}>${escHtml(say(x))}${x.date === today ? ' · today' : ''}${extra}</option>`;
-    sel.innerHTML = (listed ? '' : opt(p, ' · not yet released to the team')) + items.map(x => opt(x)).join('');
-    const focus = listed ? calendarFocus(items, today) : null;
+    // An unreleased one (the planner previewing a draft) is never listed: a placeholder stands in for it.
+    sel.innerHTML = (listed ? '' : '<option value="" selected disabled>— not released yet —</option>') + items.map(x => opt(x)).join('');
+    const focus = items.length ? calendarFocus(items, today) : null;
     whenTarget = focus && focus.pid !== p.id ? itemPath(presentAudience, focus) : null;
     warn.hidden = !whenTarget;
     if (whenTarget) {
       const upcoming = (focus.date || '') >= today;
-      warn.textContent = `${byCalendar(p, focus) < 0 ? '⚠ This is an older practice' : '⚠ This is a future practice'} (${dayDate(p.date)}). `
-        + `${upcoming ? (focus.date === today ? 'Today’s practice' : 'The next practice') : 'The most recent practice'} is ${say(focus)} — tap to open it.`;
+      const noun = docNoun(p), fnoun = focus.kind === 'game' ? 'game' : 'practice';
+      warn.textContent = `${byCalendar(p, focus) < 0 ? `⚠ This is an older ${noun}` : `⚠ This is a future ${noun}`} (${dayDate(p.date)}). `
+        + `${upcoming ? (focus.date === today ? `Today’s ${fnoun}` : `The next ${fnoun}`) : `The most recent ${fnoun}`} is ${say(focus)} — tap to open it.`;
     }
   }
   if (was !== `${bar.hidden}${warn.hidden}`) layoutPresent();

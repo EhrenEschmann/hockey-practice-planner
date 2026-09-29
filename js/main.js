@@ -1947,6 +1947,41 @@ $('#feedback-body').addEventListener('click', async e => {
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
 let editingDrill = null;  // drill id being renamed inline (explicit edit mode: ✎ → save/cancel)
 
+/**
+ * A drill copied into another practice (from the library, or by duplicating a practice) keeps its intro, voice-over
+ * and uploaded video. Clips and videos live under their practice, so the bytes are copied to the new practice's keys
+ * on this device and in the cloud — in the background; until each is up its row says so, and Upload now retries.
+ */
+function markAssetsPending(d) {
+  for (const k of ['intro', 'narration', 'upload']) if (d[k]) d[k] = { ...d[k], cloud: false, cloudError: 'copying from the original…' };
+}
+async function copyDrillAssets(srcPid, src, dstPid, dst) {
+  const owner = ownerFor();
+  const settle = (k, up) => { if (!dst[k]) return; dst[k] = { ...dst[k], cloud: up.ok }; if (up.error) dst[k].cloudError = up.error; else delete dst[k].cloudError; store.save(); renderPlan(); };
+  const missing = { ok: false, error: 'no copy of the original on this device or in the cloud' };
+  for (const kind of ['intro', 'narration']) {
+    if (!src[kind] || !dst[kind]) continue;
+    let rec = null;
+    try { rec = await idbGetClip(keyFor(owner, srcPid, src, kind)); } catch { rec = null; }
+    if (!rec?.blob && cloudBackend?.loadClip && cloudSync?.user) {
+      try { const c = await cloudBackend.loadClip(owner, srcPid, clipDocId(src.id, kind)); if (c?.data) rec = { mime: c.mime, blob: base64ToBlob(c.data, c.mime), secs: c.secs }; } catch { rec = null; }
+    }
+    if (!rec?.blob) { settle(kind, missing); continue; }
+    try { await idbPutClip(keyFor(owner, dstPid, dst, kind), rec); } catch { /* the cloud copy still serves this device */ }
+    settle(kind, await uploadClip(dstPid, clipDocId(dst.id, kind), rec));
+  }
+  if (src.upload && dst.upload) {
+    let rec = null;
+    try { rec = await idbGetClip(videoKey(owner, srcPid, src)); } catch { rec = null; }
+    if (!rec?.blob && cloudBackend?.loadVideo && cloudSync?.user) {
+      try { const chunks = await cloudBackend.loadVideo(owner, srcPid, src.id, src.upload.at, src.upload.chunks); rec = { mime: src.upload.mime, blob: chunksToBlob(chunks, src.upload.mime), secs: src.upload.secs }; } catch { rec = null; }
+    }
+    if (!rec?.blob) { settle('upload', missing); return; }
+    try { await idbPutClip(videoKey(owner, dstPid, dst), rec); } catch { /* fine */ }
+    const { mime, secs, size, width, height } = dst.upload;
+    settle('upload', await uploadVideo(dstPid, dst, rec.blob, { mime, secs, size, width, height }, dst.upload.at));
+  }
+}
 /** Put a clip in the cloud beside its practice. Resolves { ok, error? }; ok is false when signed out or refused. */
 async function uploadClip(pid, did, { mime, blob, secs }) {
   if (!cloudBackend?.saveClip) return { ok: false, error: 'local-only (no cloud configured)' };
@@ -2740,10 +2775,11 @@ $('#library').addEventListener('click', e => {
   if (!src) return;
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid();
-  delete copy.intro; delete copy.narration; delete copy.upload; // the recordings and uploaded video stay with the original
+  markAssetsPending(copy); // the recordings and uploaded video come along: copied in the background below
   copy.objects = cloneObjects(migrateDrill(copy).objects);
   const p = store.practice;
   commit(() => { p.drills.push(copy); store.drillIndex = p.drills.length - 1; });
+  copyDrillAssets(pid, src, p.id, copy);
   $('#lib-target').textContent = practiceLabel(store.practice);
   btn.textContent = 'Added ✓'; btn.disabled = true;
   setTimeout(() => { btn.textContent = '+ Add to this practice'; btn.disabled = false; }, 1200);
@@ -3358,8 +3394,10 @@ function addDrillAndRename() {
 $('#btn-dup-practice').addEventListener('click', () => {
   const copy = JSON.parse(JSON.stringify(store.practice));
   copy.id = uid(); copy.date = new Date().toISOString().slice(0, 10);
-  copy.drills.forEach(d => { d.id = uid(); delete d.intro; delete d.narration; delete d.upload; d.objects = cloneObjects(d.objects); });
+  const srcPid = store.practice.id, pairs = [];
+  copy.drills.forEach((d, i) => { d.id = uid(); markAssetsPending(d); d.objects = cloneObjects(d.objects); pairs.push([store.practice.drills[i], d]); });
   finishActive(); store.addPractice(copy); sel = null; stopAnim(); renderAll();
+  (async () => { for (const [s, d] of pairs) await copyDrillAssets(srcPid, s, copy.id, d); })(); // recordings and videos follow, one drill at a time
 });
 $('#btn-del-practice').addEventListener('click', () => {
   const p = store.practice;

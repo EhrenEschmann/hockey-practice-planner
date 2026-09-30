@@ -3884,7 +3884,7 @@ function presentHTML(p) {
         return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b>${minHTML(d)}${whenHTML(at, +d.duration || 0)}</header>
-        ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
+        ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : ''}
         ${videoBlockHTML(d)}
         <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>
       </section>`;

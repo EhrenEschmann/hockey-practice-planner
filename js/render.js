@@ -53,6 +53,12 @@ function cornerHandles(o) {
   const cs = [['nw', o.x, o.y], ['ne', o.x + o.w, o.y], ['sw', o.x, o.y + o.h], ['se', o.x + o.w, o.y + o.h]];
   return cs.map(([c, x, y]) => `<rect class="rhandle ${c}" data-corner="${c}" x="${n(x - 1.1)}" y="${n(y - 1.1)}" width="2.2" height="2.2" rx=".3"/>`).join('');
 }
+/** The rotate grip above a focus area: drag to spin the shape around its centre. */
+function rotHandle(o) {
+  const cx = o.x + o.w / 2, top = o.y;
+  return `<g class="rot-handle" data-rot="1"><line x1="${n(cx)}" y1="${n(top)}" x2="${n(cx)}" y2="${n(top - 3.5)}"/><circle cx="${n(cx)}" cy="${n(top - 3.5)}" r="1.1"><title>Drag to rotate (5° steps)</title></circle></g>`;
+}
+
 function handles(pts) {
   return pts.map((p, i) => `<circle class="handle" data-handle="${i}" cx="${n(p.x)}" cy="${n(p.y)}" r="1"/>`).join('');
 }
@@ -168,7 +174,7 @@ const draw = {
         ${sel ? `<polygon class="focus-sel" points="${s}" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-opacity=".45" pointer-events="none"/>` : ''}
         <polygon class="focus-edge core" points="${s}" fill="none" pointer-events="none"/>
         <polygon class="stripe" points="${s}" fill="none" pointer-events="none"/>
-        ${sel ? handles(o.points) : ''}
+        ${sel ? handles(o.points) + rotHandle(o) : ''}
       </g>`;
     }
     const x = n(o.x), y = n(o.y), w = n(o.w), h = n(o.h);
@@ -178,7 +184,7 @@ const draw = {
       ${sel ? `<rect class="focus-sel" x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-opacity=".45" pointer-events="none"/>` : ''}
       <rect class="focus-edge core" x="${x}" y="${y}" width="${w}" height="${h}" pointer-events="none"/>
       <rect class="stripe" x="${x}" y="${y}" width="${w}" height="${h}" pointer-events="none"/>
-      ${sel ? cornerHandles(o) : ''}
+      ${sel ? cornerHandles(o) + rotHandle(o) : ''}
     </g>`;
   },
 

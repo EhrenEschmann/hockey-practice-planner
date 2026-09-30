@@ -93,6 +93,8 @@ export const SVG_STYLE = `
   .wp-label circle{fill:#fff;stroke:#555;stroke-width:.2}
   .wp-label.cued circle{fill:#fde68a;stroke:#b45309} /* a spoken cue fires here */
   .wp-label text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
+  .rot-handle line{stroke:#3b82f6;stroke-width:.3}
+  .rot-handle circle{fill:#fff;stroke:#3b82f6;stroke-width:.35;cursor:grab}
   .contact-zone{fill:#f59e0b;fill-opacity:.12;stroke:#b45309;stroke-width:.28;stroke-dasharray:.9 .7}
   .contact-t{font-family:system-ui,sans-serif;font-size:1.5px;font-weight:700;fill:#b45309}
   .warn-t{fill:#dc2626}

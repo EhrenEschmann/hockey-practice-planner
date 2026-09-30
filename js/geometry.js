@@ -103,6 +103,16 @@ export function projectOnPolyline(pts, cum, p) {
   return best;
 }
 
+/** Ray-cast point-in-polygon test. */
+export function pointInPolygon(pts, p) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 /** Closest point on a polyline to p: arc-length along it and the offset distance. */
 export function closestOnPolyline(pts, p) {
   if (!pts.length) return { along: 0, dist: Infinity };

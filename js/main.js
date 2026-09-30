@@ -494,6 +494,16 @@ function onPointerDown(e) {
       const bankEl = e.target.closest('[data-bank]');
       const arriveEl = e.target.closest('[data-arrive]');
       const arriveTo = arriveEl && id ? getObj(id)?.events?.[+arriveEl.dataset.arrive]?.to : null;
+      const rotEl = e.target.closest('[data-rot]');
+      if (rotEl && id && getObj(id)?.type === 'focus') {
+        const o = getObj(id);
+        const pts = o.points ? o.points.map(q => ({ ...q })) : [{ x: o.x, y: o.y }, { x: o.x + o.w, y: o.y }, { x: o.x + o.w, y: o.y + o.h }, { x: o.x, y: o.y + o.h }];
+        const center = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+        const contents = drill().objects.filter(x => x.id !== id && insideFocus(o, x)).map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)) }));
+        drag = { type: 'rotate', id, center, pts, contents, a0: Math.atan2(raw.y - center.y, raw.x - center.x), pushed: false };
+        select(id);
+        break;
+      }
       const cornerEl = e.target.closest('[data-corner]');
       if (cornerEl && id && getObj(id)) {
         // resize a zone / focus box: the opposite corner stays put
@@ -650,6 +660,28 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'rotate': {
+      const o = getObj(drag.id); if (!o) return;
+      const raw2 = toRink(e);
+      let deg = (Math.atan2(raw2.y - drag.center.y, raw2.x - drag.center.x) - drag.a0) * 180 / Math.PI;
+      deg = Math.round(deg / 5) * 5;
+      if (!deg && !o.points) break; // a box only becomes a polygon once it actually turns
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+      o.points = drag.pts.map(q => ({
+        x: G.round1(drag.center.x + (q.x - drag.center.x) * cos - (q.y - drag.center.y) * sin),
+        y: G.round1(drag.center.y + (q.x - drag.center.x) * sin + (q.y - drag.center.y) * cos),
+      }));
+      syncFocusBox(o);
+      for (const it of drag.contents) { // contents turn with the shape, re-derived from their grab-time state
+        const x = getObj(it.id); if (!x) continue;
+        for (const k of Object.keys(x)) delete x[k];
+        Object.assign(x, JSON.parse(JSON.stringify(it.orig)));
+        rotateObj(x, drag.center, deg);
+      }
+      renderCanvas();
+      break;
+    }
     case 'evmark': {
       const ev = getObj(drag.id)?.events?.[drag.ev]; if (!ev) return;
       if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
@@ -741,7 +773,7 @@ function onPointerUp(e) {
       if (ev && ev.dist != null) { sim = makeSim(drill()); if (sim.puck(pk.id).info[dg.ev]?.late) { const eff = effectiveDist(pk, dg.ev); if (eff != null) ev.dist = eff; } }
       store.save(); renderAll(); break;
     }
-    case 'handle': case 'bank': case 'resize': syncFocusBox(getObj(dg.id)); store.save(); renderAll(); break;
+    case 'handle': case 'bank': case 'resize': case 'rotate': syncFocusBox(getObj(dg.id)); store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
@@ -980,6 +1012,57 @@ function translateObj(o, dx, dy) {
   const tr = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) }); // spread keeps waypoint flags (e.g. pivot)
   if (o.points) { o.points = o.points.map(tr); syncFocusBox(o); }
   else { Object.assign(o, tr(o)); if (o.path) o.path = o.path.map(tr); }
+}
+
+/** Is this object inside the focus shape? Judged by its anchor: centroid for point-chains, centre for boxes. */
+function insideFocus(f, o) {
+  if (o.type === 'puck' && o.carrier) return false; // rides its carrier
+  let a = null;
+  if (o.points?.length) a = { x: o.points.reduce((s, q) => s + q.x, 0) / o.points.length, y: o.points.reduce((s, q) => s + q.y, 0) / o.points.length };
+  else if ((o.type === 'zone' || o.type === 'focus') && o.x != null) a = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+  else if (o.x != null) a = { x: o.x, y: o.y };
+  if (!a) return false;
+  return f.points?.length >= 3 ? G.pointInPolygon(f.points, a)
+    : a.x >= f.x && a.x <= f.x + f.w && a.y >= f.y && a.y <= f.y + f.h;
+}
+
+/** Rotate one object by deg° around centre c: position, path, points, angles, shot targets and banks. */
+function rotateObj(o, c, deg) {
+  const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const rp = q => ({ ...q, x: G.round1(c.x + (q.x - c.x) * cos - (q.y - c.y) * sin), y: G.round1(c.y + (q.x - c.x) * sin + (q.y - c.y) * cos) });
+  if ((o.type === 'zone' || o.type === 'focus') && !o.points) {
+    // axis-aligned boxes can't tilt: rotate the centre, and swap the sides on quarter turns
+    const ctr = rp({ x: o.x + o.w / 2, y: o.y + o.h / 2 });
+    const quarter = ((deg % 180) + 180) % 180 === 90;
+    const w = quarter ? o.h : o.w, h = quarter ? o.w : o.h;
+    o.x = G.round1(ctr.x - w / 2); o.y = G.round1(ctr.y - h / 2); o.w = G.round1(w); o.h = G.round1(h);
+    return;
+  }
+  if (o.points) { o.points = o.points.map(rp); syncFocusBox(o); }
+  if (o.x != null) { const q = rp({ x: o.x, y: o.y }); o.x = q.x; o.y = q.y; }
+  if (o.path) o.path = o.path.map(rp);
+  if (o.rot != null && o.rot !== '') o.rot = ((+o.rot + deg) % 360 + 360) % 360;
+  if (o.facing != null && o.facing !== '') o.facing = ((+o.facing + deg) % 360 + 360) % 360;
+  for (const ev of o.events || []) { if (ev.target) ev.target = rp(ev.target); if (ev.bank) ev.bank = rp(ev.bank); }
+}
+
+/** Rotate a focus area by deg° around its centre — everything inside it turns with it. */
+function rotateFocus(o, deg) {
+  const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+  const inside = drill().objects.filter(x => x !== o && insideFocus(o, x));
+  if (o.points || deg % 90 !== 0) {
+    const pts = o.points || [{ x: o.x, y: o.y }, { x: o.x + o.w, y: o.y }, { x: o.x + o.w, y: o.y + o.h }, { x: o.x, y: o.y + o.h }];
+    const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+    o.points = pts.map(q => ({
+      x: G.round1(c.x + (q.x - c.x) * cos - (q.y - c.y) * sin),
+      y: G.round1(c.y + (q.x - c.x) * sin + (q.y - c.y) * cos),
+    }));
+    syncFocusBox(o);
+  } else if (deg % 180 !== 0) {
+    const w = o.h, h = o.w;
+    o.x = G.round1(c.x - w / 2); o.y = G.round1(c.y - h / 2); o.w = G.round1(w); o.h = G.round1(h);
+  }
+  for (const x of inside) rotateObj(x, c, deg);
 }
 
 /** A polygon focus keeps x/y/w/h as its bounding box, so zoom, view-fit, mirroring and Present treat it like the box form. */
@@ -2994,6 +3077,7 @@ function renderProps() {
   }
   if (o.type === 'focus') {
     extra.push(`<button data-act="focus">Zoom the view to this box</button>`);
+    extra.push(`<button data-act="rot90" title="Quarter-turn the focus and everything inside it around its centre — or drag the round grip above it to rotate freely">Rotate 90°</button>`);
     extra.push(`<button data-act="fitdrill" title="Uniformly scale and centre everything in this drill so it fits inside the box">⇲ Resize drill into box</button>`);
     extra.push(`<p class="muted small">Everything outside ${o.points ? 'the shape' : 'the box'} is grayed out — on the ice, on the printed sheet and in the coaches’ view. Grab the dashed edge to move it${o.points ? ', drag its corner handles to reshape' : ''}; objects inside stay clickable.</p>`);
   }
@@ -3298,7 +3382,7 @@ propsBody.addEventListener('click', e => {
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
     case 'readzone': readAloud([o.label || 'Zone', ...zoneLines(o)]); break;
-    case 'rot90': commit(() => o.rot = ((o.rot || 0) + 90) % 360); break;
+    case 'rot90': commit(() => { if (o.type === 'focus') rotateFocus(o, 90); else o.rot = ((o.rot || 0) + 90) % 360; }); break;
     case 'addgoalie': { const g = { id: uid(), ...makeGoalie(o) }; commit(() => drill().objects.push(g)); select(g.id); renderProps(); break; }
     case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
     case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;

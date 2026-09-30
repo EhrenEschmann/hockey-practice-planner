@@ -37,13 +37,13 @@ export function accessFor(roster, p) {
   const t = rosterTeamFor(roster, p);
   const coach = emails([...rosterCoachEmails(t), ...(p.sharedWith || [])]);
   const team = emails([...rosterFamilyEmails(t), ...(p.sharedTeam || [])]).filter(e => !coach.includes(e));
-  return { stage: stageOf(p), coach, team };
+  return { stage: stageOf(p), open: !!p.open, coach, team };
 }
 
 /** What coaches and the team download: the practice without its access lists, stage bookkeeping or hidden drills. */
 export function publishedCopy(p, owner) {
   const c = JSON.parse(JSON.stringify(p));
-  for (const k of ['sharedWith', 'sharedTeam', 'stage', 'sentCoachesAt', 'sentTeamAt']) delete c[k];
+  for (const k of ['sharedWith', 'sharedTeam', 'stage', 'sentCoachesAt', 'sentTeamAt', 'open']) delete c[k];
   c.drills = (c.drills || []).filter(d => !d.hidden);
   c.owner = owner;
   return c;
@@ -113,6 +113,11 @@ export function resolveRoute(route, who) {
   if (view === 'unknown') return { go: '/' };
   if (route.legacy && view !== 'root') return { go: routePath(route) };
   if (persona === 'anonymous') return { screen: 'signin' };
+  if (persona === 'guest') { // signed in anonymously: may watch open practices, has no list of their own
+    if (view === 'coach' && pid) return { go: `/team/${pid}` };
+    if (view === 'team' && pid) return { screen: 'practice', as: 'team', pid };
+    return { screen: 'signin' };
+  }
   if (persona === 'unknown') return view === 'request' ? { screen: 'request' } : { go: '/request-access' };
   if (persona === 'planner') {
     if (view === 'editor') return { screen: 'editor', pid, did: route.did };

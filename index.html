@@ -60,6 +60,9 @@
           <button id="btn-stage-next" class="primary" title="Nothing is visible to anyone until you press this">Send to coaches →</button>
         </div>
         <p id="stage-who" class="muted small"></p>
+        <label class="check" title="Anyone with the link can watch — with a Google account or as an anonymous guest — once the practice leaves Draft"><input type="checkbox" id="practice-open"> Open practice — anyone with the link</label>
+        <div class="row"><button id="btn-share-open-link" hidden title="Copy the public link — anyone can open it, no roster needed">🌐 Public link</button></div>
+        <p id="open-note" class="muted small"></p>
       </div>
       <label class="field"><span>Extra coach emails (beyond the roster)</span><input id="practice-emails" placeholder="guest.coach@gmail.com" spellcheck="false"></label>
       <div class="row">
@@ -350,6 +353,7 @@
       <div class="gate-brand">🏒 Practice Plan</div>
       <p id="present-msg"></p>
       <button id="present-signin" class="primary" hidden>Sign in with Google</button>
+      <button id="present-anon" class="small-link" hidden>…or log in anonymously</button>
       <button id="present-reload" class="primary" hidden>Try again</button>
       <div id="present-request" hidden>
         <label class="check"><input type="radio" name="req-role" value="team" checked> I'm a parent / family member</label>

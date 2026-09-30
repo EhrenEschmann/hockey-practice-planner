@@ -50,8 +50,9 @@ export async function firebaseBackend(config) {
   const db = fs.getFirestore(app);
   const col = uid => fs.collection(db, 'users', uid, 'practices');
   return {
-    onUser(cb) { return auth.onAuthStateChanged(a, u => cb(u ? { uid: u.uid, email: u.email || '', name: u.displayName || u.email || 'Signed in' } : null)); },
+    onUser(cb) { return auth.onAuthStateChanged(a, u => cb(u ? { uid: u.uid, email: u.email || '', name: u.displayName || u.email || (u.isAnonymous ? 'Guest' : 'Signed in'), isAnonymous: !!u.isAnonymous } : null)); },
     onAuthError(cb) { onAuthErr = cb; if (authErr) cb(authErr); },
+    async signInAnon() { await auth.signInAnonymously(a); },
     async signIn() {
       const provider = new auth.GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' }); // always offer the account chooser, so signing out really lets someone switch emails
@@ -370,6 +371,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
 
   return {
     signIn: () => backend.signIn(),
+    signInAnon: () => backend.signInAnon?.(),
     signOut: async () => { await flush(); await backend.signOut(); },
     flush,
     get user() { return user; },

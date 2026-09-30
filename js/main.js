@@ -1826,6 +1826,11 @@ function renderStage() {
   $('#btn-stage-back').textContent = st === 'team' ? '← Pull back from team' : '← Pull back to draft';
   $('#stage-who').textContent = `${a.coach.length} coach${a.coach.length === 1 ? '' : 'es'} · ${a.team.length} family email${a.team.length === 1 ? '' : 's'}`
     + (t ? ` — the “${t.name || 'unnamed'}” roster (👥 Team) plus any extras below.` : ' — no team roster yet: add people under 👥 Team.');
+  $('#practice-open').checked = !!p.open;
+  $('#btn-share-open-link').hidden = !p.open;
+  $('#open-note').textContent = !p.open ? ''
+    : st === 'draft' ? 'Will be open to anyone with the link once it leaves Draft.'
+    : '🌐 Open — anyone with the link can watch, with a Google account or as an anonymous guest.';
 }
 function setStage(next) {
   const p = store.practice, a = accessFor(store.roster, p), st = stageOf(p);
@@ -4154,6 +4159,7 @@ function presentMsg(msg, opts = {}) {
   $('#present-gate').hidden = false;
   $('#present-msg').textContent = msg;
   $('#present-signin').hidden = !opts.signIn;
+  $('#present-anon').hidden = !opts.anon;
   $('#present-reload').hidden = !opts.reload;
   $('#present-request').hidden = !opts.request;
   $('#present-tolist').hidden = !opts.list;
@@ -4266,6 +4272,7 @@ function currentWho() {
   const u = cloudSync?.user;
   if (!u) return { persona: 'anonymous' };
   if (isOwner(u)) return { persona: 'planner' };
+  if (u.isAnonymous) return { persona: 'guest', roles: {} }; // may watch open practices; has no inbox
   if (viewerInbox === undefined) return { persona: inboxStale ? 'offline' : 'checking' };
   if (!viewerInbox) return { persona: 'unknown' };
   const roles = Object.fromEntries(Object.entries(viewerInbox.practices || {}).map(([pid, c]) => [pid, c.role === 'coach' ? 'coach' : 'team']));
@@ -4367,7 +4374,7 @@ function refreshScreen() {
       leavePractice(); $('#present-title').textContent = '';
       presentMsg(signInError ? `Sign-in failed: ${signInError}` : inAppBrowser() ? `This link opened inside another app's browser, where Google sign-in doesn't work. Open it in ${/iPhone|iPad/.test(navigator.userAgent) ? 'Safari' : 'Chrome'} instead — tap the ⋯ or share button and choose “Open in browser”, or copy the address: ${location.origin}${location.pathname}`
         : route.view === 'editor' || route.view === 'root'
-        ? 'Sign in to continue.' : 'Practice plans are shared with the team. Sign in with the Google account your coach has on the team list.', { signIn: true });
+        ? 'Sign in to continue.' : 'Practice plans are shared with the team. Sign in with the Google account your coach has on the team list.', { signIn: true, anon: !!route.pid });
       break;
     case 'offline':
       if (route.pid && showCachedPractice(route.pid, 'reconnect to get updates.')) break;
@@ -4412,7 +4419,8 @@ function showPractice(r) {
       if (err.code === 'permission-denied') {
         try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ }
         leavePractice(); presentKey = key;
-        presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
+        if (who.persona === 'guest') presentMsg("This practice isn't open to guests. Sign in with the Google account your coach has on the team list.", { signIn: true });
+        else presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
       } else if (!showingPractice) presentMsg(`Could not load the practice: ${err.message || err}`, { reload: true });
       else presentNote('Offline — showing the copy on this device.');
       return;
@@ -4886,6 +4894,7 @@ $('#btn-present').addEventListener('click', () => openPresentation('coach'));
 $('#btn-open-team').addEventListener('click', () => openPresentation('team'));
 $('#btn-open-coach').addEventListener('click', () => openPresentation('coach'));
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true })));
+$('#present-anon').addEventListener('click', () => cloudSync?.signInAnon?.().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true, anon: true })));
 /** A page inside another app (a team-chat app's built-in browser): Google refuses to sign anyone in there. */
 function inAppBrowser() {
   const ua = navigator.userAgent || '';
@@ -4961,6 +4970,11 @@ $('#viewlog-clear').addEventListener('click', async () => {
 });
 $('#btn-share-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'coach'));
 $('#btn-share-team-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'team'));
+$('#btn-share-open-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'team')); // the public link is the team view
+$('#practice-open').addEventListener('change', e => {
+  const on = e.target.checked;
+  commit(() => { if (on) store.practice.open = true; else delete store.practice.open; });
+});
 
 // ---------- cloud sync (Firebase) ----------
 const CLOUD_LABELS = { signedout: 'Not signed in (local only)', syncing: 'Syncing…', saving: 'Saving…', saved: 'Saved ✓', error: 'Cloud error' };
@@ -4978,7 +4992,7 @@ function renderCloudStatus(sync, state, detail) {
 // (this is a UI gate; the real protection is Firestore's rules — nobody can write another
 // account's practices, and readers only see the practices they are listed on).
 const OWNER_EMAILS = ['ehren.eschmann@gmail.com'];
-const isOwner = u => !u?.email || OWNER_EMAILS.includes(String(u.email).toLowerCase());
+const isOwner = u => !!u && !u.isAnonymous && (!u.email || OWNER_EMAILS.includes(String(u.email).toLowerCase()));
 
 /** Bring the practice creator up (only ever for the planner on /editor — see resolveRoute) or take it away. */
 function syncEditor(on) {

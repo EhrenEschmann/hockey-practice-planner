@@ -159,6 +159,18 @@ const draw = {
   // path (the whole view minus the box) that ignores the pointer, so objects under it stay clickable; the box is grabbed by its edge.
   focus(o, sel) {
     const d = Math.min(0.95, Math.max(0.1, +o.dim || 0.55));
+    if (o.points?.length >= 2) { // polygon focus (2 points = still being drawn)
+      const s = ptsStr(o.points);
+      const poly = 'M' + o.points.map(q => `${n(q.x)},${n(q.y)}`).join(' L') + ' Z';
+      return `<g class="obj focus" data-id="${o.id}">
+        <path class="focus-mask" fill-rule="evenodd" d="M-300,-300 H500 V400 H-300 Z ${poly}" fill="#0f1116" fill-opacity="${d}" pointer-events="none"/>
+        <polygon class="focus-hit" points="${s}" fill="none" stroke="transparent" stroke-width="2.6" pointer-events="stroke"/>
+        ${sel ? `<polygon class="focus-sel" points="${s}" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-opacity=".45" pointer-events="none"/>` : ''}
+        <polygon class="focus-edge core" points="${s}" fill="none" pointer-events="none"/>
+        <polygon class="stripe" points="${s}" fill="none" pointer-events="none"/>
+        ${sel ? handles(o.points) : ''}
+      </g>`;
+    }
     const x = n(o.x), y = n(o.y), w = n(o.w), h = n(o.h);
     return `<g class="obj focus" data-id="${o.id}">
       <path class="focus-mask" fill-rule="evenodd" d="M-300,-300 H500 V400 H-300 Z M${x},${y} h${w} v${h} h${n(-o.w)} Z" fill="#0f1116" fill-opacity="${d}" pointer-events="none"/>

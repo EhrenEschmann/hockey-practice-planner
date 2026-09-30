@@ -228,7 +228,7 @@ const HINTS = {
   jumppad: 'Click to place a low pad · skaters whose path runs over it jump it',
   barricade: 'Click points to lay a barricade · double-click or Enter to finish',
   zone: 'Drag a box to mark a section / station',
-  focusarea: 'Drag a box around the space to work in — the rest of the ice grays out',
+  focusarea: 'Drag a box around the space to work in — or click corner points for any shape (Enter/double-click closes it). The rest of the ice grays out',
   text: 'Click to place a text label',
   erase: 'Click an object to remove it',
 };
@@ -251,8 +251,8 @@ function finishActive() {
     if (o) {
       o.points.pop(); // drop the preview point
       while (o.points.length > 1 && G.dist(o.points.at(-1), o.points.at(-2)) < 0.2) o.points.pop();
-      if (o.points.length < 2) drill().objects = drill().objects.filter(x => x.id !== o.id);
-      else doneId = o.id;
+      if (o.points.length < (o.type === 'focus' ? 3 : 2)) drill().objects = drill().objects.filter(x => x.id !== o.id);
+      else { doneId = o.id; syncFocusBox(o); }
     }
     activePoly = null; changed = true;
   }
@@ -572,6 +572,13 @@ function onPointerDown(e) {
     case 'obstacle':
     case 'focusarea':
     case 'zone': {
+      if (tool === 'focusarea' && activePoly && getObj(activePoly)?.type === 'focus') {
+        const o = getObj(activePoly);
+        o.points[o.points.length - 1] = p;
+        o.points.push({ ...p });
+        renderCanvas();
+        break;
+      }
       const o = tool === 'zone'
         ? { id: uid(), type: 'zone', x: p.x, y: p.y, w: 0, h: 0, label: `Station ${drill().objects.filter(x => x.type === 'zone').length + 1}`, color: ZONE_COLORS[lastZoneColor++ % ZONE_COLORS.length] }
         : tool === 'focusarea' ? { id: uid(), type: 'focus', x: p.x, y: p.y, w: 0, h: 0, dim: '0.55' }
@@ -711,7 +718,7 @@ function onPointerUp(e) {
   document.body.classList.remove('panning');
   if (pendingDbl) { // released without moving: this really was a double-click
     const pd = pendingDbl; pendingDbl = null;
-    if (doubleClickSelect(pd.rink, pd.idEl, pd.handleEl)) { drag = null; return; }
+    if (doubleClickSelect(pd.rink, pd.idEl, pd.handleEl)) { syncFocusBox(sel && getObj(sel)); drag = null; return; }
   }
   if (!drag) return;
   const dg = drag; drag = null;
@@ -724,6 +731,7 @@ function onPointerUp(e) {
         const target = d.objects.find(s => isPlayer(s) && G.dist(s, o) < 3);
         o.carrier = target ? target.id : null;
       }
+      syncFocusBox(o);
       store.save(); renderAll(); break;
     }
     case 'evmark': case 'arrive': {
@@ -733,11 +741,19 @@ function onPointerUp(e) {
       if (ev && ev.dist != null) { sim = makeSim(drill()); if (sim.puck(pk.id).info[dg.ev]?.late) { const eff = effectiveDist(pk, dg.ev); if (eff != null) ev.dist = eff; } }
       store.save(); renderAll(); break;
     }
-    case 'handle': case 'bank': case 'resize': store.save(); renderAll(); break;
+    case 'handle': case 'bank': case 'resize': syncFocusBox(getObj(dg.id)); store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
         if (o.type === 'obstacle') { o.w = 4; o.h = 2; }
+        else if (o.type === 'focus' && tool === 'focusarea') {
+          // a plain click: trace the focus as a polygon — click corners, Enter/double-click closes it
+          o.w = 0; o.h = 0;
+          o.points = [{ x: o.x, y: o.y }, { x: o.x, y: o.y }];
+          activePoly = o.id; sel = o.id;
+          store.save(); renderAll();
+          break;
+        }
         else d.objects = d.objects.filter(x => x.id !== o.id);
       }
       store.save();
@@ -932,7 +948,8 @@ function mirrorObj(o, axis = 'x') {
   const mp = q => ({ ...q, x: axis === 'x' ? G.round1(W - q.x) : q.x, y: axis === 'y' ? G.round1(H - q.y) : q.y });
   const ang = a => (a == null || a === '' ? a : ((axis === 'x' ? 180 - +a : -+a) % 360 + 360) % 360);
   if (o.points) o.points = o.points.map(mp);
-  if (o.type === 'zone' || o.type === 'focus') { // boxes are anchored top-left: reflect the far edge
+  if (o.type === 'focus' && o.points) syncFocusBox(o);
+  else if (o.type === 'zone' || o.type === 'focus') { // boxes are anchored top-left: reflect the far edge
     if (axis === 'x') o.x = G.round1(W - o.x - o.w); else o.y = G.round1(H - o.y - o.h);
   } else if (o.x != null) Object.assign(o, mp(o));
   if (o.path) o.path = o.path.map(pt => { const q = mp(pt); if (q.pivot) q.pivot = q.pivot === 'L' ? 'R' : 'L'; return q; });
@@ -961,8 +978,16 @@ function copyDrillMirrored(axis) {
 function translateObj(o, dx, dy) {
   if (!o) return;
   const tr = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) }); // spread keeps waypoint flags (e.g. pivot)
-  if (o.points) o.points = o.points.map(tr);
+  if (o.points) { o.points = o.points.map(tr); syncFocusBox(o); }
   else { Object.assign(o, tr(o)); if (o.path) o.path = o.path.map(tr); }
+}
+
+/** A polygon focus keeps x/y/w/h as its bounding box, so zoom, view-fit, mirroring and Present treat it like the box form. */
+function syncFocusBox(o) {
+  if (o?.type !== 'focus' || !o.points?.length) return;
+  const xs = o.points.map(q => q.x), ys = o.points.map(q => q.y);
+  o.x = G.round1(Math.min(...xs)); o.y = G.round1(Math.min(...ys));
+  o.w = G.round1(Math.max(...xs) - o.x); o.h = G.round1(Math.max(...ys) - o.y);
 }
 
 /** Uniformly scale and centre everything in the drill (except `zone` itself) to fit inside `zone`. */
@@ -2970,7 +2995,7 @@ function renderProps() {
   if (o.type === 'focus') {
     extra.push(`<button data-act="focus">Zoom the view to this box</button>`);
     extra.push(`<button data-act="fitdrill" title="Uniformly scale and centre everything in this drill so it fits inside the box">⇲ Resize drill into box</button>`);
-    extra.push(`<p class="muted small">Everything outside the box is grayed out — on the ice, on the printed sheet and in the coaches’ view. Grab the dashed edge to move it; objects inside stay clickable.</p>`);
+    extra.push(`<p class="muted small">Everything outside ${o.points ? 'the shape' : 'the box'} is grayed out — on the ice, on the printed sheet and in the coaches’ view. Grab the dashed edge to move it${o.points ? ', drag its corner handles to reshape' : ''}; objects inside stay clickable.</p>`);
   }
   if (o.type === 'zone') {
     extra.push(`<button data-act="focus">Focus view on zone</button>`);

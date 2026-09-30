@@ -3663,6 +3663,33 @@ function shareView(d) {
   x0 = Math.max(-6, x0); y0 = Math.max(-6, y0); x1 = Math.min(RINK.W + 6, x1); y1 = Math.min(RINK.H + 6, y1);
   return { x: G.round1(x0), y: G.round1(y0), w: G.round1(x1 - x0), h: G.round1(y1 - y0) };
 }
+/**
+ * Per-station print crops: a drill run as separate stations prints each zone side by side in one block
+ * instead of one wide rink where every station is tiny. Only when the stations don't overlap each other
+ * and hold all of the drill's action (default nets and loose labels don't count against that).
+ */
+function stationViews(d) {
+  const zones = d.objects.filter(o => o.type === 'zone' && o.w > 4 && o.h > 4);
+  if (zones.length < 2) return null;
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  for (let i = 0; i < zones.length; i++) for (let j = i + 1; j < zones.length; j++) if (overlap(zones[i], zones[j])) return null;
+  const M = 4;
+  const inSome = q => zones.some(z => q.x >= z.x - M && q.x <= z.x + z.w + M && q.y >= z.y - M && q.y <= z.y + z.h + M);
+  for (const o of d.objects) {
+    if (o.type === 'zone' || o.type === 'focus' || o.type === 'net' || o.type === 'text') continue;
+    if (o.type === 'puck' && o.carrier) continue; // rides its carrier
+    const pts = [];
+    if (o.x != null) pts.push({ x: o.x, y: o.y });
+    (o.path || []).forEach(q => pts.push(q));
+    (o.points || []).forEach(q => pts.push(q));
+    for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
+    if (!pts.every(inSome)) return null; // something lives outside the stations: print the whole picture
+  }
+  return zones
+    .sort((a, b) => (a.x - b.x) || (a.y - b.y))
+    .map(z => ({ x: G.round1(z.x - 3), y: G.round1(z.y - 3), w: G.round1(z.w + 6), h: G.round1(z.h + 6) }));
+}
+
 /** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
 const activeDrills = p => p.drills.filter(d => !d.hidden);
 const parseStart = p => !isGame(p) && /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null; // a game's time is when it starts, not a running clock
@@ -3698,7 +3725,8 @@ $('#btn-print').addEventListener('click', () => {
     return `
       <div class="p-drill">
         <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clockFull(at)}</span>` : ''}</div>
-        ${standaloneSVG(d, rink, SVG_STYLE, shareView(d))}
+        ${(sv => sv ? `<div class="p-stations">${sv.map(v => standaloneSVG(d, rink, SVG_STYLE, v)).join('')}</div>`
+                    : standaloneSVG(d, rink, SVG_STYLE, shareView(d)))(stationViews(d))}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${d.upload ? `<div class="p-meta">Video: uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)</div>` : d.video && videoEmbed(d.video) ? `<div class="p-meta">Video: ${escHtml(d.video)}</div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
@@ -3899,7 +3927,7 @@ function presentHTML(p) {
           <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
           <span class="pr-timedisp muted small"></span>
           <span class="pr-break"></span>
-          <select class="pr-speed" title="${d.narration ? 'Speed is fixed: the coach recorded a voice-over at this speed' : 'Playback speed'}" ${d.narration ? 'disabled' : ''}>${['0.25', '0.5', '0.75', '0.9', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
+          <select class="pr-speed" title="${d.narration ? 'Speed is fixed: the coach recorded a voice-over at this speed' : 'Playback speed'}" ${d.narration ? 'disabled' : ''}>${['0.25', '0.5', '0.75', '0.9', '1', '1.5', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
           <span class="pr-impact"></span>
         </div>

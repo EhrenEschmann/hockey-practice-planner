@@ -499,7 +499,11 @@ function onPointerDown(e) {
         const o = getObj(id);
         const pts = o.points ? o.points.map(q => ({ ...q })) : [{ x: o.x, y: o.y }, { x: o.x + o.w, y: o.y }, { x: o.x + o.w, y: o.y + o.h }, { x: o.x, y: o.y + o.h }];
         const center = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
-        const contents = drill().objects.filter(x => x.id !== id && insideFocus(o, x)).map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)) }));
+        const cargo0 = focusCargo(o);
+        const contents = [
+          ...cargo0.inside.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)) })),
+          ...cargo0.riders.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)), eventsOnly: true })),
+        ];
         drag = { type: 'rotate', id, center, pts, contents, a0: Math.atan2(raw.y - center.y, raw.x - center.x), pushed: false };
         select(id);
         break;
@@ -529,6 +533,13 @@ function onPointerDown(e) {
         const o = getObj(id);
         if (o.type === 'puck' && (o.carrier || o.pile)) { const q = sim.puckPos(o.id, 0); o.x = G.round1(q.x); o.y = G.round1(q.y); }
         drag = { type: 'move', id, start: raw, orig: JSON.parse(JSON.stringify(o)), pushed: false };
+        if (o.type === 'focus' && !e.altKey) {
+          const cg = focusCargo(o);
+          drag.cargo = [
+            ...cg.inside.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)) })),
+            ...cg.riders.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)), eventsOnly: true })),
+          ];
+        }
         select(id);
       } else {
         select(null);
@@ -650,6 +661,14 @@ function onPointerMove(e) {
       if (o.points) o.points = drag.orig.points.map(tr);
       else { Object.assign(o, tr(drag.orig)); if (o.path) o.path = drag.orig.path.map(tr); }
       if (o.type === 'puck') { o.carrier = null; delete o.pile; } // dragging detaches; dropping on a skater re-attaches (see onPointerUp)
+      syncFocusBox(o);
+      for (const it of drag.cargo || []) { // everything inside a focus moves with it (Alt-drag moves just the frame)
+        const x = getObj(it.id); if (!x) continue;
+        for (const k of Object.keys(x)) delete x[k];
+        Object.assign(x, JSON.parse(JSON.stringify(it.orig)));
+        if (it.eventsOnly) { for (const ev of x.events || []) { if (ev.target) ev.target = tr(ev.target); if (ev.bank) ev.bank = tr(ev.bank); } }
+        else { translateObj(x, dx, dy); for (const ev of x.events || []) { if (ev.target) ev.target = tr(ev.target); if (ev.bank) ev.bank = tr(ev.bank); } }
+      }
       renderCanvas();
       break;
     }
@@ -673,11 +692,13 @@ function onPointerMove(e) {
         y: G.round1(drag.center.y + (q.x - drag.center.x) * sin + (q.y - drag.center.y) * cos),
       }));
       syncFocusBox(o);
+      const rp = q => ({ ...q, x: G.round1(drag.center.x + (q.x - drag.center.x) * cos - (q.y - drag.center.y) * sin), y: G.round1(drag.center.y + (q.x - drag.center.x) * sin + (q.y - drag.center.y) * cos) });
       for (const it of drag.contents) { // contents turn with the shape, re-derived from their grab-time state
         const x = getObj(it.id); if (!x) continue;
         for (const k of Object.keys(x)) delete x[k];
         Object.assign(x, JSON.parse(JSON.stringify(it.orig)));
-        rotateObj(x, drag.center, deg);
+        if (it.eventsOnly) { for (const ev of x.events || []) { if (ev.target) ev.target = rp(ev.target); if (ev.bank) ev.bank = rp(ev.bank); } }
+        else rotateObj(x, drag.center, deg);
       }
       renderCanvas();
       break;
@@ -935,7 +956,7 @@ document.addEventListener('keydown', e => {
     const step = e.shiftKey ? 5 : 1;
     const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
     const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-    commit(() => translateObj(getObj(sel), dx, dy));
+    commit(() => { const o = getObj(sel); if (o?.type === 'focus') moveFocusBy(o, dx, dy); else translateObj(o, dx, dy); });
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1046,10 +1067,28 @@ function rotateObj(o, c, deg) {
   for (const ev of o.events || []) { if (ev.target) ev.target = rp(ev.target); if (ev.bank) ev.bank = rp(ev.bank); }
 }
 
+/** What travels with a focus: the objects inside it, plus pucks carried by someone inside (events only). */
+function focusCargo(f) {
+  const inside = drill().objects.filter(x => x !== f && insideFocus(f, x));
+  const ids = new Set(inside.map(x => x.id));
+  const riders = drill().objects.filter(x => x.type === 'puck' && x.carrier && ids.has(x.carrier));
+  return { inside, riders };
+}
+
+/** Move a focus area and everything inside it by (dx, dy). */
+function moveFocusBy(f, dx, dy) {
+  const { inside, riders } = focusCargo(f);
+  const tp = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) });
+  const moveEvents = x => { for (const ev of x.events || []) { if (ev.target) ev.target = tp(ev.target); if (ev.bank) ev.bank = tp(ev.bank); } };
+  translateObj(f, dx, dy);
+  for (const x of inside) { translateObj(x, dx, dy); moveEvents(x); }
+  for (const r of riders) moveEvents(r);
+}
+
 /** Rotate a focus area by deg° around its centre — everything inside it turns with it. */
 function rotateFocus(o, deg) {
   const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
-  const inside = drill().objects.filter(x => x !== o && insideFocus(o, x));
+  const { inside, riders } = focusCargo(o);
   if (o.points || deg % 90 !== 0) {
     const pts = o.points || [{ x: o.x, y: o.y }, { x: o.x + o.w, y: o.y }, { x: o.x + o.w, y: o.y + o.h }, { x: o.x, y: o.y + o.h }];
     const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
@@ -1063,6 +1102,9 @@ function rotateFocus(o, deg) {
     o.x = G.round1(c.x - w / 2); o.y = G.round1(c.y - h / 2); o.w = G.round1(w); o.h = G.round1(h);
   }
   for (const x of inside) rotateObj(x, c, deg);
+  const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const rp = q => ({ ...q, x: G.round1(c.x + (q.x - c.x) * cos - (q.y - c.y) * sin), y: G.round1(c.y + (q.x - c.x) * sin + (q.y - c.y) * cos) });
+  for (const r of riders) for (const ev of r.events || []) { if (ev.target) ev.target = rp(ev.target); if (ev.bank) ev.bank = rp(ev.bank); }
 }
 
 /** A polygon focus keeps x/y/w/h as its bounding box, so zoom, view-fit, mirroring and Present treat it like the box form. */
@@ -3079,7 +3121,7 @@ function renderProps() {
     extra.push(`<button data-act="focus">Zoom the view to this box</button>`);
     extra.push(`<button data-act="rot90" title="Quarter-turn the focus and everything inside it around its centre — or drag the round grip above it to rotate freely">Rotate 90°</button>`);
     extra.push(`<button data-act="fitdrill" title="Uniformly scale and centre everything in this drill so it fits inside the box">⇲ Resize drill into box</button>`);
-    extra.push(`<p class="muted small">Everything outside ${o.points ? 'the shape' : 'the box'} is grayed out — on the ice, on the printed sheet and in the coaches’ view. Grab the dashed edge to move it${o.points ? ', drag its corner handles to reshape' : ''}; objects inside stay clickable.</p>`);
+    extra.push(`<p class="muted small">Everything outside ${o.points ? 'the shape' : 'the box'} is grayed out — on the ice, on the printed sheet and in the coaches’ view. Drag the dashed edge (or edit x/y, or nudge with arrow keys) to move it <b>with everything inside</b> — Alt-drag moves just the frame${o.points ? '; drag its corner handles to reshape' : ''}. Objects inside stay clickable.</p>`);
   }
   if (o.type === 'zone') {
     extra.push(`<button data-act="focus">Focus view on zone</button>`);
@@ -3338,6 +3380,12 @@ propsBody.addEventListener('input', e => {
   if (key === 'triggerPlayer' || key === 'triggerWp') {
     if (key === 'triggerPlayer') { if (el.value) o.trigger = { player: el.value, wp: o.trigger?.wp ?? 1 }; else delete o.trigger; el.blur(); }
     else if (o.trigger) o.trigger.wp = Math.max(0, Math.round(+el.value || 0));
+    store.save(); renderCanvas(); renderAnimBar();
+    return;
+  }
+  if (o.type === 'focus' && (key === 'x' || key === 'y')) {
+    const v = +el.value;
+    if (Number.isFinite(v)) moveFocusBy(o, key === 'x' ? G.round1(v - o.x) : 0, key === 'y' ? G.round1(v - o.y) : 0);
     store.save(); renderCanvas(); renderAnimBar();
     return;
   }

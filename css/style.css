@@ -20,6 +20,11 @@ textarea{resize:vertical}
 .sep{width:1px;height:22px;background:var(--border);margin:0 6px}
 .muted{color:var(--muted)}
 .lucide{width:1em;height:1em;vertical-align:-.125em;display:inline-block;flex:none}
+.datewrap{display:flex;gap:4px;align-items:center;position:relative}
+.datewrap input[type=text]{flex:1;min-width:0}
+.datewrap .datepick{padding:4px 7px;flex:none}
+.datewrap .datepick-native{position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}
+input.invalid{border-color:var(--danger)}
 #toolbar .tool .ico .lucide{width:17px;height:17px;display:block}
 #btn-play .lucide,#btn-stop .lucide{width:16px;height:16px;vertical-align:-3px}
 #drill-list li button .lucide{width:13px;height:13px}
@@ -564,6 +569,8 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
   #print-area .p-head b{font-size:11px}
   #print-area .p-time{margin-left:auto;font-variant-numeric:tabular-nums}
   #print-area .p-drill svg{max-width:100%;max-height:45mm;width:auto;height:auto;display:block;border:1px solid #ccc;border-radius:1.5mm}
+  #print-area .p-stations{display:flex;gap:1.5mm;align-items:stretch}
+  #print-area .p-stations svg{flex:1;min-width:0;max-height:38mm}
   #print-area pre{white-space:pre-wrap;font:9.5px/1.35 system-ui,sans-serif;margin:1.5mm 0 0}
   #print-area .p-rules{margin-top:1.5mm}
   #print-area .p-rules ul{margin:0.5mm 0 0;padding-left:4mm}

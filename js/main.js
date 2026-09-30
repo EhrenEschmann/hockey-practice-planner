@@ -2,7 +2,7 @@ import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
 import { makeSim, facingOf, goalieSquareTo, goalieHome, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
-import { Store, uid, newDrill, newPractice, practiceLabel, usDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
+import { Store, uid, newDrill, newPractice, practiceLabel, usDate, parseUsDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
@@ -228,7 +228,7 @@ const HINTS = {
   jumppad: 'Click to place a low pad · skaters whose path runs over it jump it',
   barricade: 'Click points to lay a barricade · double-click or Enter to finish',
   zone: 'Drag a box to mark a section / station',
-  focusarea: 'Drag a box around the space to work in — the rest of the ice grays out',
+  focusarea: 'Drag a box around the space to work in — or click corner points for any shape (Enter/double-click closes it). The rest of the ice grays out',
   text: 'Click to place a text label',
   erase: 'Click an object to remove it',
 };
@@ -251,8 +251,8 @@ function finishActive() {
     if (o) {
       o.points.pop(); // drop the preview point
       while (o.points.length > 1 && G.dist(o.points.at(-1), o.points.at(-2)) < 0.2) o.points.pop();
-      if (o.points.length < 2) drill().objects = drill().objects.filter(x => x.id !== o.id);
-      else doneId = o.id;
+      if (o.points.length < (o.type === 'focus' ? 3 : 2)) drill().objects = drill().objects.filter(x => x.id !== o.id);
+      else { doneId = o.id; syncFocusBox(o); }
     }
     activePoly = null; changed = true;
   }
@@ -494,6 +494,20 @@ function onPointerDown(e) {
       const bankEl = e.target.closest('[data-bank]');
       const arriveEl = e.target.closest('[data-arrive]');
       const arriveTo = arriveEl && id ? getObj(id)?.events?.[+arriveEl.dataset.arrive]?.to : null;
+      const rotEl = e.target.closest('[data-rot]');
+      if (rotEl && id && getObj(id)?.type === 'focus') {
+        const o = getObj(id);
+        const pts = o.points ? o.points.map(q => ({ ...q })) : [{ x: o.x, y: o.y }, { x: o.x + o.w, y: o.y }, { x: o.x + o.w, y: o.y + o.h }, { x: o.x, y: o.y + o.h }];
+        const center = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+        const cargo0 = focusCargo(o);
+        const contents = [
+          ...cargo0.inside.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)) })),
+          ...cargo0.riders.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)), eventsOnly: true })),
+        ];
+        drag = { type: 'rotate', id, center, pts, contents, a0: Math.atan2(raw.y - center.y, raw.x - center.x), pushed: false };
+        select(id);
+        break;
+      }
       const cornerEl = e.target.closest('[data-corner]');
       if (cornerEl && id && getObj(id)) {
         // resize a zone / focus box: the opposite corner stays put
@@ -519,6 +533,13 @@ function onPointerDown(e) {
         const o = getObj(id);
         if (o.type === 'puck' && (o.carrier || o.pile)) { const q = sim.puckPos(o.id, 0); o.x = G.round1(q.x); o.y = G.round1(q.y); }
         drag = { type: 'move', id, start: raw, orig: JSON.parse(JSON.stringify(o)), pushed: false };
+        if (o.type === 'focus' && !e.altKey) {
+          const cg = focusCargo(o);
+          drag.cargo = [
+            ...cg.inside.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)) })),
+            ...cg.riders.map(x => ({ id: x.id, orig: JSON.parse(JSON.stringify(x)), eventsOnly: true })),
+          ];
+        }
         select(id);
       } else {
         select(null);
@@ -572,6 +593,13 @@ function onPointerDown(e) {
     case 'obstacle':
     case 'focusarea':
     case 'zone': {
+      if (tool === 'focusarea' && activePoly && getObj(activePoly)?.type === 'focus') {
+        const o = getObj(activePoly);
+        o.points[o.points.length - 1] = p;
+        o.points.push({ ...p });
+        renderCanvas();
+        break;
+      }
       const o = tool === 'zone'
         ? { id: uid(), type: 'zone', x: p.x, y: p.y, w: 0, h: 0, label: `Station ${drill().objects.filter(x => x.type === 'zone').length + 1}`, color: ZONE_COLORS[lastZoneColor++ % ZONE_COLORS.length] }
         : tool === 'focusarea' ? { id: uid(), type: 'focus', x: p.x, y: p.y, w: 0, h: 0, dim: '0.55' }
@@ -633,6 +661,14 @@ function onPointerMove(e) {
       if (o.points) o.points = drag.orig.points.map(tr);
       else { Object.assign(o, tr(drag.orig)); if (o.path) o.path = drag.orig.path.map(tr); }
       if (o.type === 'puck') { o.carrier = null; delete o.pile; } // dragging detaches; dropping on a skater re-attaches (see onPointerUp)
+      syncFocusBox(o);
+      for (const it of drag.cargo || []) { // everything inside a focus moves with it (Alt-drag moves just the frame)
+        const x = getObj(it.id); if (!x) continue;
+        for (const k of Object.keys(x)) delete x[k];
+        Object.assign(x, JSON.parse(JSON.stringify(it.orig)));
+        if (it.eventsOnly) { for (const ev of x.events || []) { if (ev.target) ev.target = tr(ev.target); if (ev.bank) ev.bank = tr(ev.bank); } }
+        else { translateObj(x, dx, dy); for (const ev of x.events || []) { if (ev.target) ev.target = tr(ev.target); if (ev.bank) ev.bank = tr(ev.bank); } }
+      }
       renderCanvas();
       break;
     }
@@ -640,6 +676,30 @@ function onPointerMove(e) {
       const o = getObj(drag.id); if (!o) return;
       if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
       Object.assign(o[drag.key][drag.index], p); // assign in place: waypoint flags (e.g. pivot) survive the drag
+      renderCanvas();
+      break;
+    }
+    case 'rotate': {
+      const o = getObj(drag.id); if (!o) return;
+      const raw2 = toRink(e);
+      let deg = (Math.atan2(raw2.y - drag.center.y, raw2.x - drag.center.x) - drag.a0) * 180 / Math.PI;
+      deg = Math.round(deg / 5) * 5;
+      if (!deg && !o.points) break; // a box only becomes a polygon once it actually turns
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+      o.points = drag.pts.map(q => ({
+        x: G.round1(drag.center.x + (q.x - drag.center.x) * cos - (q.y - drag.center.y) * sin),
+        y: G.round1(drag.center.y + (q.x - drag.center.x) * sin + (q.y - drag.center.y) * cos),
+      }));
+      syncFocusBox(o);
+      const rp = q => ({ ...q, x: G.round1(drag.center.x + (q.x - drag.center.x) * cos - (q.y - drag.center.y) * sin), y: G.round1(drag.center.y + (q.x - drag.center.x) * sin + (q.y - drag.center.y) * cos) });
+      for (const it of drag.contents) { // contents turn with the shape, re-derived from their grab-time state
+        const x = getObj(it.id); if (!x) continue;
+        for (const k of Object.keys(x)) delete x[k];
+        Object.assign(x, JSON.parse(JSON.stringify(it.orig)));
+        if (it.eventsOnly) { for (const ev of x.events || []) { if (ev.target) ev.target = rp(ev.target); if (ev.bank) ev.bank = rp(ev.bank); } }
+        else rotateObj(x, drag.center, deg);
+      }
       renderCanvas();
       break;
     }
@@ -711,7 +771,7 @@ function onPointerUp(e) {
   document.body.classList.remove('panning');
   if (pendingDbl) { // released without moving: this really was a double-click
     const pd = pendingDbl; pendingDbl = null;
-    if (doubleClickSelect(pd.rink, pd.idEl, pd.handleEl)) { drag = null; return; }
+    if (doubleClickSelect(pd.rink, pd.idEl, pd.handleEl)) { syncFocusBox(sel && getObj(sel)); drag = null; return; }
   }
   if (!drag) return;
   const dg = drag; drag = null;
@@ -724,6 +784,7 @@ function onPointerUp(e) {
         const target = d.objects.find(s => isPlayer(s) && G.dist(s, o) < 3);
         o.carrier = target ? target.id : null;
       }
+      syncFocusBox(o);
       store.save(); renderAll(); break;
     }
     case 'evmark': case 'arrive': {
@@ -733,11 +794,19 @@ function onPointerUp(e) {
       if (ev && ev.dist != null) { sim = makeSim(drill()); if (sim.puck(pk.id).info[dg.ev]?.late) { const eff = effectiveDist(pk, dg.ev); if (eff != null) ev.dist = eff; } }
       store.save(); renderAll(); break;
     }
-    case 'handle': case 'bank': case 'resize': store.save(); renderAll(); break;
+    case 'handle': case 'bank': case 'resize': case 'rotate': syncFocusBox(getObj(dg.id)); store.save(); renderAll(); break;
     case 'rect': {
       const o = getObj(dg.id);
       if (o.w < 1.5 || o.h < 1.5) {
         if (o.type === 'obstacle') { o.w = 4; o.h = 2; }
+        else if (o.type === 'focus' && tool === 'focusarea') {
+          // a plain click: trace the focus as a polygon — click corners, Enter/double-click closes it
+          o.w = 0; o.h = 0;
+          o.points = [{ x: o.x, y: o.y }, { x: o.x, y: o.y }];
+          activePoly = o.id; sel = o.id;
+          store.save(); renderAll();
+          break;
+        }
         else d.objects = d.objects.filter(x => x.id !== o.id);
       }
       store.save();
@@ -887,7 +956,7 @@ document.addEventListener('keydown', e => {
     const step = e.shiftKey ? 5 : 1;
     const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
     const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-    commit(() => translateObj(getObj(sel), dx, dy));
+    commit(() => { const o = getObj(sel); if (o?.type === 'focus') moveFocusBy(o, dx, dy); else translateObj(o, dx, dy); });
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -932,7 +1001,8 @@ function mirrorObj(o, axis = 'x') {
   const mp = q => ({ ...q, x: axis === 'x' ? G.round1(W - q.x) : q.x, y: axis === 'y' ? G.round1(H - q.y) : q.y });
   const ang = a => (a == null || a === '' ? a : ((axis === 'x' ? 180 - +a : -+a) % 360 + 360) % 360);
   if (o.points) o.points = o.points.map(mp);
-  if (o.type === 'zone' || o.type === 'focus') { // boxes are anchored top-left: reflect the far edge
+  if (o.type === 'focus' && o.points) syncFocusBox(o);
+  else if (o.type === 'zone' || o.type === 'focus') { // boxes are anchored top-left: reflect the far edge
     if (axis === 'x') o.x = G.round1(W - o.x - o.w); else o.y = G.round1(H - o.y - o.h);
   } else if (o.x != null) Object.assign(o, mp(o));
   if (o.path) o.path = o.path.map(pt => { const q = mp(pt); if (q.pivot) q.pivot = q.pivot === 'L' ? 'R' : 'L'; return q; });
@@ -961,8 +1031,88 @@ function copyDrillMirrored(axis) {
 function translateObj(o, dx, dy) {
   if (!o) return;
   const tr = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) }); // spread keeps waypoint flags (e.g. pivot)
-  if (o.points) o.points = o.points.map(tr);
+  if (o.points) { o.points = o.points.map(tr); syncFocusBox(o); }
   else { Object.assign(o, tr(o)); if (o.path) o.path = o.path.map(tr); }
+}
+
+/** Is this object inside the focus shape? Judged by its anchor: centroid for point-chains, centre for boxes. */
+function insideFocus(f, o) {
+  if (o.type === 'puck' && o.carrier) return false; // rides its carrier
+  let a = null;
+  if (o.points?.length) a = { x: o.points.reduce((s, q) => s + q.x, 0) / o.points.length, y: o.points.reduce((s, q) => s + q.y, 0) / o.points.length };
+  else if ((o.type === 'zone' || o.type === 'focus') && o.x != null) a = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+  else if (o.x != null) a = { x: o.x, y: o.y };
+  if (!a) return false;
+  return f.points?.length >= 3 ? G.pointInPolygon(f.points, a)
+    : a.x >= f.x && a.x <= f.x + f.w && a.y >= f.y && a.y <= f.y + f.h;
+}
+
+/** Rotate one object by deg° around centre c: position, path, points, angles, shot targets and banks. */
+function rotateObj(o, c, deg) {
+  const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const rp = q => ({ ...q, x: G.round1(c.x + (q.x - c.x) * cos - (q.y - c.y) * sin), y: G.round1(c.y + (q.x - c.x) * sin + (q.y - c.y) * cos) });
+  if ((o.type === 'zone' || o.type === 'focus') && !o.points) {
+    // axis-aligned boxes can't tilt: rotate the centre, and swap the sides on quarter turns
+    const ctr = rp({ x: o.x + o.w / 2, y: o.y + o.h / 2 });
+    const quarter = ((deg % 180) + 180) % 180 === 90;
+    const w = quarter ? o.h : o.w, h = quarter ? o.w : o.h;
+    o.x = G.round1(ctr.x - w / 2); o.y = G.round1(ctr.y - h / 2); o.w = G.round1(w); o.h = G.round1(h);
+    return;
+  }
+  if (o.points) { o.points = o.points.map(rp); syncFocusBox(o); }
+  if (o.x != null) { const q = rp({ x: o.x, y: o.y }); o.x = q.x; o.y = q.y; }
+  if (o.path) o.path = o.path.map(rp);
+  if (o.rot != null && o.rot !== '') o.rot = ((+o.rot + deg) % 360 + 360) % 360;
+  if (o.facing != null && o.facing !== '') o.facing = ((+o.facing + deg) % 360 + 360) % 360;
+  for (const ev of o.events || []) { if (ev.target) ev.target = rp(ev.target); if (ev.bank) ev.bank = rp(ev.bank); }
+}
+
+/** What travels with a focus: the objects inside it, plus pucks carried by someone inside (events only). */
+function focusCargo(f) {
+  const inside = drill().objects.filter(x => x !== f && insideFocus(f, x));
+  const ids = new Set(inside.map(x => x.id));
+  const riders = drill().objects.filter(x => x.type === 'puck' && x.carrier && ids.has(x.carrier));
+  return { inside, riders };
+}
+
+/** Move a focus area and everything inside it by (dx, dy). */
+function moveFocusBy(f, dx, dy) {
+  const { inside, riders } = focusCargo(f);
+  const tp = q => ({ ...q, x: G.round1(q.x + dx), y: G.round1(q.y + dy) });
+  const moveEvents = x => { for (const ev of x.events || []) { if (ev.target) ev.target = tp(ev.target); if (ev.bank) ev.bank = tp(ev.bank); } };
+  translateObj(f, dx, dy);
+  for (const x of inside) { translateObj(x, dx, dy); moveEvents(x); }
+  for (const r of riders) moveEvents(r);
+}
+
+/** Rotate a focus area by deg° around its centre — everything inside it turns with it. */
+function rotateFocus(o, deg) {
+  const c = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+  const { inside, riders } = focusCargo(o);
+  if (o.points || deg % 90 !== 0) {
+    const pts = o.points || [{ x: o.x, y: o.y }, { x: o.x + o.w, y: o.y }, { x: o.x + o.w, y: o.y + o.h }, { x: o.x, y: o.y + o.h }];
+    const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+    o.points = pts.map(q => ({
+      x: G.round1(c.x + (q.x - c.x) * cos - (q.y - c.y) * sin),
+      y: G.round1(c.y + (q.x - c.x) * sin + (q.y - c.y) * cos),
+    }));
+    syncFocusBox(o);
+  } else if (deg % 180 !== 0) {
+    const w = o.h, h = o.w;
+    o.x = G.round1(c.x - w / 2); o.y = G.round1(c.y - h / 2); o.w = G.round1(w); o.h = G.round1(h);
+  }
+  for (const x of inside) rotateObj(x, c, deg);
+  const rad = deg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const rp = q => ({ ...q, x: G.round1(c.x + (q.x - c.x) * cos - (q.y - c.y) * sin), y: G.round1(c.y + (q.x - c.x) * sin + (q.y - c.y) * cos) });
+  for (const r of riders) for (const ev of r.events || []) { if (ev.target) ev.target = rp(ev.target); if (ev.bank) ev.bank = rp(ev.bank); }
+}
+
+/** A polygon focus keeps x/y/w/h as its bounding box, so zoom, view-fit, mirroring and Present treat it like the box form. */
+function syncFocusBox(o) {
+  if (o?.type !== 'focus' || !o.points?.length) return;
+  const xs = o.points.map(q => q.x), ys = o.points.map(q => q.y);
+  o.x = G.round1(Math.min(...xs)); o.y = G.round1(Math.min(...ys));
+  o.w = G.round1(Math.max(...xs) - o.x); o.h = G.round1(Math.max(...ys) - o.y);
 }
 
 /** Uniformly scale and centre everything in the drill (except `zone` itself) to fit inside `zone`. */
@@ -1623,7 +1773,7 @@ function openCreateForm(kind) {
   $('#new-opponent-wrap').hidden = kind !== 'game'; $('#new-opponent').value = '';
   $('#new-time-label').textContent = kind === 'game' ? 'Game time' : 'Start time';
   $('#new-team').innerHTML = teams.map(n => `<option value="${escHtml(n)}"${n.toLowerCase() === cur.toLowerCase() ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
-  $('#new-date').value = todayISO(); $('#new-time').value = store.practice.time || '';
+  $('#new-date').value = usDate(todayISO()); $('#new-time').value = store.practice.time || '';
   f.hidden = false; $('.plist-new').hidden = true;
   (kind === 'game' ? $('#new-opponent') : $('#new-date')).focus();
 }
@@ -1632,8 +1782,10 @@ $('#plist-create-game').addEventListener('click', () => openCreateForm('game'));
 $('#plist-cancel').addEventListener('click', () => { $('#plist-form').hidden = true; $('.plist-new').hidden = false; });
 $('#plist-form').addEventListener('submit', e => {
   e.preventDefault();
-  const team = $('#new-team').value, date = $('#new-date').value, time = $('#new-time').value;
-  if (!team || !date || !time) return; // `required` — the browser has already said which
+  const team = $('#new-team').value, date = parseUsDate($('#new-date').value), time = $('#new-time').value;
+  $('#new-date').classList.toggle('invalid', !date);
+  if (!date) { $('#new-date').focus(); return; }
+  if (!team || !time) return; // `required` — the browser has already said which
   finishActive();
   const p = newPractice(team, plistKind, $('#new-opponent').value.trim()); p.date = date; p.time = time;
   store.addPractice(p);
@@ -1654,7 +1806,7 @@ function renderPracticeProps() {
   for (const [id, key] of PRACTICE_FIELDS) {
     const el = $(id);
     if (el.tagName === 'SELECT') renderTeamSelect();
-    else if (document.activeElement !== el) el.value = p[key] || '';
+    else if (document.activeElement !== el) el.value = key === 'date' ? usDate(p[key]) : (p[key] || '');
   }
   for (const [id, key] of SHARE_FIELDS) {
     const em = $(id);
@@ -1674,6 +1826,11 @@ function renderStage() {
   $('#btn-stage-back').textContent = st === 'team' ? '← Pull back from team' : '← Pull back to draft';
   $('#stage-who').textContent = `${a.coach.length} coach${a.coach.length === 1 ? '' : 'es'} · ${a.team.length} family email${a.team.length === 1 ? '' : 's'}`
     + (t ? ` — the “${t.name || 'unnamed'}” roster (👥 Team) plus any extras below.` : ' — no team roster yet: add people under 👥 Team.');
+  $('#practice-open').checked = !!p.open;
+  $('#btn-share-open-link').hidden = !p.open;
+  $('#open-note').textContent = !p.open ? ''
+    : st === 'draft' ? 'Will be open to anyone with the link once it leaves Draft.'
+    : '🌐 Open — anyone with the link can watch, with a Google account or as an anonymous guest.';
 }
 function setStage(next) {
   const p = store.practice, a = accessFor(store.roster, p), st = stageOf(p);
@@ -1698,7 +1855,16 @@ const SHARE_FIELDS = [['#practice-emails', 'sharedWith'], ['#practice-team-email
 for (const [id, key] of PRACTICE_FIELDS) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
-  el.addEventListener('input', () => { if (el.value === MANAGE_TEAMS) return; store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
+  el.addEventListener('input', () => {
+    if (el.value === MANAGE_TEAMS) return;
+    if (key === 'date') {
+      const iso = parseUsDate(el.value);
+      el.classList.toggle('invalid', !iso);
+      if (!iso) return; // keep the old date until the field parses as MM/DD/YYYY
+      store.practice.date = iso;
+    } else store.practice[key] = el.value;
+    store.save(); renderPracticeSelect();
+  });
   el.addEventListener('change', () => {
     if (el.value === MANAGE_TEAMS) { el.value = store.practice.team || ''; $('#practice-pop').hidden = true; openTeamMgr(); return; }
     store.commitPending(); renderUI();
@@ -1706,6 +1872,25 @@ for (const [id, key] of PRACTICE_FIELDS) {
 }
 // The team is picked from the roster (👥 Team), never typed: the roster is what decides who can open the practice.
 const MANAGE_TEAMS = '__manage-teams__';
+
+// Date fields are US-format text inputs; the calendar button opens the hidden native picker.
+$$('.datewrap').forEach(w => {
+  const text = w.querySelector('input[type=text]');
+  const native = w.querySelector('input.datepick-native');
+  w.querySelector('.datepick').addEventListener('click', e => {
+    e.stopPropagation();
+    native.value = parseUsDate(text.value) || todayISO();
+    try { native.showPicker(); } catch { native.click(); }
+  });
+  native.addEventListener('click', e => e.stopPropagation());
+  native.addEventListener('change', () => {
+    if (!native.value) return;
+    text.value = usDate(native.value);
+    text.classList.remove('invalid');
+    text.dispatchEvent(new Event('input'));
+    text.dispatchEvent(new Event('change'));
+  });
+});
 function renderTeamSelect() {
   const el = $('#practice-team'), cur = store.practice.team || '';
   const teams = store.roster.teams.map(t => t.name || '').filter(Boolean);
@@ -2939,8 +3124,9 @@ function renderProps() {
   }
   if (o.type === 'focus') {
     extra.push(`<button data-act="focus">Zoom the view to this box</button>`);
+    extra.push(`<button data-act="rot90" title="Quarter-turn the focus and everything inside it around its centre — or drag the round grip above it to rotate freely">Rotate 90°</button>`);
     extra.push(`<button data-act="fitdrill" title="Uniformly scale and centre everything in this drill so it fits inside the box">⇲ Resize drill into box</button>`);
-    extra.push(`<p class="muted small">Everything outside the box is grayed out — on the ice, on the printed sheet and in the coaches’ view. Grab the dashed edge to move it; objects inside stay clickable.</p>`);
+    extra.push(`<p class="muted small">Everything outside ${o.points ? 'the shape' : 'the box'} is grayed out — on the ice, on the printed sheet and in the coaches’ view. Drag the dashed edge (or edit x/y, or nudge with arrow keys) to move it <b>with everything inside</b> — Alt-drag moves just the frame${o.points ? '; drag its corner handles to reshape' : ''}. Objects inside stay clickable.</p>`);
   }
   if (o.type === 'zone') {
     extra.push(`<button data-act="focus">Focus view on zone</button>`);
@@ -3202,6 +3388,12 @@ propsBody.addEventListener('input', e => {
     store.save(); renderCanvas(); renderAnimBar();
     return;
   }
+  if (o.type === 'focus' && (key === 'x' || key === 'y')) {
+    const v = +el.value;
+    if (Number.isFinite(v)) moveFocusBy(o, key === 'x' ? G.round1(v - o.x) : 0, key === 'y' ? G.round1(v - o.y) : 0);
+    store.save(); renderCanvas(); renderAnimBar();
+    return;
+  }
   o[key] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? +el.value : el.value;
   if (key === 'facing') o.facing = el.value === '' ? null : +el.value;
   if (key === 'carrier') { o.carrier = el.value || null; if (o.carrier) delete o.pile; el.blur(); }
@@ -3243,7 +3435,7 @@ propsBody.addEventListener('click', e => {
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
     case 'readzone': readAloud([o.label || 'Zone', ...zoneLines(o)]); break;
-    case 'rot90': commit(() => o.rot = ((o.rot || 0) + 90) % 360); break;
+    case 'rot90': commit(() => { if (o.type === 'focus') rotateFocus(o, 90); else o.rot = ((o.rot || 0) + 90) % 360; }); break;
     case 'addgoalie': { const g = { id: uid(), ...makeGoalie(o) }; commit(() => drill().objects.push(g)); select(g.id); renderProps(); break; }
     case 'selgoalie': { const g = goalieOf(o); if (g) { select(g.id); renderProps(); } break; }
     case 'face45': commit(() => { const cur = Math.round(facingOf(o, drill().objects) * 180 / Math.PI); o.facing = ((cur + 45) % 360 + 360) % 360; }); break;
@@ -3471,6 +3663,33 @@ function shareView(d) {
   x0 = Math.max(-6, x0); y0 = Math.max(-6, y0); x1 = Math.min(RINK.W + 6, x1); y1 = Math.min(RINK.H + 6, y1);
   return { x: G.round1(x0), y: G.round1(y0), w: G.round1(x1 - x0), h: G.round1(y1 - y0) };
 }
+/**
+ * Per-station print crops: a drill run as separate stations prints each zone side by side in one block
+ * instead of one wide rink where every station is tiny. Only when the stations don't overlap each other
+ * and hold all of the drill's action (default nets and loose labels don't count against that).
+ */
+function stationViews(d) {
+  const zones = d.objects.filter(o => o.type === 'zone' && o.w > 4 && o.h > 4);
+  if (zones.length < 2) return null;
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  for (let i = 0; i < zones.length; i++) for (let j = i + 1; j < zones.length; j++) if (overlap(zones[i], zones[j])) return null;
+  const M = 4;
+  const inSome = q => zones.some(z => q.x >= z.x - M && q.x <= z.x + z.w + M && q.y >= z.y - M && q.y <= z.y + z.h + M);
+  for (const o of d.objects) {
+    if (o.type === 'zone' || o.type === 'focus' || o.type === 'net' || o.type === 'text') continue;
+    if (o.type === 'puck' && o.carrier) continue; // rides its carrier
+    const pts = [];
+    if (o.x != null) pts.push({ x: o.x, y: o.y });
+    (o.path || []).forEach(q => pts.push(q));
+    (o.points || []).forEach(q => pts.push(q));
+    for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
+    if (!pts.every(inSome)) return null; // something lives outside the stations: print the whole picture
+  }
+  return zones
+    .sort((a, b) => (a.x - b.x) || (a.y - b.y))
+    .map(z => ({ x: G.round1(z.x - 3), y: G.round1(z.y - 3), w: G.round1(z.w + 6), h: G.round1(z.h + 6) }));
+}
+
 /** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
 const activeDrills = p => p.drills.filter(d => !d.hidden);
 const parseStart = p => !isGame(p) && /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null; // a game's time is when it starts, not a running clock
@@ -3506,7 +3725,8 @@ $('#btn-print').addEventListener('click', () => {
     return `
       <div class="p-drill">
         <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clockFull(at)}</span>` : ''}</div>
-        ${standaloneSVG(d, rink, SVG_STYLE, shareView(d))}
+        ${(sv => sv ? `<div class="p-stations">${sv.map(v => standaloneSVG(d, rink, SVG_STYLE, v)).join('')}</div>`
+                    : standaloneSVG(d, rink, SVG_STYLE, shareView(d)))(stationViews(d))}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${d.upload ? `<div class="p-meta">Video: uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)</div>` : d.video && videoEmbed(d.video) ? `<div class="p-meta">Video: ${escHtml(d.video)}</div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
@@ -3692,7 +3912,7 @@ function presentHTML(p) {
         return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b>${minHTML(d)}${whenHTML(at, +d.duration || 0)}</header>
-        ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : '<p class="muted">Technique work — elements on the whiteboard.</p>'}
+        ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : ''}
         ${videoBlockHTML(d)}
         <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>
       </section>`;
@@ -3707,7 +3927,7 @@ function presentHTML(p) {
           <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
           <span class="pr-timedisp muted small"></span>
           <span class="pr-break"></span>
-          <select class="pr-speed" title="${d.narration ? 'Speed is fixed: the coach recorded a voice-over at this speed' : 'Playback speed'}" ${d.narration ? 'disabled' : ''}>${['0.25', '0.5', '0.75', '0.9', '1', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
+          <select class="pr-speed" title="${d.narration ? 'Speed is fixed: the coach recorded a voice-over at this speed' : 'Playback speed'}" ${d.narration ? 'disabled' : ''}>${['0.25', '0.5', '0.75', '0.9', '1', '1.5', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
           <span class="pr-impact"></span>
         </div>
@@ -3967,6 +4187,7 @@ function presentMsg(msg, opts = {}) {
   $('#present-gate').hidden = false;
   $('#present-msg').textContent = msg;
   $('#present-signin').hidden = !opts.signIn;
+  $('#present-anon').hidden = !opts.anon;
   $('#present-reload').hidden = !opts.reload;
   $('#present-request').hidden = !opts.request;
   $('#present-tolist').hidden = !opts.list;
@@ -4079,6 +4300,7 @@ function currentWho() {
   const u = cloudSync?.user;
   if (!u) return { persona: 'anonymous' };
   if (isOwner(u)) return { persona: 'planner' };
+  if (u.isAnonymous) return { persona: 'guest', roles: {} }; // may watch open practices; has no inbox
   if (viewerInbox === undefined) return { persona: inboxStale ? 'offline' : 'checking' };
   if (!viewerInbox) return { persona: 'unknown' };
   const roles = Object.fromEntries(Object.entries(viewerInbox.practices || {}).map(([pid, c]) => [pid, c.role === 'coach' ? 'coach' : 'team']));
@@ -4180,7 +4402,7 @@ function refreshScreen() {
       leavePractice(); $('#present-title').textContent = '';
       presentMsg(signInError ? `Sign-in failed: ${signInError}` : inAppBrowser() ? `This link opened inside another app's browser, where Google sign-in doesn't work. Open it in ${/iPhone|iPad/.test(navigator.userAgent) ? 'Safari' : 'Chrome'} instead — tap the ⋯ or share button and choose “Open in browser”, or copy the address: ${location.origin}${location.pathname}`
         : route.view === 'editor' || route.view === 'root'
-        ? 'Sign in to continue.' : 'Practice plans are shared with the team. Sign in with the Google account your coach has on the team list.', { signIn: true });
+        ? 'Sign in to continue.' : 'Practice plans are shared with the team. Sign in with the Google account your coach has on the team list.', { signIn: true, anon: !!route.pid });
       break;
     case 'offline':
       if (route.pid && showCachedPractice(route.pid, 'reconnect to get updates.')) break;
@@ -4226,7 +4448,8 @@ function showPractice(r) {
       if (err.code === 'permission-denied') {
         try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ }
         leavePractice(); presentKey = key;
-        presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
+        if (who.persona === 'guest') presentMsg("This practice isn't open to guests. Sign in with the Google account your coach has on the team list.", { signIn: true });
+        else presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
       } else if (!showingPractice) presentMsg(`Could not load the practice: ${err.message || err}`, { reload: true });
       else presentNote('Offline — showing the copy on this device.');
       return;
@@ -4710,6 +4933,7 @@ $('#btn-present').addEventListener('click', () => openPresentation('coach'));
 $('#btn-open-team').addEventListener('click', () => openPresentation('team'));
 $('#btn-open-coach').addEventListener('click', () => openPresentation('coach'));
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true })));
+$('#present-anon').addEventListener('click', () => cloudSync?.signInAnon?.().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true, anon: true })));
 /** A page inside another app (a team-chat app's built-in browser): Google refuses to sign anyone in there. */
 function inAppBrowser() {
   const ua = navigator.userAgent || '';
@@ -4785,6 +5009,11 @@ $('#viewlog-clear').addEventListener('click', async () => {
 });
 $('#btn-share-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'coach'));
 $('#btn-share-team-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'team'));
+$('#btn-share-open-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'team')); // the public link is the team view
+$('#practice-open').addEventListener('change', e => {
+  const on = e.target.checked;
+  commit(() => { if (on) store.practice.open = true; else delete store.practice.open; });
+});
 
 // ---------- cloud sync (Firebase) ----------
 const CLOUD_LABELS = { signedout: 'Not signed in (local only)', syncing: 'Syncing…', saving: 'Saving…', saved: 'Saved ✓', error: 'Cloud error' };
@@ -4802,7 +5031,7 @@ function renderCloudStatus(sync, state, detail) {
 // (this is a UI gate; the real protection is Firestore's rules — nobody can write another
 // account's practices, and readers only see the practices they are listed on).
 const OWNER_EMAILS = ['ehren.eschmann@gmail.com'];
-const isOwner = u => !u?.email || OWNER_EMAILS.includes(String(u.email).toLowerCase());
+const isOwner = u => !!u && !u.isAnonymous && (!u.email || OWNER_EMAILS.includes(String(u.email).toLowerCase()));
 
 /** Bring the practice creator up (only ever for the planner on /editor — see resolveRoute) or take it away. */
 function syncEditor(on) {

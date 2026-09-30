@@ -11,7 +11,7 @@ const WANTED = {
   zone: ['square-dashed', 'box-select'], text: ['type'], erase: ['eraser'],
   undo: ['undo-2'], redo: ['redo-2'], play: ['play'], pause: ['pause'], stop: ['square'],
   notes: ['sticky-note'], edit: ['pencil'], up: ['chevron-up'], down: ['chevron-down'],
-  copy: ['copy'], x: ['x'], check: ['check'], library: ['library', 'library-big'],
+  copy: ['copy'], x: ['x'], check: ['check'], library: ['library', 'library-big'], calendar: ['calendar'],
   prev: ['chevron-left'], next: ['chevron-right'], rotate: ['rotate-cw'], fullscreen: ['maximize'], unfullscreen: ['minimize'],
   list: ['rows-3', 'list'], focus: ['smartphone'], sync: ['refresh-cw'], eye: ['eye'], eyeoff: ['eye-off'], focusarea: ['scan', 'focus'],
   account: ['circle-user', 'user'], signout: ['log-out'], mic: ['mic'], video: ['video', 'clapperboard'],

@@ -23,7 +23,14 @@ service cloud.firestore {
     function isTeamOf(pid) {
       return signedIn() && exists(accessPath(pid)) && get(accessPath(pid)).data.stage == 'team' && me() in get(accessPath(pid)).data.team;
     }
-    function canView(pid) { return isPlanner() || isCoachOf(pid) || isTeamOf(pid); }
+    // An "open" practice: anyone signed in — a Google account or an anonymous guest — may watch it
+    // once it has left draft. (Anonymous sign-in must be enabled in the Firebase console for guests.)
+    function isOpenPractice(pid) {
+      return request.auth != null && exists(accessPath(pid))
+        && get(accessPath(pid)).data.get('open', false) == true
+        && get(accessPath(pid)).data.stage != 'draft';
+    }
+    function canView(pid) { return isPlanner() || isCoachOf(pid) || isTeamOf(pid) || isOpenPractice(pid); }
 
     // ---- the planner's own account: nobody else reads anything here but clips / videos of a practice released to them
     match /users/{uid}/meta/{docId} {

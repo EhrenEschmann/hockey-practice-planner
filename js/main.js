@@ -4639,17 +4639,21 @@ if (presentMode !== 'focus' && presentMode !== 'list') presentMode = matchMedia(
 const presentCards = () => $$('#present-body .pr-drill');
 const inLandscape = () => matchMedia('(orientation: landscape) and (max-height: 560px)').matches; // a phone on its side
 
-/** Index of the drill that should be on screen right now: by the wall clock when the practice is today, else the first. */
+/**
+ * Index of the drill to open on: the first page by default. Only while the practice is actually in progress (today,
+ * between its start and its end) does the viewer jump to the drill the clock says is on the ice now.
+ */
 function drillNowIndex(p) {
   const start = parseStart(p);
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   if (start == null || p.date !== today) return 0;
   const min = now.getHours() * 60 + now.getMinutes();
+  if (min < start) return 0;
   const drills = activeDrills(p);
   let t = start;
   for (let i = 0; i < drills.length; i++) { t += +drills[i].duration || 0; if (min < t) return i; }
-  return drills.length; // practice is over: the dismissal card (clamped to the last drill if there is none)
+  return 0; // practice is over: back to the first page, not the dismissal card
 }
 
 function applyPresentMode() {

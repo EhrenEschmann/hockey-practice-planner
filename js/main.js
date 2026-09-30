@@ -4212,9 +4212,14 @@ async function presentSignOut() {
 }
 function openAcct() {
   const u = cloudSync?.user; if (!u) return;
-  $('#present-acct-who').textContent = u.email && u.name !== u.email ? `${u.name} · ${u.email}` : u.name;
+  const guest = who.persona === 'guest';
+  $('#present-acct-who').textContent = guest ? 'A guest — watching an open practice without an account.' : u.email && u.name !== u.email ? `${u.name} · ${u.email}` : u.name;
+  $('#present-acct-google').hidden = !guest;
+  $('#present-signout').hidden = guest;
+  $('#present-acct-note').textContent = guest ? 'Coaches and families on the team list: sign in with that Google account to get your own list of practices (and, for coaches, the feedback button).' : 'Signing out removes the practice copies kept on this device for offline use. Sign in again with the Google email the practice was shared with.';
   $('#present-acct').hidden = false;
 }
+$('#present-acct-google').addEventListener('click', () => { closeAcct(); cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true })); });
 function closeAcct() { $('#present-acct').hidden = true; }
 
 // ---------- audit log: who looked at which drill, and when ----------
@@ -4386,7 +4391,7 @@ function refreshScreen() {
   $('#present').hidden = !presenting;
   keepAwake(r.screen === 'practice');
   if (!presenting) { leavePractice(); return; }
-  $('#present-user').textContent = cloudSync?.user?.name || '';
+  $('#present-user').textContent = who.persona === 'guest' ? 'Guest' : cloudSync?.user?.name || '';
   $('#present-account').hidden = !cloudSync?.user;
   if (!cloudSync?.user) closeAcct();
   applyPresentMode();
@@ -4422,6 +4427,7 @@ function refreshScreen() {
 
 /** One practice, as /coach/<id> or /team/<id> shows it. */
 function showPractice(r) {
+  ensureLatestViewer(); // a stale page reloads itself (the URL brings it straight back here) before the practice is used
   const pid = r.pid;
   presentAudience = r.as;
   if (who.persona === 'planner') {
@@ -4452,6 +4458,8 @@ function showPractice(r) {
         try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ }
         leavePractice(); presentKey = key;
         if (who.persona === 'guest') presentMsg("This practice isn't open to guests. Sign in with the Google account your coach has on the team list.", { signIn: true });
+        else if (who.persona === 'unknown') { try { sessionStorage.setItem('hpp.wanted', location.pathname); } catch { /* fine */ } navigate('/request-access', { replace: true }); } // on no roster and not an open practice: ask for access (and come back here once approved)
+        else if (r.probe) presentMsg("This practice isn't available to you. It will show up in your list once your coach sends it out.", { list: `/${who.persona}` });
         else presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
       } else if (!showingPractice) presentMsg(`Could not load the practice: ${err.message || err}`, { reload: true });
       else presentNote('Offline — showing the copy on this device.');
@@ -4469,7 +4477,7 @@ function showPractice(r) {
 function practiceItems(as) {
   if (who.persona === 'planner') {
     return store.data.practices.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
-      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, date: p.date, time: p.time }));
+      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, date: p.date, time: p.time, ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }));
   }
   return Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
 }
@@ -4487,24 +4495,28 @@ function paintWhen() {
   const was = `${bar.hidden}${warn.hidden}`;
   if (!p) { bar.hidden = true; warn.hidden = true; whenTarget = null; }
   else {
-    // The dropdown lists this team's practices that are released to the team — nothing that is still a draft or
-    // with the coaches, and only the ones this person may open. The practice on screen is always in it, marked
-    // when it is not one of those (a coach reading a plan out for feedback, the planner previewing a draft).
-    const sameTeam = x => String(x.team || '').trim().toLowerCase() === String(p.team || '').trim().toLowerCase();
-    const items = practiceItems(presentAudience).filter(x => sameTeam(x) && x.stage === 'team').sort(byCalendar);
+    // The dropdown lists exactly what has been released to this person: as a coach, every practice and game sent to
+    // the coaches or the team; as a team member, only those released to the team. Never a draft. All teams, so an old
+    // one under a different team name is still a way back. The banner points at the calendar's pick (today's, else
+    // the next, else the most recent) whenever that is not the one on screen.
+    const items = practiceItems(presentAudience).filter(x => x.stage === 'team' || (x.stage === 'coaches' && presentAudience === 'coach')).sort(byCalendar);
     const listed = items.some(x => x.pid === p.id);
-    const today = todayISO(), say = x => whenLabel(x);
+    const today = todayISO();
+    const teams = new Set(items.map(x => String(x.team || '').trim().toLowerCase()));
+    const say = x => `${teams.size > 1 || (x.kind === 'game') ? `${docTitle(x)} · ` : ''}${whenLabel(x)}`;
     bar.hidden = false;
     $('#when-team').textContent = docTitle(p);
     const opt = (x, extra = '') => `<option value="${escHtml(itemPath(presentAudience, x))}"${x.pid === p.id ? ' selected' : ''}>${escHtml(say(x))}${x.date === today ? ' · today' : ''}${extra}</option>`;
-    sel.innerHTML = (listed ? '' : opt(p, ' · not yet released to the team')) + items.map(x => opt(x)).join('');
-    const focus = listed ? calendarFocus(items, today) : null;
+    // An unreleased one (the planner previewing a draft) is never listed: a placeholder stands in for it.
+    sel.innerHTML = (listed ? '' : '<option value="" selected disabled>— not released yet —</option>') + items.map(x => opt(x)).join('');
+    const focus = items.length ? calendarFocus(items, today) : null;
     whenTarget = focus && focus.pid !== p.id ? itemPath(presentAudience, focus) : null;
     warn.hidden = !whenTarget;
     if (whenTarget) {
       const upcoming = (focus.date || '') >= today;
-      warn.textContent = `${byCalendar(p, focus) < 0 ? '⚠ This is an older practice' : '⚠ This is a future practice'} (${dayDate(p.date)}). `
-        + `${upcoming ? (focus.date === today ? 'Today’s practice' : 'The next practice') : 'The most recent practice'} is ${say(focus)} — tap to open it.`;
+      const noun = docNoun(p), fnoun = focus.kind === 'game' ? 'game' : 'practice';
+      warn.textContent = `${byCalendar(p, focus) < 0 ? `⚠ This is an older ${noun}` : `⚠ This is a future ${noun}`} (${dayDate(p.date)}). `
+        + `${upcoming ? (focus.date === today ? `Today’s ${fnoun}` : `The next ${fnoun}`) : `The most recent ${fnoun}`} is ${say(focus)} — tap to open it.`;
     }
   }
   if (was !== `${bar.hidden}${warn.hidden}`) layoutPresent();
@@ -4514,6 +4526,7 @@ $('#present-warn').addEventListener('click', () => { if (whenTarget) navigate(wh
 
 /** /coach and /team: every practice released to this person, upcoming first — one bookmark for the whole season. */
 function showList(r) {
+  ensureLatestViewer();
   const as = r.as;
   const items = practiceItems(as);
   const today = todayISO();
@@ -4637,17 +4650,21 @@ if (presentMode !== 'focus' && presentMode !== 'list') presentMode = matchMedia(
 const presentCards = () => $$('#present-body .pr-drill');
 const inLandscape = () => matchMedia('(orientation: landscape) and (max-height: 560px)').matches; // a phone on its side
 
-/** Index of the drill that should be on screen right now: by the wall clock when the practice is today, else the first. */
+/**
+ * Index of the drill to open on: the first page by default. Only while the practice is actually in progress (today,
+ * between its start and its end) does the viewer jump to the drill the clock says is on the ice now.
+ */
 function drillNowIndex(p) {
   const start = parseStart(p);
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   if (start == null || p.date !== today) return 0;
   const min = now.getHours() * 60 + now.getMinutes();
+  if (min < start) return 0;
   const drills = activeDrills(p);
   let t = start;
   for (let i = 0; i < drills.length; i++) { t += +drills[i].duration || 0; if (min < t) return i; }
-  return drills.length; // practice is over: the dismissal card (clamped to the last drill if there is none)
+  return 0; // practice is over: back to the first page, not the dismissal card
 }
 
 function applyPresentMode() {
@@ -4695,14 +4712,14 @@ function showDrill(i) {
 }
 
 /** Inline sizing for the two cases CSS can't do alone: the sideways portrait diagram and the phone-landscape row. */
+const ROTATE_GAIN = 1.3; // in portrait, a diagram is turned 90° only when that makes its long side at least this much bigger
 function layoutPresent() {
   if (!presenting) return;
   const focus = presentMode === 'focus' && showingPractice;
   const landscape = focus && inLandscape();
   $('#present').classList.toggle('landscape', landscape);
   const scroll = $('#present-scroll');
-  const curAr = +presentCards()[presentIndex]?.querySelector('.pr-fig')?.dataset.ar || 0;
-  $('#present-rotate').hidden = !focus || landscape || curAr <= 1.05; // only offered when the diagram is wider than tall
+  let rotateHelps = false; // set below for the card on screen: turning it 90° would make it noticeably bigger
   for (const sec of presentCards()) {
     const fig = sec.querySelector('.pr-fig'), layers = fig ? [...fig.querySelectorAll(':scope > svg')] : [];
     const player = sec.querySelector('.pr-video .video-box');
@@ -4732,16 +4749,21 @@ function layoutPresent() {
     for (const el of sec.children) if (el !== fig && el !== text) used += el.offsetHeight;
     const textWant = text ? Math.min(text.scrollHeight, 88) : 0;
     const availH = Math.max(110, scroll.clientHeight - 16 - used - textWant - 28), availW = scroll.clientWidth - 24;
-    if (presentRotate && ar > 1.05) {
+    // Turning a wide diagram 90° so its long side runs down the phone only pays when it comes out noticeably bigger:
+    // a diagram that is nearly square, or a box that is already wide enough, would just gain gutters and shrink.
+    const upright = Math.min(availW, availH * ar), turned = Math.min(availH, availW * ar); // the long side on screen either way
+    rotateHelps = ar > 1.05 && turned >= upright * ROTATE_GAIN;
+    if (presentRotate && rotateHelps) {
       // turned 90°: the rink's long side runs down the phone. Box on screen is w × h; the svg is laid out h × w then rotated.
-      const h = Math.min(availH, availW * ar), w = h / ar;
+      const h = turned, w = h / ar;
       fig.classList.add('rotated');
       fig.style.width = `${w}px`; fig.style.height = `${h}px`;
       layers.forEach(l => { l.style.width = `${h}px`; l.style.height = `${w}px`; });
     } else {
-      fig.style.width = `${Math.min(availW, availH * ar)}px`;
+      fig.style.width = `${upright}px`;
     }
   }
+  $('#present-rotate').hidden = !focus || landscape || !rotateHelps; // only offered when turning would actually help
 }
 
 /** Portrait focus mode: give one media box (an open video) the height left under the title and controls. */
@@ -5114,6 +5136,30 @@ function paintInboxButtons() {
 // ---------- boot ----------
 // Offline support: cache the app shell so the rink works without internet (needs HTTPS or localhost).
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// ---------- keeping the viewer current ----------
+// Every deploy writes version.json (scripts/stamp-version.mjs, run by the hosting predeploy hook). The page notes the
+// stamp it started with and re-reads it whenever the viewer moves to a practice or the list, and when the app comes
+// back to the foreground. A changed stamp means a newer deploy: the page reloads itself — the URL brings it straight
+// back to the same practice — so a phone that has kept the app open for a week never runs a practice on an old viewer.
+// Offline, the service worker hands back the cached stamp, which matches, so nothing happens.
+let appVersion = null;
+async function readVersion() {
+  try { const r = await fetch('/version.json', { cache: 'no-store' }); if (!r.ok) return null; return (await r.json()).v || null; } catch { return null; }
+}
+async function ensureLatestViewer() {
+  const v = await readVersion();
+  if (!v) return;
+  if (!appVersion) { appVersion = v; return; }
+  if (v === appVersion) return;
+  let last = null;
+  try { last = sessionStorage.getItem('hpp.reloadedFor'); sessionStorage.setItem('hpp.reloadedFor', v); } catch { /* fine */ }
+  if (last === v) { appVersion = v; return; } // already reloaded for this stamp once and it still differs: don't loop
+  try { (await navigator.serviceWorker?.getRegistration())?.update(); } catch { /* fine */ }
+  location.reload();
+}
+ensureLatestViewer(); // remember the stamp this page started with
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && presenting) ensureLatestViewer(); });
 hydrateIcons();
 applyRoute();
 setTool('select');

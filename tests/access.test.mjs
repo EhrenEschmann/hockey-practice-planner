@@ -14,15 +14,16 @@ const M = [
   [planner, ['/editor',         'editor',         'list:coach',  'practice:coach:a', 'list:team',  'practice:team:a']],
   [coach,   ['/coach',          '/coach',         'list:coach',  'practice:coach:a', 'list:team',  'practice:team:a']],
   [team,    ['/team',           '/team',          '/team',       '/team/a',          'list:team',  'practice:team:a']],
-  [unknown, ['/request-access', '/request-access', '/request-access', '/request-access', '/request-access', '/request-access']],
+  [unknown, ['/request-access', '/request-access', '/request-access', 'practice:team:a', '/request-access', 'practice:team:a']], // a practice link is tried (it may be open); the app asks for access if refused
 ];
 for (const [who, row] of M) ['/', '/editor', '/coach', '/coach/a', '/team', '/team/a'].forEach((p, i) => assert.equal(go(p, who), row[i], `${who.persona} on ${p}`));
 assert.equal(go('/request-access', unknown), 'request');
 assert.equal(go('/request-access', coach), '/coach');
 assert.equal(go('/request-access', planner), '/editor');
 assert.equal(go('/coach/b', coach), '/team/b', 'a coach who is only a parent on that practice gets the team link');
-assert.equal(go('/coach/zzz', coach), 'unavailable:coach:zzz');
-assert.equal(go('/team/zzz', team), 'unavailable:team:zzz');
+assert.equal(go('/coach/zzz', coach), 'practice:team:zzz', 'a practice not on their list is still tried, as the team sees it (an open practice is for anyone signed in)');
+assert.equal(go('/team/zzz', team), 'practice:team:zzz');
+assert.equal(resolveRoute(at('/team/zzz'), team).probe, true, '…marked as a probe so a refusal is explained as "not on your list yet"');
 assert.equal(go('/editor/p/d', planner), 'editor:p');
 assert.equal(go('/nope', anon), '/');
 assert.equal(go('/coach/a/b', coach), '/');
@@ -43,8 +44,8 @@ const roster = { teams: [
   { name: 'Mites', coaches: [{ email: ' Head@X.io ' }, { email: '' }], players: [{ contacts: [{ email: 'mom@x.io' }, { email: 'head@x.io' }] }, { contacts: [] }] },
   { name: 'Squirts', coaches: [{ email: 'sq@x.io' }], players: [{ contacts: [{ email: 'head@x.io' }] }] }] };
 const p1 = { id: 'p1', team: 'mites', date: '2026-09-21', stage: 'team', sharedTeam: ['Guest@x.io'], drills: [{ id: 'd1' }, { id: 'd2', hidden: true }] };
-assert.deepEqual(accessFor(roster, p1), { stage: 'team', coach: ['head@x.io'], team: ['mom@x.io', 'guest@x.io'] }, 'roster + extras, lower-cased, a coach-parent is a coach');
-assert.deepEqual(accessFor(roster, { team: 'Squirts', stage: 'coaches' }), { stage: 'coaches', coach: ['sq@x.io'], team: ['head@x.io'] }, 'per team: the Mites coach is a parent on the Squirts');
+assert.deepEqual(accessFor(roster, p1), { stage: 'team', open: false, coach: ['head@x.io'], team: ['mom@x.io', 'guest@x.io'] }, 'roster + extras, lower-cased, a coach-parent is a coach');
+assert.deepEqual(accessFor(roster, { team: 'Squirts', stage: 'coaches' }), { stage: 'coaches', open: false, coach: ['sq@x.io'], team: ['head@x.io'] }, 'per team: the Mites coach is a parent on the Squirts');
 const copy = publishedCopy({ ...p1, sharedWith: ['x@x.io'], sentTeamAt: 1 }, 'OWNER');
 assert.deepEqual(Object.keys(copy).sort(), ['date', 'drills', 'id', 'owner', 'team']);
 assert.equal(copy.drills.length, 1, 'hidden drills are not published');

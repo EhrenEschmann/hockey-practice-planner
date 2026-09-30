@@ -3,6 +3,7 @@
     "rules": "firestore.rules"
   },
   "hosting": {
+    "predeploy": ["node scripts/stamp-version.mjs"],
     "public": ".",
     "ignore": [
       "firebase.json",

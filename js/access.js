@@ -118,7 +118,9 @@ export function resolveRoute(route, who) {
     if (view === 'team' && pid) return { screen: 'practice', as: 'team', pid };
     return { screen: 'signin' };
   }
-  if (persona === 'unknown') return view === 'request' ? { screen: 'request' } : { go: '/request-access' };
+  // A signed-in account on no roster: a practice link is still tried, as the team sees it — an open practice lets
+ // anyone signed in watch (probe: a refusal sends them on to request access); anything else → request access.
+  if (persona === 'unknown') return (view === 'coach' || view === 'team') && pid ? { screen: 'practice', as: 'team', pid, probe: true } : view === 'request' ? { screen: 'request' } : { go: '/request-access' };
   if (persona === 'planner') {
     if (view === 'editor') return { screen: 'editor', pid, did: route.did };
     if (view === 'coach' || view === 'team') return pid ? { screen: 'practice', as: view, pid } : { screen: 'list', as: view };
@@ -129,7 +131,7 @@ export function resolveRoute(route, who) {
   if (view === 'root' || view === 'editor' || view === 'request') return { go: home };
   if (!pid) return view === 'coach' && persona === 'team' ? { go: '/team' } : { screen: 'list', as: view };
   const role = who.roles?.[pid]; // this practice's role: a coach of one team can be a parent on another
-  if (!role) return { screen: 'unavailable', as: persona, pid };
+  if (!role) return { screen: 'practice', as: 'team', pid, probe: true }; // not on their list: still tried, since an open practice is for anyone signed in (a refusal explains)
   if (view === 'coach' && role === 'team') return { go: `/team/${pid}` };
   return { screen: 'practice', as: view, pid };
 }

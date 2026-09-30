@@ -4208,9 +4208,14 @@ async function presentSignOut() {
 }
 function openAcct() {
   const u = cloudSync?.user; if (!u) return;
-  $('#present-acct-who').textContent = u.email && u.name !== u.email ? `${u.name} · ${u.email}` : u.name;
+  const guest = who.persona === 'guest';
+  $('#present-acct-who').textContent = guest ? 'A guest — watching an open practice without an account.' : u.email && u.name !== u.email ? `${u.name} · ${u.email}` : u.name;
+  $('#present-acct-google').hidden = !guest;
+  $('#present-signout').hidden = guest;
+  $('#present-acct-note').textContent = guest ? 'Coaches and families on the team list: sign in with that Google account to get your own list of practices (and, for coaches, the feedback button).' : 'Signing out removes the practice copies kept on this device for offline use. Sign in again with the Google email the practice was shared with.';
   $('#present-acct').hidden = false;
 }
+$('#present-acct-google').addEventListener('click', () => { closeAcct(); cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true })); });
 function closeAcct() { $('#present-acct').hidden = true; }
 
 // ---------- audit log: who looked at which drill, and when ----------
@@ -4382,7 +4387,7 @@ function refreshScreen() {
   $('#present').hidden = !presenting;
   keepAwake(r.screen === 'practice');
   if (!presenting) { leavePractice(); return; }
-  $('#present-user').textContent = cloudSync?.user?.name || '';
+  $('#present-user').textContent = who.persona === 'guest' ? 'Guest' : cloudSync?.user?.name || '';
   $('#present-account').hidden = !cloudSync?.user;
   if (!cloudSync?.user) closeAcct();
   applyPresentMode();
@@ -4449,6 +4454,8 @@ function showPractice(r) {
         try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ }
         leavePractice(); presentKey = key;
         if (who.persona === 'guest') presentMsg("This practice isn't open to guests. Sign in with the Google account your coach has on the team list.", { signIn: true });
+        else if (who.persona === 'unknown') { try { sessionStorage.setItem('hpp.wanted', location.pathname); } catch { /* fine */ } navigate('/request-access', { replace: true }); } // on no roster and not an open practice: ask for access (and come back here once approved)
+        else if (r.probe) presentMsg("This practice isn't available to you. It will show up in your list once your coach sends it out.", { list: `/${who.persona}` });
         else presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
       } else if (!showingPractice) presentMsg(`Could not load the practice: ${err.message || err}`, { reload: true });
       else presentNote('Offline — showing the copy on this device.');

@@ -77,7 +77,7 @@ try {
   ok('released practices are published, the draft is not', cloud.db.has('published/p1') && cloud.db.has('published/p2') && !cloud.db.has('published/p3'), [...cloud.db.keys()]);
   const pub = cloud.db.get('published/p1');
   ok('the published copy has no access lists, no hidden drill, and names its owner', !('sharedWith' in pub) && !('stage' in pub) && pub.drills.length === 2 && pub.owner === 'own', pub);
-  ok('access lists come from the roster (+ extras), lower-cased, coach wins over team', JSON.stringify(cloud.db.get('access/p1')) === JSON.stringify({ stage: 'team', coach: ['coach.a@example.com', 'coachb@example.com', 'guest@example.com'], team: ['parent@example.com'] }), cloud.db.get('access/p1'));
+  ok('access lists come from the roster (+ extras), lower-cased, coach wins over team', JSON.stringify(cloud.db.get('access/p1')) === JSON.stringify({ stage: 'team', open: false, coach: ['coach.a@example.com', 'coachb@example.com', 'guest@example.com'], team: ['parent@example.com'] }), cloud.db.get('access/p1'));
   ok('each person gets a list document with their persona', cloud.db.get('inbox/coach.a@example.com')?.persona === 'coach' && Object.keys(cloud.db.get('inbox/coach.a@example.com').practices).length === 3
     && cloud.db.get('inbox/parent@example.com')?.persona === 'team' && Object.keys(cloud.db.get('inbox/parent@example.com').practices).sort().join() === 'p0,p1', cloud.db.get('inbox/parent@example.com'));
 
@@ -99,7 +99,7 @@ try {
   await coachA.open('/coach/p2'); s = await coachA.state();
   ok('coach opens a practice that is out for feedback', s.cards.join() === '1. Edges,* Dismissal' && s.fb === 2, s);
   await coachA.open('/coach/p3'); s = await coachA.state();
-  ok('coach on a draft → "isn\'t available yet", nothing fetched', /isn't available yet/.test(s.msg) && !reads('coach.a@example.com', 'published/p3').length, s);
+  ok('coach on a draft → tried (it might have been open), refused, told it will show up in their list', /isn't available to you/.test(s.msg) && /show up in your list/.test(s.msg) && !s.cards.length, s);
   await coachA.open('/coach/p1'); s = await coachA.state();
   ok('coach view: drills (hidden one left out), notes, a feedback button per drill + overall', s.cards.join() === '1. Warmup,2. Scrimmage,* Dismissal' && s.fb === 3 && await coachA.ev(`document.querySelector('#present-body pre').textContent === 'notes for Warmup'`), s);
   await coachA.click('.pr-fb[data-fb="d1"]'); await coachA.ev(`document.querySelector('#fb-text').value = 'Too long for mites'`); await coachA.click('#fb-send');
@@ -125,7 +125,7 @@ try {
   await parent.open('/coach'); ok('parent on /coach → /team', (await parent.path()) === '/team');
   await parent.open('/editor/p1/d1'); s = await parent.state(); ok('parent on /editor → /team, no editor', s.path === '/team' && !s.editor && !s.editorBuilt, s);
   await parent.open('/team/p2'); s = await parent.state();
-  ok('parent on a practice still with the coaches → "isn\'t available yet", nothing fetched, nothing revealed', /isn't available yet/.test(s.msg) && !s.title && !reads('parent@example.com', 'published/p2').length, s);
+  ok('parent on a practice still with the coaches → tried, refused, nothing revealed', /isn't available to you/.test(s.msg) && !s.title && !s.cards.length, s);
   await parent.open('/#view=own/p1'); ok('old #view= link → the new URL (and on to /team for a parent)', (await parent.path()) === '/team/p1', await parent.path());
   await coachA.open('/#team%3Down%2Fp1'); ok('old percent-encoded #team= link → /team/p1', (await coachA.path()) === '/team/p1', await coachA.path());
   await coachA.open('/coach/p1/extra/bits'); ok('unknown path → "/" → home', (await coachA.path()) === '/coach', await coachA.path());
@@ -138,13 +138,14 @@ try {
   const wd = d => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   const lastWeek = new Date(+today - 7 * 86400000);
   await coachA.open('/coach/p1'); let w = await when(coachA);
-  ok('today\'s practice: team named, dropdown lists only practices released to the team (not the one with the coaches), today picked, no banner',
-    w.team === 'Mites' && w.options.join('|') === `${wd(lastWeek)} @ 05:00 PM|${wd(today)} @ 05:00 PM · today` && w.picked.startsWith(wd(today)) && w.warn === null, w);
+  const tomorrow = new Date(+today + 86400000);
+  ok('today\'s practice: team named, a coach\'s dropdown lists everything sent to the coaches or the team (never a draft), today picked, no banner',
+    w.team === 'Mites' && w.options.join('|') === `${wd(lastWeek)} @ 05:00 PM|${wd(today)} @ 05:00 PM · today|${wd(tomorrow)}` && w.picked.startsWith(wd(today)) && w.warn === null, w);
   await pick(coachA, '/coach/p0'); w = await when(coachA);
   ok('an older practice picked from the dropdown gets the red banner naming today\'s', /older practice/.test(w.warn || '') && w.warn.includes(`Today’s practice is ${wd(today)} @ 05:00 PM`), w);
   await coachA.click('#present-warn'); await coachA.until(`location.pathname === '/coach/p1'`, 'banner jumps to the practice on the calendar'); await coachA.settle();
   await coachA.open('/coach/p2'); w = await when(coachA);
-  ok('a practice still with the coaches is in the dropdown only as the marked current entry', w.picked.endsWith('not yet released to the team') && w.options.length === 3 && w.warn === null, w);
+  ok('a practice still with the coaches is an ordinary entry for a coach, with the banner pointing back at today\'s', w.picked.startsWith(wd(tomorrow)) && w.options.length === 3 && /future practice/.test(w.warn || '') && w.warn.includes(`Today’s practice is ${wd(today)}`), w);
   await parent.open('/team/p1'); w = await when(parent);
   ok('a parent gets the same dropdown: the practices released to the team', w.options.length === 2 && w.picked.includes('today') && w.warn === null, w);
   await parent.open('/team'); ok('no practice bar or banner on the list', (await when(parent)).team === null && (await when(parent)).warn === null);
@@ -190,7 +191,7 @@ try {
   console.log('request access');
   const gran = await browser(U.stranger);
   await gran.open('/coach/p1'); s = await gran.state();
-  ok('someone on no roster → /request-access, nothing fetched', s.path === '/request-access' && s.request && !reads('gran@example.com', 'published/p1').length, s);
+  ok('someone on no roster → /request-access (the practice was tried in case it was open, and refused)', s.path === '/request-access' && s.request, s);
   await gran.until(`fetch('http://127.0.0.1:${CLOUD}/', { method: 'POST', body: JSON.stringify({ user: ${JSON.stringify(U.planner)}, op: 'get', path: 'attempts/st' }) }).then(r => r.json()).then(r => !!r.data)`, 'failed sign-in recorded');
   ok('the failed sign-in is recorded: who, and the link they opened', cloud.db.get('attempts/st')?.email === 'gran@example.com' && cloud.db.get('attempts/st').path === '/coach/p1' && cloud.db.get('attempts/st').count === 1, cloud.db.get('attempts/st'));
   await planner.open('/editor/p1'); await planner.until(`document.querySelector('#btn-team').textContent.includes('(1)')`, 'sign-in badge');

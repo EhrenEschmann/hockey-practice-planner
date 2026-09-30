@@ -46,6 +46,19 @@ export function newPractice(team = '', kind = null, opponent = '') {
 /** How a practice is shown anywhere it needs a label. */
 /** Dates are shown US style, mm/dd/yyyy (stored as yyyy-mm-dd, which sorts). */
 export const usDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? `${date.slice(5, 7)}/${date.slice(8, 10)}/${date.slice(0, 4)}` : (date || '');
+
+/** Parse a US-format date ("MM/DD/YYYY", also M/D/YY or ISO) to ISO "YYYY-MM-DD", or null if invalid. */
+export function parseUsDate(s) {
+  s = String(s || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/);
+  if (!m) return null;
+  const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+  const mm = +m[1], dd = +m[2];
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const iso = `${y}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  return new Date(iso + 'T12:00').getDate() === dd ? iso : null; // rejects 02/30 and friends
+}
 export function practiceLabel(p) { return `${isGame(p) ? docTitle(p) : (p.team || 'No team')} — ${usDate(p.date) || 'no date'}`; }
 
 /**

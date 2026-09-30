@@ -29,7 +29,11 @@
         <h3 id="plist-form-title">New practice</h3>
         <label class="field"><span>Team</span><select id="new-team" required></select></label>
         <label class="field" id="new-opponent-wrap" hidden><span>Opponent</span><input id="new-opponent" placeholder="Who we play" autocomplete="off"></label>
-        <label class="field"><span>Date</span><input id="new-date" type="date" required></label>
+        <label class="field"><span>Date</span><span class="datewrap">
+          <input id="new-date" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" autocomplete="off" required>
+          <button type="button" class="datepick" title="Pick from calendar" data-icon="calendar"></button>
+          <input type="date" class="datepick-native" tabindex="-1" aria-hidden="true">
+        </span></label>
         <label class="field"><span id="new-time-label">Start time</span><input id="new-time" type="time" required></label>
         <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="plist-cancel">Cancel</button></div>
       </form>
@@ -41,7 +45,11 @@
       <h3 id="practice-pop-title">Current practice</h3>
       <label class="field"><span>Team</span><select id="practice-team" title="Which team this practice is for — the roster under 👥 Team decides who can open it"></select></label>
       <label class="field" id="practice-opponent-wrap" hidden><span>Opponent</span><input id="practice-opponent" placeholder="Who we play" autocomplete="off"></label>
-      <label class="field"><span>Date</span><input id="practice-date" type="date"></label>
+      <label class="field"><span>Date</span><span class="datewrap">
+        <input id="practice-date" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" autocomplete="off">
+        <button type="button" class="datepick" title="Pick from calendar" data-icon="calendar"></button>
+        <input type="date" class="datepick-native" tabindex="-1" aria-hidden="true">
+      </span></label>
       <label class="field"><span>Start time</span><input id="practice-time" type="time"></label>
       <label class="field"><span>Coaches</span><input id="practice-coaches" placeholder="e.g. Ehren, Mike, Dante"></label>
       <h3>Sharing</h3>

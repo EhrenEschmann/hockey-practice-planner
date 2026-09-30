@@ -2,7 +2,7 @@ import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
 import { makeSim, facingOf, goalieSquareTo, goalieHome, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
-import { Store, uid, newDrill, newPractice, practiceLabel, usDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
+import { Store, uid, newDrill, newPractice, practiceLabel, usDate, parseUsDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
 import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
@@ -1623,7 +1623,7 @@ function openCreateForm(kind) {
   $('#new-opponent-wrap').hidden = kind !== 'game'; $('#new-opponent').value = '';
   $('#new-time-label').textContent = kind === 'game' ? 'Game time' : 'Start time';
   $('#new-team').innerHTML = teams.map(n => `<option value="${escHtml(n)}"${n.toLowerCase() === cur.toLowerCase() ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
-  $('#new-date').value = todayISO(); $('#new-time').value = store.practice.time || '';
+  $('#new-date').value = usDate(todayISO()); $('#new-time').value = store.practice.time || '';
   f.hidden = false; $('.plist-new').hidden = true;
   (kind === 'game' ? $('#new-opponent') : $('#new-date')).focus();
 }
@@ -1632,8 +1632,10 @@ $('#plist-create-game').addEventListener('click', () => openCreateForm('game'));
 $('#plist-cancel').addEventListener('click', () => { $('#plist-form').hidden = true; $('.plist-new').hidden = false; });
 $('#plist-form').addEventListener('submit', e => {
   e.preventDefault();
-  const team = $('#new-team').value, date = $('#new-date').value, time = $('#new-time').value;
-  if (!team || !date || !time) return; // `required` — the browser has already said which
+  const team = $('#new-team').value, date = parseUsDate($('#new-date').value), time = $('#new-time').value;
+  $('#new-date').classList.toggle('invalid', !date);
+  if (!date) { $('#new-date').focus(); return; }
+  if (!team || !time) return; // `required` — the browser has already said which
   finishActive();
   const p = newPractice(team, plistKind, $('#new-opponent').value.trim()); p.date = date; p.time = time;
   store.addPractice(p);
@@ -1654,7 +1656,7 @@ function renderPracticeProps() {
   for (const [id, key] of PRACTICE_FIELDS) {
     const el = $(id);
     if (el.tagName === 'SELECT') renderTeamSelect();
-    else if (document.activeElement !== el) el.value = p[key] || '';
+    else if (document.activeElement !== el) el.value = key === 'date' ? usDate(p[key]) : (p[key] || '');
   }
   for (const [id, key] of SHARE_FIELDS) {
     const em = $(id);
@@ -1698,7 +1700,16 @@ const SHARE_FIELDS = [['#practice-emails', 'sharedWith'], ['#practice-team-email
 for (const [id, key] of PRACTICE_FIELDS) {
   const el = $(id);
   el.addEventListener('focus', () => store.beginPending());
-  el.addEventListener('input', () => { if (el.value === MANAGE_TEAMS) return; store.practice[key] = el.value; store.save(); renderPracticeSelect(); });
+  el.addEventListener('input', () => {
+    if (el.value === MANAGE_TEAMS) return;
+    if (key === 'date') {
+      const iso = parseUsDate(el.value);
+      el.classList.toggle('invalid', !iso);
+      if (!iso) return; // keep the old date until the field parses as MM/DD/YYYY
+      store.practice.date = iso;
+    } else store.practice[key] = el.value;
+    store.save(); renderPracticeSelect();
+  });
   el.addEventListener('change', () => {
     if (el.value === MANAGE_TEAMS) { el.value = store.practice.team || ''; $('#practice-pop').hidden = true; openTeamMgr(); return; }
     store.commitPending(); renderUI();
@@ -1706,6 +1717,25 @@ for (const [id, key] of PRACTICE_FIELDS) {
 }
 // The team is picked from the roster (👥 Team), never typed: the roster is what decides who can open the practice.
 const MANAGE_TEAMS = '__manage-teams__';
+
+// Date fields are US-format text inputs; the calendar button opens the hidden native picker.
+$$('.datewrap').forEach(w => {
+  const text = w.querySelector('input[type=text]');
+  const native = w.querySelector('input.datepick-native');
+  w.querySelector('.datepick').addEventListener('click', e => {
+    e.stopPropagation();
+    native.value = parseUsDate(text.value) || todayISO();
+    try { native.showPicker(); } catch { native.click(); }
+  });
+  native.addEventListener('click', e => e.stopPropagation());
+  native.addEventListener('change', () => {
+    if (!native.value) return;
+    text.value = usDate(native.value);
+    text.classList.remove('invalid');
+    text.dispatchEvent(new Event('input'));
+    text.dispatchEvent(new Event('change'));
+  });
+});
 function renderTeamSelect() {
   const el = $('#practice-team'), cur = store.practice.team || '';
   const teams = store.roster.teams.map(t => t.name || '').filter(Boolean);

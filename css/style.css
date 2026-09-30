@@ -561,16 +561,14 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
   #print-area .p-title{font-size:15px;font-weight:700}
   #print-area .p-sub{margin:0.5mm 0}
   #print-area .p-meta{color:#555;font-size:9.5px}
-  #print-area .p-overview{display:flex;flex-wrap:wrap;gap:2mm;margin:2.5mm 0}
-  #print-area .p-overview svg{height:20mm;width:auto;border:1px solid #ccc;border-radius:1.5mm}
-  #print-area .p-cols{columns:3;column-gap:5mm;margin-top:2mm}
+  #print-area .p-cols{columns:2;column-gap:6mm;margin-top:2mm}
   #print-area .p-drill{break-inside:avoid;page-break-inside:avoid;margin-top:3mm;border-top:1px solid #999;padding-top:1.5mm}
   #print-area .p-head{display:flex;align-items:baseline;gap:3mm;margin-bottom:1.5mm}
   #print-area .p-head b{font-size:11px}
   #print-area .p-time{margin-left:auto;font-variant-numeric:tabular-nums}
   #print-area .p-drill svg{max-width:100%;max-height:45mm;width:auto;height:auto;display:block;border:1px solid #ccc;border-radius:1.5mm}
-  #print-area .p-stations{display:flex;gap:1.5mm;align-items:stretch}
-  #print-area .p-stations svg{flex:1;min-width:0;max-height:38mm}
+  #print-area .p-combined{margin:2mm 0}
+  #print-area .p-combined svg{width:100%;height:auto;display:block;border:1px solid #ccc;border-radius:1.5mm}
   #print-area pre{white-space:pre-wrap;font:9.5px/1.35 system-ui,sans-serif;margin:1.5mm 0 0}
   #print-area .p-rules{margin-top:1.5mm}
   #print-area .p-rules ul{margin:0.5mm 0 0;padding-left:4mm}

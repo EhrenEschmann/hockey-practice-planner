@@ -3664,30 +3664,35 @@ function shareView(d) {
   return { x: G.round1(x0), y: G.round1(y0), w: G.round1(x1 - x0), h: G.round1(y1 - y0) };
 }
 /**
- * Per-station print crops: a drill run as separate stations prints each zone side by side in one block
- * instead of one wide rink where every station is tiny. Only when the stations don't overlap each other
- * and hold all of the drill's action (default nets and loose labels don't count against that).
+ * Print: every drill overlaid on one full-rink picture — the whole practice's use of the ice at a glance.
+ * Each drill's area is numbered to match the drill list below (a drill with nothing but nets gets no number).
  */
-function stationViews(d) {
-  const zones = d.objects.filter(o => o.type === 'zone' && o.w > 4 && o.h > 4);
-  if (zones.length < 2) return null;
-  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-  for (let i = 0; i < zones.length; i++) for (let j = i + 1; j < zones.length; j++) if (overlap(zones[i], zones[j])) return null;
-  const M = 4;
-  const inSome = q => zones.some(z => q.x >= z.x - M && q.x <= z.x + z.w + M && q.y >= z.y - M && q.y <= z.y + z.h + M);
-  for (const o of d.objects) {
-    if (o.type === 'zone' || o.type === 'focus' || o.type === 'net' || o.type === 'text') continue;
-    if (o.type === 'puck' && o.carrier) continue; // rides its carrier
-    const pts = [];
-    if (o.x != null) pts.push({ x: o.x, y: o.y });
-    (o.path || []).forEach(q => pts.push(q));
-    (o.points || []).forEach(q => pts.push(q));
-    for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
-    if (!pts.every(inSome)) return null; // something lives outside the stations: print the whole picture
-  }
-  return zones
-    .sort((a, b) => (a.x - b.x) || (a.y - b.y))
-    .map(z => ({ x: G.round1(z.x - 3), y: G.round1(z.y - 3), w: G.round1(z.w + 6), h: G.round1(z.h + 6) }));
+function combinedOverview(drills, rink) {
+  if (!drills.length) return null;
+  const boxes = drills.map(d => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const o of d.objects) {
+      if (o.type === 'net') continue;
+      const pts = [];
+      if (o.x != null) pts.push({ x: o.x, y: o.y });
+      if ((o.type === 'zone' || o.type === 'focus') && o.x != null) pts.push({ x: o.x + o.w, y: o.y + o.h });
+      (o.path || []).forEach(q => pts.push(q));
+      (o.points || []).forEach(q => pts.push(q));
+      for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
+      for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+    }
+    return x0 === Infinity ? null : { x0, y0, x1, y1 };
+  });
+  const merged = {
+    ...drills[0],
+    objects: [
+      ...drills.flatMap(d => d.objects.filter(o => o.type !== 'focus')), // no gray-out masks on the shared picture
+      ...(drills.length > 1
+        ? boxes.flatMap((b, i) => b ? [{ id: `ovlabel${i}`, type: 'text', x: G.round1(G.clamp(b.x0 + 1, 2, RINK.W - 4)), y: G.round1(G.clamp(b.y0 - 1.5, 4, RINK.H - 2)), text: `${i + 1}`, size: 5, color: '#111' }] : [])
+        : []),
+    ],
+  };
+  return standaloneSVG(merged, rink, SVG_STYLE, { x: -3, y: -3, w: RINK.W + 6, h: RINK.H + 6 });
 }
 
 /** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
@@ -3725,8 +3730,7 @@ $('#btn-print').addEventListener('click', () => {
     return `
       <div class="p-drill">
         <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clockFull(at)}</span>` : ''}</div>
-        ${(sv => sv ? `<div class="p-stations">${sv.map(v => standaloneSVG(d, rink, SVG_STYLE, v)).join('')}</div>`
-                    : standaloneSVG(d, rink, SVG_STYLE, shareView(d)))(stationViews(d))}
+        ${standaloneSVG(d, rink, SVG_STYLE, shareView(d))}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${d.upload ? `<div class="p-meta">Video: uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)</div>` : d.video && videoEmbed(d.video) ? `<div class="p-meta">Video: ${escHtml(d.video)}</div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
@@ -3736,7 +3740,7 @@ $('#btn-print').addEventListener('click', () => {
     <div class="p-title">${escHtml(docTitle(p))}</div>
     <div class="p-sub">${escHtml(whenLabel(p, true))}</div>
     ${p.coaches ? `<div class="p-sub">Coaches: ${escHtml(p.coaches)}</div>` : ''}
-    <div class="p-overview">${drills.map(d => standaloneSVG(d, rink, SVG_STYLE, shareView(d))).join('')}</div>
+    ${(ov => ov ? `<div class="p-combined">${ov}</div>` : '')(combinedOverview(drills, rink))}
     <div class="p-sub">${startMin != null ? `Start @ ${clockFull(startMin)}` : ''} <span class="p-meta">${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${isGame(p) ? '' : ` · ${total} min`}</span></div>
     <div class="p-cols">
     ${drillRows}

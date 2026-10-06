@@ -4505,7 +4505,11 @@ function paintWhen() {
     const opt = (x, extra = '') => `<option value="${escHtml(itemPath(presentAudience, x))}"${x.pid === p.id ? ' selected' : ''}>${escHtml(say(x))}${x.date === today ? ' · today' : ''}${extra}</option>`;
     // An unreleased one (the planner previewing a draft) is never listed: a placeholder stands in for it.
     sel.innerHTML = (listed ? '' : '<option value="" selected disabled>— not released yet —</option>') + items.map(x => opt(x)).join('');
-    const focus = items.length ? calendarFocus(items, today) : null;
+    // The banner waits until this person's list is actually known (the inbox has arrived) and the practice on screen is
+    // on it: on a first open the practice can land before the list does, and a banner computed from a half-loaded list
+    // would wrongly flag the right practice as the wrong one.
+    const listKnown = who.persona === 'planner' || viewerInbox !== undefined;
+    const focus = listKnown && listed ? calendarFocus(items, today) : null;
     whenTarget = focus && focus.pid !== p.id ? itemPath(presentAudience, focus) : null;
     warn.hidden = !whenTarget;
     if (whenTarget) {

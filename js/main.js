@@ -3772,7 +3772,14 @@ function wireVideos(p) {
     // A drill with a video and nothing drawn on the ice is the video: it opens by itself and the empty rink stays hidden.
     const videoOnly = !!d && !(d.objects || []).length;
     const label = () => box.dataset.upload ? `🎬 Watch video <span class="muted small">(${fmtSecs(d?.upload?.secs)})</span>` : `🎬 Watch video <span class="muted small">(${escHtml(box.dataset.host)})</span>`;
+    // While the coach's intro plays (before the animation), the video keeps out of the way: its button is disabled
+    // and an open player is paused; the video's own intro (introBeforeVideo) holds the player the same way.
+    sec._videoLock = on => {
+      btn.disabled = on; btn.title = on ? 'Wait for the coach’s intro to finish' : '';
+      const v = box.querySelector('video'); if (on && v && !v.paused) v.pause();
+    };
     const toggle = async ({ auto = false } = {}) => {
+      if (sec._introOn?.()) return; // not while the intro is playing
       const open = auto || !sec.classList.contains('video-open');
       sec.classList.toggle('video-open', open);
       box.querySelector('.video-box')?.remove();
@@ -3818,7 +3825,7 @@ function introBeforeVideo(vid, sec, p, d) {
   const cue = sec.querySelector('.pr-cue') || sec.querySelector('.pr-video').appendChild(Object.assign(document.createElement('div'), { className: 'pr-cue', hidden: true }));
   const say = (text, ms) => { cue.textContent = text; cue.hidden = false; if (ms) setTimeout(() => { cue.hidden = true; }, ms); };
   vid.addEventListener('play', () => {
-    if (cur) { cur.cancelled = true; cur.stop(); return; } // ▶ during the intro: skip it, the video is already going
+    if (cur || sec._introOn?.()) { vid.pause(); say('🎙 Coach’s intro first — the video starts when it ends'); return; } // no playing the video over the intro
     if (done || vid.currentTime > 0.5) return;
     done = true; // one intro per opening of the player
     const clip = clipMem.get(keyFor(presentOwner, p.id, d));
@@ -4078,8 +4085,10 @@ function wirePresentAnims(p) {
           const entry = await fetchClip(presentOwner, p.id, d);
           if (!entry) return;
           ib.innerHTML = icon('pause');
-          cur = playClip(entry, { onEnd: () => { cur = null; ib.innerHTML = icon('play'); } });
+          sec._videoLock?.(true); // the card's video waits for the intro
+          cur = playClip(entry, { onEnd: () => { cur = null; ib.innerHTML = icon('play'); sec._videoLock?.(false); } });
         });
+        sec._introOn = () => !!cur;
         sec._pause = () => { if (cur) cur.stop(); }; // leaving the drill stops the intro
       } else bar.remove();
       continue;
@@ -4170,11 +4179,14 @@ function wirePresentAnims(p) {
       cueEl.textContent = '🎙 Coach’s intro…'; cueEl.hidden = false;
       a.intro = playClip(clip, { onEnd: err => {
         const skip = a.intro?.cancelled; a.intro = null;
+        sec._videoLock?.(false);
         if (err) { cueEl.textContent = `🎙 intro didn’t play — ${err}`; setTimeout(() => { cueEl.hidden = true; }, 4000); } else cueEl.hidden = true;
         if (skip) draw(); else go();
       } });
+      sec._videoLock?.(true); // the card's video (button and player) waits for the intro
       draw();
     });
+    sec._introOn = () => !!a.intro;
     tl.addEventListener('input', () => { a.t = +tl.value; draw(); if (a.playing) startNarr(); else stopNarr(); });
     // On a phone the diagram itself is the biggest play button there is.
     fig.addEventListener('click', () => { if (!fig.classList.contains('zoomed')) btn.click(); });

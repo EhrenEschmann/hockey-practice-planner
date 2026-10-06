@@ -73,3 +73,18 @@ assert.equal(new Set(objs.map(o => o.id)).size, objs.length, 'fresh unique ids')
 assert.deepEqual(layoutToObjects({}, { uid }), [], 'an empty layout is nothing');
 
 console.log('ai.js: all assertions passed');
+
+// ---- the intro script's brief of a drill
+import { drillBrief } from '../js/ai.js';
+const briefDrill = { name: 'Rush', duration: 8, notes: 'Heads up\nShoot early', objects: [
+  { id: 's1', type: 'skater', label: '1', side: 'O', role: 'F', x: 95, y: 20, delay: 0, path: [{ x: 60, y: 15 }, { x: 30, y: 30, cue: 'Shoot' }], startCue: 'Go!' },
+  { id: 'g', type: 'skater', label: 'G', role: 'G', x: 13, y: 42.5, path: [] },
+  { id: 'c', type: 'coach', label: 'C', x: 60, y: 60, path: [] },
+  { id: 'p', type: 'puck', carrier: 's1', events: [{ type: 'pass', to: 'c' }, { type: 'shoot' }] },
+  { id: 'n', type: 'net', x: 11, y: 42.5 }, { id: 'k1', type: 'cone', x: 50, y: 20 }, { id: 'k2', type: 'cone', x: 55, y: 20 },
+  { id: 'z', type: 'zone', label: 'Slot', x: 15, y: 30, w: 25, h: 25, constraints: 'One touch\nHeads up' },
+] };
+const brief = drillBrief(briefDrill);
+for (const want of ['Drill: Rush (8 min)', 'Heads up\nShoot early', 'Skater 1 (offense, blue): skates 2 legs', 'cues: "Go!", "Shoot"', 'Goalie G: stands at (13, 43)', 'Coach C: stands', 'Puck with Skater 1: passes to Coach C, then shoots', '2 cones, 1 net', 'Station "Slot": One touch; Heads up']) assert.ok(brief.includes(want), `brief mentions ${JSON.stringify(want)}\n${brief}`);
+assert.ok(drillBrief({ name: 'x', objects: [] }, { game: true }).startsWith('Coaching point: x'));
+console.log('ai.js brief: all assertions passed');

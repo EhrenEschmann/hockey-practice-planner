@@ -222,6 +222,10 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .intro-box p{margin:8px 0 0}
 .intro-warn{margin-top:6px;line-height:1.35}
 .intro-sep{border:0;border-top:1px solid var(--border);margin:10px 0 8px}
+.intro-script-row{align-items:center;margin-bottom:6px}
+.intro-script-row input[type=number]{width:52px;font-size:12px;padding:2px 4px}
+.intro-script{width:100%;font-size:12.5px;line-height:1.45;min-height:88px;margin-bottom:6px}
+.intro-script.reading{font-size:15px;line-height:1.5;min-height:160px}
 /* the intro / video buttons: quiet line icons like the rest of the row; a tint only once there is something recorded */
 #drill-list li button.has-intro{color:#f59e0b}
 #drill-list li button.has-video{color:#a78bfa}

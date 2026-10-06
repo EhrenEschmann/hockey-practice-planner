@@ -8,7 +8,7 @@ import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy,
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
-import { SDK_URL, encryptSecret, decryptSecret, looksLikeKey, systemPrompt, generateLayout, layoutToObjects } from './ai.js';
+import { SDK_URL, encryptSecret, decryptSecret, looksLikeKey, systemPrompt, generateLayout, layoutToObjects, drillBrief, generateIntroScript } from './ai.js';
 import { clipKey, idbGetClip, idbPutClip, idbDelClip, canRecord, canPlay, phoneFriendly, startRecording, blobToBase64, base64ToBlob, CLIP_CLOUD_MAX_BYTES, CLIP_WARN_BYTES, fmtKB } from './clips.js';
 
 const $ = s => document.querySelector(s);
@@ -2451,6 +2451,20 @@ async function introAction(iact, li) {
     if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(ownerFor(), pid, d.id).catch(() => {});
     commit(() => { delete d.intro; });
     renderPlan();
+  } else if (iact === 'script') { // ✨ a script to read while recording, pitched at the players' age and sized for the length
+    if (scriptBusy) return;
+    if (!aiKey) { scriptStatus = '✗ Set up the Claude key under ⚙ Settings first.'; renderPlan(); return; }
+    const age = +d.introAge || 7, secs = +d.introSecs || 30;
+    scriptBusy = d.id; scriptStatus = 'Asking Claude for a script…'; renderPlan();
+    try {
+      if (!sdkModule) sdkModule = await import(SDK_URL);
+      const { text, usage } = await generateIntroScript({ sdk: sdkModule, apiKey: aiKey, brief: drillBrief(d, { game: isGame(store.practice) }), age, secs, game: isGame(store.practice) });
+      commit(() => { d.introScript = text; d.introAge = age; d.introSecs = secs; });
+      scriptStatus = `✓ About ${text.split(/\s+/).filter(Boolean).length} words for ${secs} s at age ${age}${usage ? ` · ${usage.input_tokens + usage.output_tokens} tokens` : ''}. Edit it as you like, then press ● Record and read it.`;
+    } catch (e) {
+      scriptStatus = `✗ ${e?.status === 401 ? 'Anthropic rejected the API key — check it under ⚙ Settings.' : e?.status === 429 ? 'Rate limited by Anthropic — try again in a moment.' : (e?.message || String(e))}`;
+    }
+    scriptBusy = null; renderPlan();
   } else if (iact === 'nrec') { // voice over the animation: the drill plays from the top (cues captioned, not spoken) while the mic records
     if (anim.recNarr || introRec) return;
     if (store.drill !== d) { store.drillIndex = store.practice.drills.indexOf(d); renderAll(); }
@@ -2631,6 +2645,18 @@ $('#btn-ai-drill').addEventListener('click', e => { e.stopPropagation(); aiOpen 
 $('#drill-list').addEventListener('input', e => { if (e.target.matches('.ai-prompt')) aiPrompt = e.target.value; });
 $('#drill-list').addEventListener('keydown', e => { if (e.target.matches('.ai-prompt') && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); aiAction('generate', e.target.closest('li')); } });
 
+// ----- the intro script: age and length set the pitch and size; ✨ writes it; the coach edits it and reads it while recording
+let scriptBusy = null, scriptStatus = '';
+function introScriptHTML(d, recording) {
+  const age = +d.introAge || 7, secs = +d.introSecs || 30, busy = scriptBusy === d.id;
+  return `<div class="row intro-script-row">
+        <label class="check small">Age <input type="number" class="intro-age" min="4" max="18" step="1" value="${age}" ${busy ? 'disabled' : ''}></label>
+        <label class="check small">Length <input type="number" class="intro-secs" min="10" max="300" step="5" value="${secs}" ${busy ? 'disabled' : ''}> s</label>
+        <button data-iact="script" ${busy || recording ? 'disabled' : ''} title="${aiKey ? 'Claude writes a script for this intro from the drill and your notes — pitched at this age, sized for this length' : 'Set up the Claude key under ⚙ Settings first'}">${busy ? '… writing' : `✨ ${d.introScript ? 'Rewrite' : 'Write'} a script`}</button>
+      </div>
+      <textarea class="intro-script${recording ? ' reading' : ''}" rows="${recording ? 8 : 5}" placeholder="What you'll say — write it here, or let ✨ draft it from the drill and your notes, then read it while recording.">${escHtml(d.introScript || '')}</textarea>
+      ${scriptStatus && (busy || scriptBusy === null) ? `<div class="intro-status muted small${/✗/.test(scriptStatus) ? ' warn' : ''}">${escHtml(scriptStatus)}</div>` : ''}`;
+}
 /** The voice-over section of a drill's 🎙 row: record over the animation, listen, upload, delete. */
 function narrationHTML(d) {
   const n = d.narration, rec = anim.recNarr?.drillId === d.id, busy = !!introRec || (anim.recNarr && !rec);
@@ -2707,6 +2733,7 @@ function renderPlan() {
       <div class="intro-warn warn small intro-size-warn"${(recording ? '' : clipSizeWarning(d.intro?.size)) ? '' : ' hidden'}>${recording ? '' : clipSizeWarning(d.intro?.size)}</div>
       ${d.intro && !recording && !phoneFriendly(d.intro.mime) ? `<div class="intro-warn warn small">⚠ Recorded in a format iPhones can’t play (${escHtml(d.intro.mime)}) — press Re-record; this version records one that plays everywhere.</div>` : ''}
       ${d.intro && !recording && d.intro.cloud !== true ? `<div class="intro-warn warn small">⚠ ${d.intro.cloud === false ? `Not in the cloud — coaches can’t hear it${d.intro.cloudError ? ` (${escHtml(d.intro.cloudError)}${cloudHint(d.intro.cloudError)})` : ''}` : 'Cloud copy unknown — recorded before this version'}</div>` : ''}
+      ${introScriptHTML(d, recording)}
       <div class="row">
         ${recording ? '<button data-iact="stop" class="danger">■ Stop</button>' : `<button data-iact="rec" ${canRecord() ? '' : 'disabled'}>● ${d.intro ? 'Re-record' : 'Record'}</button>`}
         <button data-iact="play" ${d.intro && !recording ? '' : 'disabled'}>${introPlaying?.drillId === d.id ? '■ Stop' : '▶ Listen'}</button>
@@ -2845,6 +2872,13 @@ $('#drill-list').addEventListener('input', e => {
   if (el.dataset.notes != null) {
     const d = store.practice.drills[+el.dataset.notes];
     if (d) { d.notes = el.value; store.save(); }
+  }
+  if (el.matches('.intro-script, .intro-age, .intro-secs')) {
+    const d = store.practice.drills.find(x => x.id === introOpenFor); if (!d) return;
+    if (el.matches('.intro-script')) d.introScript = el.value;
+    else if (el.matches('.intro-age')) d.introAge = Math.max(4, Math.min(18, Math.round(+el.value || 7)));
+    else d.introSecs = Math.max(10, Math.min(300, Math.round(+el.value || 30)));
+    store.save();
   }
 });
 $('#drill-list').addEventListener('change', e => {

@@ -165,3 +165,45 @@ export function layoutToObjects(layout, { uid, zoneColors = ZONE_PALETTE } = {})
   for (const l of layout.labels || []) if (l.text) out.push({ id: uid(), type: 'text', x: px(l.x), y: py(l.y), text: String(l.text).slice(0, 60), size: 3, color: '#111' });
   return out;
 }
+
+// ---------- the coach's intro script ----------
+/** A plain-language brief of a drill for the script writer: who is on the ice, what they do, the cues and the notes. */
+export function drillBrief(d, { game = false } = {}) {
+  const objs = d.objects || [];
+  const players = objs.filter(o => o.type === 'skater' || o.type === 'coach').map(o => {
+    const who = o.type === 'coach' ? `Coach ${o.label || 'C'}` : `${o.role === 'G' ? 'Goalie' : o.side === 'D' ? 'Defender' : 'Skater'} ${o.label || '?'}${o.side ? ` (${o.side === 'D' ? 'defense, red' : 'offense, blue'})` : ''}`;
+    const path = (o.path || []).length ? `skates ${o.path.length} leg${o.path.length === 1 ? '' : 's'} from (${Math.round(o.x)}, ${Math.round(o.y)}) to (${Math.round(o.path.at(-1).x)}, ${Math.round(o.path.at(-1).y)})${o.backward ? ' backward' : ''}` : `stands at (${Math.round(o.x)}, ${Math.round(o.y)})`;
+    const cues = [o.startCue, ...(o.path || []).map(w => w.cue)].filter(Boolean);
+    return `- ${who}: ${path}${o.delay ? `, starting after ${o.delay} s` : ''}${cues.length ? `; cues: ${cues.map(c => `"${c}"`).join(', ')}` : ''}`;
+  });
+  const byId = Object.fromEntries(objs.map(o => [o.id, o]));
+  const name = id => { const o = byId[id]; return !o ? 'someone' : o.type === 'coach' ? `Coach ${o.label || 'C'}` : `${o.role === 'G' ? 'Goalie' : o.side === 'D' ? 'Defender' : 'Skater'} ${o.label || '?'}`; };
+  const pucks = objs.filter(o => o.type === 'puck').map(pk => {
+    const evs = (pk.events || []).map(ev => ev.type === 'pass' ? `passes to ${name(ev.to)}` : ev.type === 'shoot' ? 'shoots' : ev.type === 'pickup' ? `${name(ev.skater)} picks it up` : ev.type).filter(Boolean);
+    return `- Puck${pk.carrier ? ` with ${name(pk.carrier)}` : ' loose'}${evs.length ? `: ${evs.join(', then ')}` : ''}`;
+  });
+  const gear = ['cone', 'minicone', 'tire', 'net', 'pile', 'raisedpad', 'jumppad', 'barricade', 'obstacle'].map(t => { const n = objs.filter(o => o.type === t).length; return n ? `${n} ${t}${n === 1 ? '' : 's'}` : ''; }).filter(Boolean);
+  const zones = objs.filter(o => o.type === 'zone').map(z => `- Station "${z.label || 'Zone'}"${z.constraints ? `: ${String(z.constraints).split('\n').filter(Boolean).join('; ')}` : ''}`);
+  return [
+    `${game ? 'Coaching point' : 'Drill'}: ${d.name || 'untitled'}${d.duration ? ` (${d.duration} min)` : ''}`,
+    d.notes ? `Coach's notes / coaching points:\n${d.notes}` : 'Coach\'s notes: none written.',
+    players.length ? `Players on the diagram:\n${players.join('\n')}` : 'No players drawn.',
+    pucks.length ? `Pucks:\n${pucks.join('\n')}` : '',
+    gear.length ? `Equipment: ${gear.join(', ')}.` : '',
+    zones.length ? `Stations:\n${zones.join('\n')}` : '',
+    d.upload || d.video ? 'There is also a video of this drill the players will watch.' : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+/** Ask Claude for the words a coach says to introduce the drill: plain spoken text, sized for `secs` seconds, pitched at `age`-year-olds. */
+export async function generateIntroScript({ sdk, apiKey, brief, age = 7, secs = 30, game = false, model = MODEL, signal = null }) {
+  const Anthropic = sdk.default || sdk.Anthropic;
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 1 });
+  const words = Math.max(20, Math.round(secs * 2.3)); // an unhurried coach speaks about 140 words a minute
+  const system = `You write what a youth hockey coach says out loud to introduce a ${game ? 'coaching point before a game' : 'practice drill'} to ${age}-year-old players, as a script the coach will read while recording. Rules: about ${words} words (it is read in roughly ${secs} seconds); plain spoken English a ${age}-year-old follows, short sentences, warm and energetic; say what happens step by step, naming players by their number or role as on the diagram; include the coaching points — the two or three things to focus on, drawn from the coach's notes when there are any; finish with a short go cue. Output only the words to say: no title, no headings, no bullets, no stage directions, no quotation marks around the whole thing.`;
+  const res = await client.messages.create({ model, max_tokens: 2000, system, messages: [{ role: 'user', content: brief }] }, signal ? { signal } : undefined);
+  if (res.stop_reason === 'refusal') throw new Error(`Claude declined this request${res.stop_details?.explanation ? `: ${res.stop_details.explanation}` : ''}`);
+  const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  if (!text) throw new Error('Claude did not return a script — try again');
+  return { text, usage: res.usage };
+}

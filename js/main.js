@@ -4,7 +4,7 @@ import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, AR
 import { makeSim, facingOf, goalieSquareTo, goalieHome, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, usDate, parseUsDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
-import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus } from './access.js';
+import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus, clubDoc, TASK_UNITS, isoWeek, weekStart, shiftWeek } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
@@ -915,6 +915,7 @@ document.addEventListener('keydown', e => {
   if (presenting) { presentKeydown(e); return; } // presentation is view-only and terminal: no editor shortcuts, no way "back"
   if (!editorOn) return;
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
+  if (!$('#club-output').hidden) { if (e.key === 'Escape') $('#club-output').hidden = true; return; } // the output table sits over the team manager
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
   if (!$('#settings').hidden) { if (e.key === 'Escape') closeSettings(); return; }
   if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
@@ -2021,6 +2022,17 @@ function renderTeamMgr() {
     ${reqRows ? `<h3>Access requests</h3>${reqRows}` : ''}
     ${tryRows ? `<h3>Signed in without access</h3>${tryRows}` : ''}
     <label class="field inline ros-team-name"><span>Team name</span><input data-field="teamname" value="${escHtml(t.name || '')}"></label>
+    <label class="check"><input type="checkbox" data-field="club" ${t.club ? 'checked' : ''}> Official club team — weekly tasks, player profiles and each player's weekly output</label>
+    ${t.club ? `<h3>Weekly tasks</h3>
+    ${(t.tasks || []).map(k => `
+    <div class="ros-row ros-task" data-tid="${k.id}">
+      <input placeholder="Task — e.g. Shots on goal" data-field="title" value="${escHtml(k.title || '')}">
+      <select data-field="unit" title="What gets counted">${Object.entries(TASK_UNITS).map(([v, l]) => `<option value="${v}" ${(k.unit || 'reps') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <input type="number" min="0" step="1" placeholder="per week" title="Target per week" data-field="target" value="${+k.target || 0}">
+      <button data-act="deltask" title="Remove task">${icon('x')}</button>
+    </div>`).join('') || '<p class="muted small">No tasks yet — add shooting, stickhandling, balance work…</p>'}
+    <div class="row"><button data-act="addtask">＋ Add task</button><button data-act="output" class="primary">📊 Weekly output</button></div>
+    <p class="muted small">Families see their player's profile on their practice list and add the week's numbers; coaches and you see every player's output. The team's players and contacts below decide who may log for whom.</p>` : ''}
     <h3>Coaches</h3>
     ${coachRows || '<p class="muted small">No coaches yet.</p>'}
     <div class="row"><button data-act="addcoach">＋ Add coach</button></div>
@@ -2050,17 +2062,20 @@ $('#team-body').addEventListener('input', e => {
   const el = e.target; const t = currentMgrTeam();
   if (!t || !el.dataset.field) return;
   if (el.dataset.field === 'teamname') { renameFrom ??= t.name; t.name = el.value; store.saveRoster(); return; }
-  const row = el.closest('[data-cid],[data-kid],[data-pid]');
+  if (el.dataset.field === 'club') return; // a checkbox: handled on change
+  const row = el.closest('[data-cid],[data-kid],[data-pid],[data-tid]');
   if (!row) return;
   const obj = row.dataset.cid ? t.coaches.find(c => c.id === row.dataset.cid)
     : row.dataset.kid ? t.players.flatMap(p => p.contacts || []).find(k => k.id === row.dataset.kid)
+    : row.dataset.tid ? (t.tasks || []).find(k => k.id === row.dataset.tid)
     : t.players.find(p => p.id === row.dataset.pid);
   if (!obj) return;
-  obj[el.dataset.field] = el.value;
+  obj[el.dataset.field] = el.dataset.field === 'target' ? Math.max(0, Math.round(+el.value || 0)) : el.value;
   store.saveRoster();
 });
 let renameFrom = null; // a roster team's name before the current edit: its practices are renamed with it
 $('#team-body').addEventListener('change', e => {
+  if (e.target.dataset.field === 'club') { const t = currentMgrTeam(); if (!t) return; t.club = e.target.checked; if (t.club && !t.tasks) t.tasks = []; store.saveRoster(); renderTeamMgr(); return; }
   if (e.target.dataset.field !== 'teamname') return;
   const from = renameFrom, to = e.target.value.trim(); renameFrom = null;
   if (from && to && from.trim().toLowerCase() !== to.toLowerCase()) {
@@ -2077,7 +2092,7 @@ $('#team-body').addEventListener('click', e => {
   const fromAttempt = reqRow?.dataset.kind === 'attempt';
   const req = reqRow && (fromAttempt ? accessAttempts : accessRequests).find(r => r.uid === reqRow.dataset.ruid);
   const settle = (fn, r) => { fn(r.uid).catch(e => alert(`Couldn't update the request: ${e?.message || e}`)); if (!fromAttempt) cloudBackend.removeAttempt?.(r.uid).catch(() => {}); }; // a settled request retires the sign-in record too
-  const clear = fromAttempt ? cloudBackend.removeAttempt : cloudBackend.removeRequest;
+  const clear = fromAttempt ? cloudBackend?.removeAttempt : cloudBackend?.removeRequest; // no cloud (local-only): the request rows don't exist anyway
   switch (btn.dataset.act) {
     case 'req-coach': if (!req) return; t.coaches.push({ id: uid(), name: req.name || '', email: req.email }); settle(clear, req); break;
     case 'req-family': {
@@ -2088,6 +2103,9 @@ $('#team-body').addEventListener('click', e => {
       settle(clear, req); break;
     }
     case 'req-deny': if (req) settle(fromAttempt ? cloudBackend.removeAttempt : cloudBackend.denyRequest, req); return;
+    case 'addtask': (t.tasks ||= []).push({ id: uid(), title: '', unit: 'reps', target: 0 }); break;
+    case 'deltask': t.tasks = (t.tasks || []).filter(k => k.id !== btn.closest('[data-tid]').dataset.tid); break;
+    case 'output': openClubOutput(t.id, { modal: true }); return;
     case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
     case 'delcoach': t.coaches = t.coaches.filter(c => c.id !== btn.closest('[data-cid]').dataset.cid); break;
     case 'addplayer': t.players.push({ id: uid(), name: '', contacts: [] }); break;
@@ -4586,17 +4604,126 @@ function showList(r) {
       ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
   $('#present-title').textContent = who.persona === 'planner' ? `Practices — ${as} view` : 'Practices';
   $('#present-gate').hidden = true; presentNote(inboxStale ? 'Offline — this is the list from your last visit.' : '');
+  const clubs = clubsFor();
+  const clubRows = clubs.map(c => c.role === 'coach'
+    ? `<button class="pl-item pl-club" data-club-output="${escHtml(c.id)}"><b>📊 ${escHtml(c.name || 'Club team')} — weekly output</b><span>every player's numbers for the week</span></button>`
+    : c.players.map(pl => `<button class="pl-item pl-club" data-club-player="${escHtml(c.id)}:${escHtml(pl.id)}"><b>🏒 ${escHtml(pl.name || 'Player')}</b><span>${escHtml(c.name || 'Club team')} · this week's tasks and progress</span></button>`).join('')).join('');
   $('#present-body').innerHTML = `<div class="pl-list">
     ${items.length ? '' : '<p class="muted">Nothing here yet — practices show up once your coach sends them out.</p>'}
+    ${clubRows ? `<h2>Club</h2>${clubRows}` : ''}
     ${upcoming.length ? `<h2>Upcoming</h2>${upcoming.map(row).join('')}` : ''}
     ${past.length ? `<h2>Earlier</h2>${past.map(row).join('')}` : ''}
   </div>`;
   $('#present-scroll').scrollTop = 0;
 }
 $('#present-body').addEventListener('click', e => {
+  const out = e.target.closest('[data-club-output]'); if (out) { openClubOutput(out.dataset.clubOutput, { modal: false }); return; }
+  const pl = e.target.closest('[data-club-player]'); if (pl) { const [teamId, playerId] = pl.dataset.clubPlayer.split(':'); openProfile(teamId, playerId); return; }
   const a = e.target.closest('a[data-nav]'); if (!a || e.metaKey || e.ctrlKey) return;
   e.preventDefault(); navigate(a.getAttribute('href'));
 });
+
+// ---------- official club teams: weekly tasks, a player's profile (their family logs the week), the team's weekly output ----------
+// Data: club/{teamId} (tasks + lookups, written by the planner's roster sync) and club/{teamId}/stats/{playerId_week}
+// ({ playerId, week, values: { taskId: n }, by, updatedAt }). Weeks are ISO weeks, Monday to Sunday.
+/** The club teams this person has a part in: for the planner every club team as a coach; for others from their list document. */
+function clubsFor() {
+  if (who.persona === 'planner') return (store.roster.teams || []).filter(t => t.club).map(t => ({ id: t.id, name: t.name || '', role: 'coach', players: (t.players || []).map(pl => ({ id: pl.id, name: pl.name || '' })) }));
+  return Object.entries(viewerInbox?.club || {}).map(([id, c]) => ({ id, ...c }));
+}
+const clubState = { teamId: null, doc: null, week: isoWeek(), stats: new Map(), player: null, mount: null, busy: '' };
+const weekLabel = w => { const s = weekStart(w); if (!s) return w; const e = new Date(s); e.setDate(e.getDate() + 6); const f = d => `${d.getMonth() + 1}/${d.getDate()}`; return `${w === isoWeek() ? 'This week · ' : ''}${f(s)}–${f(e)}`; };
+const myEmail = () => String(cloudSync?.user?.email || '').toLowerCase();
+/** The club document: the planner's own roster is the truth; everyone else reads club/{teamId}. */
+async function loadClubDoc(teamId) {
+  if (who.persona === 'planner') { const t = (store.roster.teams || []).find(x => x.id === teamId); return clubDoc(t); }
+  if (!cloudBackend?.loadClub) return null;
+  try { return await cloudBackend.loadClub(teamId); } catch { return null; }
+}
+async function openClubOutput(teamId, { modal }) {
+  clubState.teamId = teamId; clubState.player = null; clubState.week = isoWeek(); clubState.stats = new Map(); clubState.busy = 'Loading…';
+  clubState.mount = modal ? $('#club-output-body') : $('#present-club-body');
+  if (modal) { $('#club-output').hidden = false; $('#club-output-title').textContent = ''; } else $('#present-club').hidden = false;
+  renderClub();
+  clubState.doc = await loadClubDoc(teamId);
+  if (!clubState.doc) { clubState.busy = '✗ Could not load this club team — are the latest firestore.rules deployed?'; renderClub(); return; }
+  if (modal) $('#club-output-title').textContent = clubState.doc.name;
+  await loadClubWeek();
+}
+async function openProfile(teamId, playerId) {
+  clubState.teamId = teamId; clubState.player = playerId; clubState.week = isoWeek(); clubState.stats = new Map(); clubState.busy = 'Loading…';
+  clubState.mount = $('#present-club-body'); $('#present-club').hidden = false;
+  renderClub();
+  clubState.doc = await loadClubDoc(teamId);
+  if (!clubState.doc) { clubState.busy = '✗ Could not load this club team.'; renderClub(); return; }
+  if (!cloudBackend?.loadPlayerStats || !cloudSync?.user) { clubState.busy = '✗ Sign in to see and log the numbers.'; renderClub(); return; }
+  try { for (const s of await cloudBackend.loadPlayerStats(teamId, playerId)) clubState.stats.set(`${s.playerId}_${s.week}`, s); clubState.busy = ''; }
+  catch (e) { clubState.busy = `✗ Could not load the numbers: ${e?.message || e}`; }
+  renderClub();
+}
+async function loadClubWeek() {
+  clubState.busy = 'Loading…'; renderClub();
+  if (!cloudBackend?.loadWeekStats || !cloudSync?.user) { clubState.busy = '✗ Sign in to see the numbers — they live in the cloud.'; renderClub(); return; }
+  try { for (const s of await cloudBackend.loadWeekStats(clubState.teamId, clubState.week)) clubState.stats.set(`${s.playerId}_${s.week}`, s); clubState.busy = ''; }
+  catch (e) { clubState.busy = `✗ Could not load the numbers: ${e?.message || e}`; }
+  renderClub();
+}
+const statFor = (playerId, week) => clubState.stats.get(`${playerId}_${week}`) || { playerId, week, values: {} };
+/** Write one number: the stat document for that player and week is rewritten whole, signed by this account. */
+async function logStat(playerId, taskId, value) {
+  const cur = statFor(playerId, clubState.week);
+  const values = { ...(cur.values || {}) };
+  if (Number.isFinite(+value) && value !== '') values[taskId] = Math.max(0, Math.round(+value)); else delete values[taskId];
+  const next = { playerId, week: clubState.week, values, by: myEmail(), updatedAt: Date.now() };
+  clubState.stats.set(`${playerId}_${clubState.week}`, next);
+  try { await cloudBackend.saveStat(clubState.teamId, next); clubState.busy = `✓ Saved ${stamp(next.updatedAt)}`; }
+  catch (e) { clubState.busy = `✗ Not saved: ${e?.message || e}${/permission/i.test(e?.message || '') ? ' — only this player\'s family or a coach may log their numbers' : ''}`; }
+  const el = clubState.mount?.querySelector('.club-note'); if (el) { el.textContent = clubState.busy; el.classList.toggle('warn', /✗/.test(clubState.busy)); }
+  renderClub({ keepFocus: true });
+}
+function renderClub({ keepFocus = false } = {}) {
+  const m = clubState.mount; if (!m) return;
+  if (keepFocus && m.contains(document.activeElement)) return; // typing: the numbers are already in state; repaint when the field blurs
+  const d = clubState.doc, week = clubState.week;
+  const nav = `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= isoWeek() ? 'disabled' : ''}>▶</button></div>`;
+  const note = `<div class="club-note muted small${/✗/.test(clubState.busy) ? ' warn' : ''}">${escHtml(clubState.busy)}</div>`;
+  if (!d) { m.innerHTML = `<div class="club-head"><h3>Club</h3></div>${note}`; return; }
+  const tasks = d.tasks || [];
+  if (clubState.player) { // one player's profile: this week's tasks to fill in, then the recent weeks
+    const pl = d.players?.[clubState.player] || { name: 'Player' };
+    const s = statFor(clubState.player, week);
+    const rows = tasks.map(k => { const v = s.values?.[k.id]; const pct = k.target ? Math.min(1, (+v || 0) / k.target) : 0; return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${k.target ? `${k.target} ${TASK_UNITS[k.unit] || k.unit} a week` : TASK_UNITS[k.unit] || k.unit}</span>${k.target ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}</div><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" value="${v ?? ''}" placeholder="0"></div>`; }).join('');
+    const weeks = [...new Set([week, ...[...clubState.stats.values()].map(x => x.week)])].sort().reverse().slice(0, 8);
+    const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3><table class="club-table"><thead><tr><th>Week</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}</th>`).join('')}</tr></thead><tbody>${weeks.map(w => { const st = statFor(clubState.player, w); return `<tr><td>${escHtml(weekLabel(w).replace('This week · ', ''))}</td>${tasks.map(k => `<td class="num">${st.values?.[k.id] ?? '·'}${k.target ? `<span class="muted">/${k.target}</span>` : ''}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>` : '';
+    m.innerHTML = `<div class="club-head"><h3>🏒 ${escHtml(pl.name || 'Player')} <span class="muted small">· ${escHtml(d.name)}</span></h3>${nav}<button data-club="close" title="Close">✕</button></div>
+      ${tasks.length ? rows : '<p class="muted">No weekly tasks set yet — the coach adds them under the team.</p>'}${note}
+      <p class="muted small">Type the week's numbers as you go — each is saved when you leave the field. The bar fills toward the week's target.</p>${hist}`;
+    return;
+  }
+  // the whole team: players down, tasks across; coaches and the planner may type in a number for anyone
+  const players = Object.entries(d.players || {}).map(([id, p]) => ({ id, name: p.name || 'Player' })).sort((a, b) => a.name.localeCompare(b.name));
+  const mayLog = who.persona === 'planner' || (d.coaches || []).includes(myEmail());
+  const cell = (pl, k) => { const v = statFor(pl.id, week).values?.[k.id]; const done = k.target && +v >= k.target; return `<td class="num">${mayLog ? `<input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-player="${pl.id}" value="${v ?? ''}" placeholder="·">` : `<b>${v ?? '·'}</b>`}${k.target ? `<span class="muted small">/${k.target}${done ? ' ✓' : ''}</span>` : ''}</td>`; };
+  const total = pl => { const s = statFor(pl.id, week); const t = tasks.filter(k => k.target); if (!t.length) return ''; const pct = t.reduce((a, k) => a + Math.min(1, (+s.values?.[k.id] || 0) / k.target), 0) / t.length; return `<td class="num">${(pct * 100).toFixed(0)}%<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div></td>`; };
+  m.innerHTML = `<div class="club-head"><h3>📊 ${escHtml(d.name)} <span class="muted small">· weekly output</span></h3>${nav}${clubState.mount === $('#present-club-body') ? '<button data-club="close" title="Close">✕</button>' : ''}</div>
+    ${tasks.length && players.length ? `<table class="club-table"><thead><tr><th>Player</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}<br><span class="muted">${TASK_UNITS[k.unit] || k.unit}</span></th>`).join('')}${tasks.some(k => k.target) ? '<th class="num">Week</th>' : ''}</tr></thead><tbody>${players.map(pl => `<tr><td>${escHtml(pl.name)}</td>${tasks.map(k => cell(pl, k)).join('')}${total(pl)}</tr>`).join('')}</tbody></table>` : `<p class="muted">${tasks.length ? 'No players on the roster yet.' : 'No weekly tasks set yet — add them under 👥 Team.'}</p>`}
+    ${note}<p class="muted small">${mayLog ? 'Families log their own player\'s numbers from their practice list; you can type a number in for anyone — it saves when you leave the field.' : 'Numbers come from each player\'s family, logged from their practice list.'}</p>`;
+}
+for (const sel of ['#club-output-body', '#present-club-body']) {
+  $(sel).addEventListener('click', e => {
+    const b = e.target.closest('[data-club]'); if (!b) return;
+    if (b.dataset.club === 'close') { $('#present-club').hidden = true; return; }
+    clubState.week = shiftWeek(clubState.week, b.dataset.club === 'prev' ? -1 : 1);
+    if (clubState.player) renderClub(); else loadClubWeek();
+  });
+  $(sel).addEventListener('change', e => {
+    const el = e.target; if (!el.matches('[data-log]')) return;
+    logStat(el.dataset.player || clubState.player, el.dataset.log, el.value);
+  });
+}
+$('#club-output-close').addEventListener('click', () => { $('#club-output').hidden = true; });
+$('#club-output').addEventListener('click', e => { if (e.target === e.currentTarget) $('#club-output').hidden = true; });
+$('#present-club').addEventListener('click', e => { if (e.target === e.currentTarget) $('#present-club').hidden = true; });
 $('#present-home').addEventListener('click', () => { if (['coach', 'team', 'planner'].includes(who.persona) && screen.as) navigate(`/${screen.as === 'coach' ? 'coach' : 'team'}`); });
 
 // ---------- request access: someone signed in who is on no roster ----------
@@ -4957,7 +5084,7 @@ const atTop = el => { for (; el && el !== document.body; el = el.parentElement) 
 const endPull = () => { pull = null; pullTip.hidden = true; };
 document.addEventListener('touchstart', e => {
   pull = null;
-  if (editorOn || e.touches.length !== 1 || e.target.closest('input,select,textarea,canvas,video,.pr-fig.zoomed,#present-picker,#present-acct,#present-fb') || !atTop(e.target)) return;
+  if (editorOn || e.touches.length !== 1 || e.target.closest('input,select,textarea,canvas,video,.pr-fig.zoomed,#present-picker,#present-acct,#present-fb,#present-club') || !atTop(e.target)) return;
   pull = { x: e.touches[0].clientX, y: e.touches[0].clientY, el: e.target, armed: false };
 }, { passive: true });
 document.addEventListener('touchmove', e => {

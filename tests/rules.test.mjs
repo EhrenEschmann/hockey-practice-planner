@@ -45,6 +45,31 @@ ok('parent cannot read the planner\'s private doc', await get(PARENT, 'users/own
 ok('stranger cannot write a private doc under the planner', await set(STRANGER, 'users/own/private/anthropic', { data: 'x' }), DENY);
 ok('planner deletes own private doc', await del(PLANNER, 'users/own/private/anthropic'), ALLOW);
 
+await set('admin', 'club/t1', { id: 't1', name: 'Mites', tasks: [{ id: 'k1', title: 'Shots', unit: 'shots', target: 100 }], coaches: ['coach.a@example.com'], members: ['coach.a@example.com', 'parent@example.com'], players: { pl1: { name: 'Sam', contacts: ['parent@example.com'] }, pl2: { name: 'Alex', contacts: [] } } });
+await set('admin', 'club/t1/stats/pl2_2026-W41', { playerId: 'pl2', week: '2026-W41', values: { k1: 40 }, by: 'coach.a@example.com' });
+console.log('official club team: tasks for members, numbers by family or coach');
+ok('planner writes the club doc', await set(PLANNER, 'club/t1', { id: 't1', name: 'Mites', tasks: [], coaches: ['coach.a@example.com'], members: ['coach.a@example.com', 'parent@example.com'], players: { pl1: { name: 'Sam', contacts: ['parent@example.com'] }, pl2: { name: 'Alex', contacts: [] } } }), ALLOW);
+ok('a coach reads the club doc', await get(COACH_A, 'club/t1'), ALLOW);
+ok('a family reads the club doc', await get(PARENT, 'club/t1'), ALLOW);
+ok('a stranger cannot read the club doc', await get(STRANGER, 'club/t1'), DENY);
+ok('a coach cannot rewrite the club doc', await set(COACH_A, 'club/t1', { tasks: [] }), DENY);
+const stat = (pid, by, extra = {}) => ({ playerId: pid, week: '2026-W41', values: { k1: 25 }, by, ...extra });
+ok('a parent logs their own player\'s week', await set(PARENT, 'club/t1/stats/pl1_2026-W41', stat('pl1', 'parent@example.com')), ALLOW);
+ok('…and updates it', await set(PARENT, 'club/t1/stats/pl1_2026-W41', stat('pl1', 'parent@example.com', { values: { k1: 30 } })), ALLOW);
+ok('a parent cannot log for another player', await set(PARENT, 'club/t1/stats/pl2_2026-W41', stat('pl2', 'parent@example.com')), DENY);
+ok('a parent cannot sign as someone else', await set(PARENT, 'club/t1/stats/pl1_2026-W40', stat('pl1', 'coach.a@example.com', { week: '2026-W40' })), DENY);
+ok('the document id must match player and week', await set(PARENT, 'club/t1/stats/pl1_2026-W39', stat('pl1', 'parent@example.com')), DENY);
+ok('a coach logs for any player', await set(COACH_A, 'club/t1/stats/pl2_2026-W42', stat('pl2', 'coach.a@example.com', { week: '2026-W42' })), ALLOW);
+ok('a parent reads their player\'s week', await get(PARENT, 'club/t1/stats/pl1_2026-W41'), ALLOW);
+ok('a parent cannot read another player\'s week', await get(PARENT, 'club/t1/stats/pl2_2026-W41'), DENY);
+ok('a coach reads any player\'s week', await get(COACH_A, 'club/t1/stats/pl1_2026-W41'), ALLOW);
+ok('a coach lists the week\'s numbers for the whole team', await query(COACH_A, 'club/t1', 'stats', ['week', '2026-W41']), r => r.status === 200 && r.n === 2);
+ok('a parent lists their own player\'s weeks', await query(PARENT, 'club/t1', 'stats', ['playerId', 'pl1']), r => r.status === 200 && r.n === 1);
+ok('a parent cannot list the whole team', await query(PARENT, 'club/t1', 'stats', ['week', '2026-W41']), r => r.status !== 200);
+ok('a stranger gets nothing', await get(STRANGER, 'club/t1/stats/pl1_2026-W41'), DENY);
+ok('only the planner deletes numbers', await del(PARENT, 'club/t1/stats/pl1_2026-W41'), DENY);
+ok('the planner reads everything', await get(PLANNER, 'club/t1/stats/pl1_2026-W41'), ALLOW);
+
 console.log('working document, roster, access lists: planner only');
 ok('planner reads own working doc', await get(PLANNER, 'users/own/practices/p1'), ALLOW);
 ok('planner writes own working doc', await set(PLANNER, 'users/own/practices/p1', { id: 'p1', team: 'Mites' }), ALLOW);

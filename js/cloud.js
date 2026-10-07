@@ -4,7 +4,7 @@
 // Data layout in Firestore:  users/{uid}/practices/{practiceId}  — one document per practice (the same
 // JSON the app keeps locally, plus `updatedAt` in ms). Newest `updatedAt` wins when local and cloud differ.
 
-import { accessFor, publishedCopy, inboxDocs } from './access.js';
+import { accessFor, publishedCopy, inboxDocs, clubDoc, statId } from './access.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 export const SAVE_DELAY = 800; // ms of quiet after an edit before it is written
@@ -83,6 +83,13 @@ export async function firebaseBackend(config) {
     async removeAccess(pid) { await fs.deleteDoc(fs.doc(db, 'access', pid)); },
     async loadInboxes() { return (await fs.getDocs(fs.collection(db, 'inbox'))).docs.map(d => ({ email: d.id, ...d.data() })); },
     async saveInbox(email, doc) { await fs.setDoc(fs.doc(db, 'inbox', email), doc); },
+    // Official club teams: club/{teamId} (tasks + lookups, planner-written) and club/{teamId}/stats/{playerId_week} (a family's or coach's numbers).
+    async saveClub(teamId, doc) { await fs.setDoc(fs.doc(db, 'club', teamId), doc); },
+    async removeClub(teamId) { await fs.deleteDoc(fs.doc(db, 'club', teamId)); },
+    async loadClub(teamId) { const s = await fs.getDoc(fs.doc(db, 'club', teamId)); return s.exists() ? s.data() : null; },
+    async saveStat(teamId, data) { await fs.setDoc(fs.doc(db, 'club', teamId, 'stats', statId(data.playerId, data.week)), data); },
+    async loadWeekStats(teamId, week) { return (await fs.getDocs(fs.query(fs.collection(db, 'club', teamId, 'stats'), fs.where('week', '==', week)))).docs.map(d => d.data()); },
+    async loadPlayerStats(teamId, playerId) { return (await fs.getDocs(fs.query(fs.collection(db, 'club', teamId, 'stats'), fs.where('playerId', '==', playerId)))).docs.map(d => d.data()); },
     async removeInbox(email) { await fs.deleteDoc(fs.doc(db, 'inbox', email)); },
     // Viewer: who am I here (null = on no roster), and one released practice, live.
     subscribeInbox(email, cb) {
@@ -236,6 +243,15 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
     await backend.removeAccess(id); await backend.removePublished(id);
     delete pub.a[id]; delete pub.p[id]; savePub();
   }
+  /** Each official club team's document (tasks + who may log for whom) follows the roster; a team no longer flagged loses it. */
+  async function syncClubs() {
+    if (!uid || !backend.saveClub) return;
+    pub.c ||= {};
+    const want = new Map((store.roster.teams || []).map(t => [t.id, clubDoc(t)]).filter(([, d]) => d));
+    for (const [id, doc] of want) { const f = fp(doc); if (pub.c[id] !== f) { await backend.saveClub(id, clean(doc)); pub.c[id] = f; } }
+    for (const id of Object.keys(pub.c)) if (!want.has(id)) { await backend.removeClub(id); delete pub.c[id]; }
+    savePub();
+  }
   /** Each person's list document: persona from the roster, practices from what is released to them. */
   async function syncInboxes() {
     if (!uid || !backend.saveInbox) return;
@@ -256,6 +272,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
       pub.i = Object.fromEntries((await backend.loadInboxes()).map(({ email, ...doc }) => [email, fp(doc)]));
       for (const p of store.data.practices) await publishOne(p);
       for (const id of Object.keys({ ...pub.a, ...pub.p })) if (!local(id)) await unpublish(id);
+      await syncClubs();
       await syncInboxes();
       return true;
     } catch (e) { status('error', `sharing: ${e?.message || e} — are the latest firestore.rules deployed?`); return false; }
@@ -276,6 +293,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
     try {
       await backend.saveRoster(uid, clean(store.roster));
       for (const p of store.data.practices) await publishOne(p); // the roster is who has access: every released practice follows it
+      await syncClubs();
       await syncInboxes();
       if (!timers.size) status('saved');
     } catch (e) { status('error', e?.message || String(e)); }

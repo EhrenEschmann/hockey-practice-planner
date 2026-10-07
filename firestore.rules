@@ -7,6 +7,8 @@ rules_version = '2';
 //   access/{pid}                    { stage, coach: [emails], team: [emails] } — planner only; looked up by these rules
 //   inbox/{email}                   that person's persona + list of practices — themselves and the planner only
 //   requests/{uid}                  an access request — the requester and the planner only
+//   club/{teamId}                   an official club team: weekly tasks + { coaches, members, players: { id: { contacts } } } — planner writes, members read
+//   club/{teamId}/stats/{pid_week}  a player's numbers for one week — written by that player's family (or a coach), read by coaches and that family
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -90,6 +92,25 @@ service cloud.firestore {
     match /inbox/{email} {
       allow read: if isPlanner() || (signedIn() && me() == email);
       allow write: if isPlanner();
+    }
+
+    // ---- official club teams: tasks for the week, and each player's numbers
+    match /club/{teamId} {
+      function club() { return get(/databases/$(database)/documents/club/$(teamId)).data; }
+      function clubCoach() { return signedIn() && me() in club().coaches; }
+      function familyOf(pid) { return signedIn() && pid in club().players && me() in club().players[pid].contacts; }
+      allow write: if isPlanner();
+      allow read: if isPlanner() || (signedIn() && me() in resource.data.members);
+      match /stats/{sid} {
+        function wellFormed() {
+          return request.resource.data.playerId is string && request.resource.data.week is string
+            && sid == request.resource.data.playerId + '_' + request.resource.data.week
+            && request.resource.data.values is map && request.resource.data.by == me();
+        }
+        allow read: if isPlanner() || clubCoach() || familyOf(resource.data.playerId);
+        allow create, update: if wellFormed() && (isPlanner() || clubCoach() || familyOf(request.resource.data.playerId));
+        allow delete: if isPlanner();
+      }
     }
 
     // ---- sign-ins that got nowhere: someone on no roster opened the app — one document per account, in their own

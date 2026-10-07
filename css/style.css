@@ -302,6 +302,40 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 #viewlog{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.7)}
 #viewlog[hidden]{display:none}
 #viewlog .lib-panel{width:min(900px,94vw)}
+#club-output{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.7)}
+#club-output[hidden]{display:none}
+#club-output .lib-panel{width:min(900px,94vw);height:auto;max-height:min(90vh,820px)}
+.club-body{overflow-y:auto;padding:10px 14px 14px;flex:1;min-height:0}
+#present-club{position:absolute;inset:0;z-index:6;display:flex;align-items:flex-end;justify-content:center;background:rgba(15,17,22,.7)}
+#present-club[hidden]{display:none}
+.club-sheet{max-height:92%}
+.club-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.club-head h3{margin:0;font-size:15px;flex:1 1 auto}
+.club-week{display:flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums}
+.club-week button{padding:2px 8px}
+.club-table{width:100%;border-collapse:collapse;font-size:13px}
+.club-table th,.club-table td{padding:6px 6px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+.club-table th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.club-table td.num,.club-table th.num{text-align:right;font-variant-numeric:tabular-nums}
+.club-table input[type=number]{width:64px;font-size:13px;padding:3px 5px;text-align:right}
+.club-bar{height:5px;background:var(--panel-2);border-radius:3px;overflow:hidden;margin-top:4px}
+.club-bar i{display:block;height:100%;background:#34d399}
+.club-bar i.part{background:#e6c15a}
+.club-task{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.club-task .t{flex:1 1 auto;min-width:0}
+.club-task .t b{display:block;font-size:15px}
+.club-task .t span{color:var(--muted);font-size:12.5px}
+.club-task input[type=number]{width:84px;font-size:18px;padding:6px 8px;text-align:right}
+.club-hist{margin-top:12px}
+.pl-item.pl-club{width:100%;cursor:pointer;font-family:inherit;text-align:left}
+.ros-task{padding:4px 0}
+.ros-task input[data-field=title]{flex:1 1 320px;min-width:200px;font-size:15px;padding:8px 10px}
+.ros-task select{flex:0 0 auto;width:auto;font-size:13px;padding:7px 6px}
+.ros-task input[type=number]{flex:0 0 96px;width:96px;font-size:15px;padding:8px 8px;text-align:right}
+.ros-task::after{content:'per week';color:var(--muted);font-size:12px;order:3}
+.ros-task input[type=number]{order:2}
+.ros-task select{order:1}
+.ros-task button{order:4}
 #viewlog-body{flex:1;overflow-y:auto;padding:14px 16px}
 #viewlog-body h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:16px 0 8px;font-weight:600}
 #viewlog-body h3:first-child{margin-top:0}

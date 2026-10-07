@@ -85,3 +85,22 @@ assert.equal(calendarFocus(cal, '2026-09-22').pid, 'next');
 assert.equal(calendarFocus(cal, '2026-10-01').pid, 'next', 'nothing upcoming: the most recent');
 assert.equal(calendarFocus([], '2026-10-01'), null);
 console.log('access.js: all assertions passed');
+
+// ---- official club teams: the club document, the inbox's club field, and week keys
+import { clubDoc, isoWeek, weekStart, shiftWeek, statId } from '../js/access.js';
+const clubTeam = { id: 't1', name: 'Mites', club: true, coaches: [{ email: 'Head@x.io' }], tasks: [{ id: 'k1', title: ' Shots on goal ', unit: 'shots', target: 100 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60 }, { id: 'k3', title: '', unit: 'min', target: 5 }, { id: 'k4', title: 'Balance', unit: 'nope', target: -3 }],
+  players: [{ id: 'pl1', name: 'Sam', contacts: [{ email: 'mom@x.io' }, { email: 'DAD@x.io' }] }, { id: 'pl2', name: 'Alex', contacts: [{ email: 'head@x.io' }] }] };
+const cd = clubDoc(clubTeam);
+assert.deepEqual(cd.tasks, [{ id: 'k1', title: 'Shots on goal', unit: 'shots', target: 100 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60 }, { id: 'k4', title: 'Balance', unit: 'reps', target: 0 }], 'tasks: trimmed, untitled dropped, unit and target sanitised');
+assert.deepEqual(cd.coaches, ['head@x.io']); assert.deepEqual(cd.members.sort(), ['dad@x.io', 'head@x.io', 'mom@x.io']);
+assert.deepEqual(cd.players, { pl1: { name: 'Sam', contacts: ['mom@x.io', 'dad@x.io'] }, pl2: { name: 'Alex', contacts: ['head@x.io'] } });
+assert.equal(clubDoc({ ...clubTeam, club: false }), null, 'only a team flagged as a club gets a document');
+const clubInbox = inboxDocs({ teams: [clubTeam] }, []);
+assert.deepEqual(clubInbox.get('head@x.io').club, { t1: { name: 'Mites', role: 'coach', players: [{ id: 'pl1', name: 'Sam' }, { id: 'pl2', name: 'Alex' }] } }, 'a coach (even as a parent) gets every player');
+assert.deepEqual(clubInbox.get('mom@x.io').club, { t1: { name: 'Mites', role: 'family', players: [{ id: 'pl1', name: 'Sam' }] } }, 'a family gets its own players');
+assert.equal(inboxDocs({ teams: [{ ...clubTeam, club: false }] }, []).get('mom@x.io').club, undefined, 'no club field without the flag');
+assert.equal(isoWeek(new Date(2026, 9, 6)), '2026-W41'); assert.equal(isoWeek(new Date(2026, 0, 1)), '2026-W01'); assert.equal(isoWeek(new Date(2027, 0, 3)), '2026-W53');
+assert.equal(weekStart('2026-W41').toDateString(), new Date(2026, 9, 5).toDateString(), 'a week starts on its Monday');
+assert.equal(shiftWeek('2026-W41', -1), '2026-W40'); assert.equal(shiftWeek('2026-W53', 1), '2027-W01');
+assert.equal(statId('pl1', '2026-W41'), 'pl1_2026-W41');
+console.log('access.js club: all assertions passed');

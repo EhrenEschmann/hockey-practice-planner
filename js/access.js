@@ -6,8 +6,10 @@
 //   published/{pid}                 the copy coaches and the team read (written while stage ≠ draft)
 //   published/{pid}/feedback/{fid}  a coach's feedback: one document per coach per drill (fid = `${uid}_${drillId|overall}`)
 //   access/{pid}                    { stage, coach: [emails], team: [emails] } — planner only; the rules look people up here
-//   inbox/{email}                   { persona, practices: { [pid]: { role, team, date, time } } } — that person's list
+//   inbox/{email}                   { persona, practices: { [pid]: { role, team, date, time } }, club } — that person's list
 //   requests/{uid}                  an access request from someone who is on no roster
+//   club/{teamId}                   an official club team's weekly tasks + who may log for which player (clubDoc below)
+//   club/{teamId}/stats/{pid_week}  one player's numbers for one week — their family (or a coach) writes, coaches read
 
 export const STAGES = ['draft', 'coaches', 'team'];
 export const STAGE_LABELS = { draft: 'Draft — only you', coaches: 'Out to coaches for feedback', team: 'Released to the team' };
@@ -65,8 +67,53 @@ export function inboxDocs(roster, practices) {
     if (a.stage === 'team') for (const e of a.team) doc(e).practices[p.id] = card('team');
     else for (const e of a.team) doc(e); // known to the app (not a stranger), nothing to open yet
   }
+  // Official club teams: each coach gets the whole team's weekly output; each family gets its own players' profiles.
+  for (const t of roster?.teams || []) {
+    if (!t.club) continue;
+    const players = (t.players || []).map(pl => ({ id: pl.id, name: pl.name || '' }));
+    for (const e of rosterCoachEmails(t)) { const d = doc(e); (d.club ||= {})[t.id] = { name: t.name || '', role: 'coach', players }; }
+    for (const pl of t.players || []) for (const e of emails((pl.contacts || []).map(k => k.email))) {
+      if (rosterCoachEmails(t).includes(e)) continue; // a coach-parent already has everyone
+      const d = doc(e), c = (d.club ||= {})[t.id] ||= { name: t.name || '', role: 'family', players: [] };
+      if (!c.players.some(x => x.id === pl.id)) c.players.push({ id: pl.id, name: pl.name || '' });
+    }
+  }
   return out;
 }
+
+// ---- official club teams: weekly tasks and who may log for whom
+export const TASK_UNITS = { reps: 'reps', min: 'minutes', times: 'times', shots: 'shots' };
+/** The club document for a team flagged as an official club team (null otherwise): tasks, and the lookups the rules use. */
+export function clubDoc(t) {
+  if (!t?.club) return null;
+  const coach = rosterCoachEmails(t);
+  const players = {};
+  for (const pl of t.players || []) players[pl.id] = { name: pl.name || '', contacts: emails((pl.contacts || []).map(k => k.email)) };
+  const members = emails([...coach, ...Object.values(players).flatMap(p => p.contacts)]);
+  const tasks = (t.tasks || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)) }));
+  return { id: t.id, name: t.name || '', tasks, coaches: coach, members, players, updatedAt: t.updatedAt || 0 };
+}
+/** The ISO week a date falls in, as 'YYYY-Www' (weeks start on Monday) — the key a week's stats are filed under. */
+export function isoWeek(d = new Date()) {
+  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = x.getUTCDay() || 7; // Mon=1 … Sun=7
+  x.setUTCDate(x.getUTCDate() + 4 - day); // the Thursday of this week decides the year
+  const y = x.getUTCFullYear();
+  const week = Math.ceil(((x - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7);
+  return `${y}-W${String(week).padStart(2, '0')}`;
+}
+/** The Monday a 'YYYY-Www' key starts on (local midnight). */
+export function weekStart(key) {
+  const m = String(key || '').match(/^(\d{4})-W(\d{2})$/); if (!m) return null;
+  const y = +m[1], w = +m[2];
+  const jan4 = new Date(y, 0, 4), day = jan4.getDay() || 7; // ISO week 1 holds 4 January
+  const monday = new Date(y, 0, 4 - (day - 1) + (w - 1) * 7);
+  return monday;
+}
+/** The week key `n` weeks away from `key`. */
+export function shiftWeek(key, n) { const s = weekStart(key); if (!s) return key; s.setDate(s.getDate() + 7 * n); return isoWeek(s); }
+/** The stats document id for one player's week. */
+export const statId = (playerId, week) => `${playerId}_${week}`;
 
 /** Calendar order: by date, then start time (undated practices first). */
 export const byCalendar = (a, b) => `${a.date || ''} ${a.time || ''}`.localeCompare(`${b.date || ''} ${b.time || ''}`);

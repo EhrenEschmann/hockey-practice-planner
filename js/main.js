@@ -2028,7 +2028,10 @@ function renderTeamMgr() {
     <div class="ros-row ros-task" data-tid="${k.id}">
       <input placeholder="Task — e.g. Shots on goal" data-field="title" value="${escHtml(k.title || '')}">
       <select data-field="unit" title="What gets counted">${Object.entries(TASK_UNITS).map(([v, l]) => `<option value="${v}" ${(k.unit || 'reps') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <input type="number" min="0" step="1" placeholder="per week" title="Target per week" data-field="target" value="${+k.target || 0}">
+      <input type="number" min="0" step="1" placeholder="amount" title="How much each time — e.g. 25 shots" data-field="target" value="${+k.target || 0}">
+      <span class="ros-x muted small">×</span>
+      <input type="number" min="1" step="1" placeholder="times" title="How many times a week — e.g. 3" data-field="times" value="${Math.max(1, +k.times || 1)}">
+      <span class="ros-x muted small">a week</span>
       <button data-act="deltask" title="Remove task">${icon('x')}</button>
     </div>`).join('') || '<p class="muted small">No tasks yet — add shooting, stickhandling, balance work…</p>'}
     <div class="row"><button data-act="addtask">＋ Add task</button><button data-act="output" class="primary">📊 Weekly output</button></div>
@@ -2070,7 +2073,7 @@ $('#team-body').addEventListener('input', e => {
     : row.dataset.tid ? (t.tasks || []).find(k => k.id === row.dataset.tid)
     : t.players.find(p => p.id === row.dataset.pid);
   if (!obj) return;
-  obj[el.dataset.field] = el.dataset.field === 'target' ? Math.max(0, Math.round(+el.value || 0)) : el.value;
+  obj[el.dataset.field] = el.dataset.field === 'target' ? Math.max(0, Math.round(+el.value || 0)) : el.dataset.field === 'times' ? Math.max(1, Math.round(+el.value || 1)) : el.value;
   store.saveRoster();
 });
 let renameFrom = null; // a roster team's name before the current edit: its practices are renamed with it
@@ -2103,7 +2106,7 @@ $('#team-body').addEventListener('click', e => {
       settle(clear, req); break;
     }
     case 'req-deny': if (req) settle(fromAttempt ? cloudBackend.removeAttempt : cloudBackend.denyRequest, req); return;
-    case 'addtask': (t.tasks ||= []).push({ id: uid(), title: '', unit: 'reps', target: 0 }); break;
+    case 'addtask': (t.tasks ||= []).push({ id: uid(), title: '', unit: 'reps', target: 0, times: 1 }); break;
     case 'deltask': t.tasks = (t.tasks || []).filter(k => k.id !== btn.closest('[data-tid]').dataset.tid); break;
     case 'output': openClubOutput(t.id, { modal: true }); return;
     case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
@@ -4668,13 +4671,23 @@ async function loadClubWeek() {
   catch (e) { clubState.busy = `✗ Could not load the numbers: ${e?.message || e}`; }
   renderClub();
 }
-const statFor = (playerId, week) => clubState.stats.get(`${playerId}_${week}`) || { playerId, week, values: {} };
-/** Write one number: the stat document for that player and week is rewritten whole, signed by this account. */
-async function logStat(playerId, taskId, value) {
+const statFor = (playerId, week) => clubState.stats.get(`${playerId}_${week}`) || { playerId, week, values: {}, done: {} };
+const unitName = k => TASK_UNITS[k.unit] || k.unit;
+/** "25 shots × 3 a week" / "60 minutes a week" / "minutes". */
+const goalText = k => k.target ? (k.times > 1 ? `${k.target} ${unitName(k)} × ${k.times} a week` : `${k.target} ${unitName(k)} a week`) : unitName(k);
+/** Progress toward the week: sessions done out of `times` when the task repeats, else the amount against the target. */
+function progressOf(k, s) {
+  const total = +s.values?.[k.id] || 0, sessions = +s.done?.[k.id] || 0;
+  if (k.times > 1) return Math.max(Math.min(1, sessions / k.times), k.target ? Math.min(1, total / (k.target * k.times)) : 0);
+  return k.target ? Math.min(1, total / k.target) : 0;
+}
+/** Write one number — the week's total amount (`values`) or sessions done (`done`) for a task: the stat document for that player and week is rewritten whole, signed by this account. */
+async function logStat(playerId, taskId, value, kind = 'total') {
   const cur = statFor(playerId, clubState.week);
-  const values = { ...(cur.values || {}) };
-  if (Number.isFinite(+value) && value !== '') values[taskId] = Math.max(0, Math.round(+value)); else delete values[taskId];
-  const next = { playerId, week: clubState.week, values, by: myEmail(), updatedAt: Date.now() };
+  const values = { ...(cur.values || {}) }, done = { ...(cur.done || {}) };
+  const box = kind === 'done' ? done : values;
+  if (Number.isFinite(+value) && value !== '') box[taskId] = Math.max(0, Math.round(+value)); else delete box[taskId];
+  const next = { playerId, week: clubState.week, values, done, by: myEmail(), updatedAt: Date.now() };
   clubState.stats.set(`${playerId}_${clubState.week}`, next);
   try { await cloudBackend.saveStat(clubState.teamId, next); clubState.busy = `✓ Saved ${stamp(next.updatedAt)}`; }
   catch (e) { clubState.busy = `✗ Not saved: ${e?.message || e}${/permission/i.test(e?.message || '') ? ' — only this player\'s family or a coach may log their numbers' : ''}`; }
@@ -4692,21 +4705,29 @@ function renderClub({ keepFocus = false } = {}) {
   if (clubState.player) { // one player's profile: this week's tasks to fill in, then the recent weeks
     const pl = d.players?.[clubState.player] || { name: 'Player' };
     const s = statFor(clubState.player, week);
-    const rows = tasks.map(k => { const v = s.values?.[k.id]; const pct = k.target ? Math.min(1, (+v || 0) / k.target) : 0; return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${k.target ? `${k.target} ${TASK_UNITS[k.unit] || k.unit} a week` : TASK_UNITS[k.unit] || k.unit}</span>${k.target ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}</div><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" value="${v ?? ''}" placeholder="0"></div>`; }).join('');
+    const rows = tasks.map(k => {
+      const v = s.values?.[k.id], n = s.done?.[k.id], pct = progressOf(k, s);
+      const boxes = `${k.times > 1 ? `<label class="club-in"><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="done" value="${n ?? ''}" placeholder="0"><span>of ${k.times} times</span></label>` : ''}<label class="club-in"><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="total" value="${v ?? ''}" placeholder="0"><span>${escHtml(unitName(k))} in all</span></label>`;
+      return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${k.target || k.times > 1 ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}</div><div class="club-ins">${boxes}</div></div>`;
+    }).join('');
     const weeks = [...new Set([week, ...[...clubState.stats.values()].map(x => x.week)])].sort().reverse().slice(0, 8);
-    const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3><table class="club-table"><thead><tr><th>Week</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}</th>`).join('')}</tr></thead><tbody>${weeks.map(w => { const st = statFor(clubState.player, w); return `<tr><td>${escHtml(weekLabel(w).replace('This week · ', ''))}</td>${tasks.map(k => `<td class="num">${st.values?.[k.id] ?? '·'}${k.target ? `<span class="muted">/${k.target}</span>` : ''}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>` : '';
+    const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3><table class="club-table"><thead><tr><th>Week</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}</th>`).join('')}</tr></thead><tbody>${weeks.map(w => { const st = statFor(clubState.player, w); return `<tr><td>${escHtml(weekLabel(w).replace('This week · ', ''))}</td>${tasks.map(k => `<td class="num">${k.times > 1 ? `${st.done?.[k.id] ?? '·'}<span class="muted">/${k.times}×</span> · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `<span class="muted">/${k.target * (k.times || 1)}</span>` : ''}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>` : '';
     m.innerHTML = `<div class="club-head"><h3>🏒 ${escHtml(pl.name || 'Player')} <span class="muted small">· ${escHtml(d.name)}</span></h3>${nav}<button data-club="close" title="Close">✕</button></div>
       ${tasks.length ? rows : '<p class="muted">No weekly tasks set yet — the coach adds them under the team.</p>'}${note}
-      <p class="muted small">Type the week's numbers as you go — each is saved when you leave the field. The bar fills toward the week's target.</p>${hist}`;
+      <p class="muted small">Type the week's numbers as you go — how many times it was done, and the total — each is saved when you leave the field. The bar fills toward the week's goal.</p>${hist}`;
     return;
   }
   // the whole team: players down, tasks across; coaches and the planner may type in a number for anyone
   const players = Object.entries(d.players || {}).map(([id, p]) => ({ id, name: p.name || 'Player' })).sort((a, b) => a.name.localeCompare(b.name));
   const mayLog = who.persona === 'planner' || (d.coaches || []).includes(myEmail());
-  const cell = (pl, k) => { const v = statFor(pl.id, week).values?.[k.id]; const done = k.target && +v >= k.target; return `<td class="num">${mayLog ? `<input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-player="${pl.id}" value="${v ?? ''}" placeholder="·">` : `<b>${v ?? '·'}</b>`}${k.target ? `<span class="muted small">/${k.target}${done ? ' ✓' : ''}</span>` : ''}</td>`; };
-  const total = pl => { const s = statFor(pl.id, week); const t = tasks.filter(k => k.target); if (!t.length) return ''; const pct = t.reduce((a, k) => a + Math.min(1, (+s.values?.[k.id] || 0) / k.target), 0) / t.length; return `<td class="num">${(pct * 100).toFixed(0)}%<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div></td>`; };
+  const cell = (pl, k) => {
+    const s = statFor(pl.id, week), v = s.values?.[k.id], n = s.done?.[k.id], met = progressOf(k, s) >= 1;
+    const box = (kind, val, ph) => mayLog ? `<input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="${kind}" data-player="${pl.id}" value="${val ?? ''}" placeholder="${ph}">` : `<b>${val ?? '·'}</b>`;
+    return `<td class="num">${k.times > 1 ? `${box('done', n, '×')}<span class="muted small">/${k.times}×</span> ` : ''}${box('total', v, '·')}${k.target ? `<span class="muted small">/${k.target * (k.times || 1)}${met ? ' ✓' : ''}</span>` : ''}</td>`;
+  };
+  const total = pl => { const s = statFor(pl.id, week); const t = tasks.filter(k => k.target || k.times > 1); if (!t.length) return ''; const pct = t.reduce((a, k) => a + progressOf(k, s), 0) / t.length; return `<td class="num">${(pct * 100).toFixed(0)}%<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div></td>`; };
   m.innerHTML = `<div class="club-head"><h3>📊 ${escHtml(d.name)} <span class="muted small">· weekly output</span></h3>${nav}${clubState.mount === $('#present-club-body') ? '<button data-club="close" title="Close">✕</button>' : ''}</div>
-    ${tasks.length && players.length ? `<table class="club-table"><thead><tr><th>Player</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}<br><span class="muted">${TASK_UNITS[k.unit] || k.unit}</span></th>`).join('')}${tasks.some(k => k.target) ? '<th class="num">Week</th>' : ''}</tr></thead><tbody>${players.map(pl => `<tr><td>${escHtml(pl.name)}</td>${tasks.map(k => cell(pl, k)).join('')}${total(pl)}</tr>`).join('')}</tbody></table>` : `<p class="muted">${tasks.length ? 'No players on the roster yet.' : 'No weekly tasks set yet — add them under 👥 Team.'}</p>`}
+    ${tasks.length && players.length ? `<table class="club-table"><thead><tr><th>Player</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}<br><span class="muted">${escHtml(goalText(k))}</span></th>`).join('')}${tasks.some(k => k.target) ? '<th class="num">Week</th>' : ''}</tr></thead><tbody>${players.map(pl => `<tr><td>${escHtml(pl.name)}</td>${tasks.map(k => cell(pl, k)).join('')}${total(pl)}</tr>`).join('')}</tbody></table>` : `<p class="muted">${tasks.length ? 'No players on the roster yet.' : 'No weekly tasks set yet — add them under 👥 Team.'}</p>`}
     ${note}<p class="muted small">${mayLog ? 'Families log their own player\'s numbers from their practice list; you can type a number in for anyone — it saves when you leave the field.' : 'Numbers come from each player\'s family, logged from their practice list.'}</p>`;
 }
 for (const sel of ['#club-output-body', '#present-club-body']) {
@@ -4718,7 +4739,7 @@ for (const sel of ['#club-output-body', '#present-club-body']) {
   });
   $(sel).addEventListener('change', e => {
     const el = e.target; if (!el.matches('[data-log]')) return;
-    logStat(el.dataset.player || clubState.player, el.dataset.log, el.value);
+    logStat(el.dataset.player || clubState.player, el.dataset.log, el.value, el.dataset.kind || 'total');
   });
 }
 $('#club-output-close').addEventListener('click', () => { $('#club-output').hidden = true; });

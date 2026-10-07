@@ -325,17 +325,19 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .club-task .t{flex:1 1 auto;min-width:0}
 .club-task .t b{display:block;font-size:15px}
 .club-task .t span{color:var(--muted);font-size:12.5px}
+.club-ins{display:flex;gap:10px;flex:none}
+.club-in{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.club-in span{color:var(--muted);font-size:11px;white-space:nowrap}
 .club-task input[type=number]{width:84px;font-size:18px;padding:6px 8px;text-align:right}
+.club-table input[type=number]{width:52px}
 .club-hist{margin-top:12px}
 .pl-item.pl-club{width:100%;cursor:pointer;font-family:inherit;text-align:left}
 .ros-task{padding:4px 0}
 .ros-task input[data-field=title]{flex:1 1 320px;min-width:200px;font-size:15px;padding:8px 10px}
 .ros-task select{flex:0 0 auto;width:auto;font-size:13px;padding:7px 6px}
 .ros-task input[type=number]{flex:0 0 96px;width:96px;font-size:15px;padding:8px 8px;text-align:right}
-.ros-task::after{content:'per week';color:var(--muted);font-size:12px;order:3}
-.ros-task input[type=number]{order:2}
-.ros-task select{order:1}
-.ros-task button{order:4}
+.ros-task .ros-x{flex:none;white-space:nowrap}
+.ros-task input[data-field=times]{flex:0 0 64px;width:64px}
 #viewlog-body{flex:1;overflow-y:auto;padding:14px 16px}
 #viewlog-body h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:16px 0 8px;font-weight:600}
 #viewlog-body h3:first-child{margin-top:0}

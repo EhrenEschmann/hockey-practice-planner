@@ -90,7 +90,8 @@ export function clubDoc(t) {
   const players = {};
   for (const pl of t.players || []) players[pl.id] = { name: pl.name || '', contacts: emails((pl.contacts || []).map(k => k.email)) };
   const members = emails([...coach, ...Object.values(players).flatMap(p => p.contacts)]);
-  const tasks = (t.tasks || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)) }));
+  // A task is "`target` `unit` per session, `times` sessions a week" — e.g. 25 shots, 3 times a week.
+  const tasks = (t.tasks || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)), times: Math.max(1, Math.round(+x.times || 1)) }));
   return { id: t.id, name: t.name || '', tasks, coaches: coach, members, players, updatedAt: t.updatedAt || 0 };
 }
 /** The ISO week a date falls in, as 'YYYY-Www' (weeks start on Monday) — the key a week's stats are filed under. */

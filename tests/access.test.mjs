@@ -88,10 +88,10 @@ console.log('access.js: all assertions passed');
 
 // ---- official club teams: the club document, the inbox's club field, and week keys
 import { clubDoc, isoWeek, weekStart, shiftWeek, statId } from '../js/access.js';
-const clubTeam = { id: 't1', name: 'Mites', club: true, coaches: [{ email: 'Head@x.io' }], tasks: [{ id: 'k1', title: ' Shots on goal ', unit: 'shots', target: 100 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60 }, { id: 'k3', title: '', unit: 'min', target: 5 }, { id: 'k4', title: 'Balance', unit: 'nope', target: -3 }],
+const clubTeam = { id: 't1', name: 'Mites', club: true, coaches: [{ email: 'Head@x.io' }], tasks: [{ id: 'k1', title: ' Shots on goal ', unit: 'shots', target: 25, times: 3 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60 }, { id: 'k3', title: '', unit: 'min', target: 5 }, { id: 'k4', title: 'Balance', unit: 'nope', target: -3, times: 0 }],
   players: [{ id: 'pl1', name: 'Sam', contacts: [{ email: 'mom@x.io' }, { email: 'DAD@x.io' }] }, { id: 'pl2', name: 'Alex', contacts: [{ email: 'head@x.io' }] }] };
 const cd = clubDoc(clubTeam);
-assert.deepEqual(cd.tasks, [{ id: 'k1', title: 'Shots on goal', unit: 'shots', target: 100 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60 }, { id: 'k4', title: 'Balance', unit: 'reps', target: 0 }], 'tasks: trimmed, untitled dropped, unit and target sanitised');
+assert.deepEqual(cd.tasks, [{ id: 'k1', title: 'Shots on goal', unit: 'shots', target: 25, times: 3 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60, times: 1 }, { id: 'k4', title: 'Balance', unit: 'reps', target: 0, times: 1 }], 'tasks: trimmed, untitled dropped, unit, target and times sanitised');
 assert.deepEqual(cd.coaches, ['head@x.io']); assert.deepEqual(cd.members.sort(), ['dad@x.io', 'head@x.io', 'mom@x.io']);
 assert.deepEqual(cd.players, { pl1: { name: 'Sam', contacts: ['mom@x.io', 'dad@x.io'] }, pl2: { name: 'Alex', contacts: ['head@x.io'] } });
 assert.equal(clubDoc({ ...clubTeam, club: false }), null, 'only a team flagged as a club gets a document');

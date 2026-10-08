@@ -337,6 +337,26 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .ros-task select{flex:0 0 auto;width:auto;font-size:13px;padding:7px 6px}
 .ros-task input[type=number]{flex:0 0 96px;width:96px;font-size:15px;padding:8px 8px;text-align:right}
 .ros-task .ros-x{flex:none;white-space:nowrap}
+#week-plan{position:fixed;inset:0;z-index:410;display:flex;align-items:center;justify-content:center;background:rgba(15,17,22,.7)}
+#week-plan[hidden]{display:none}
+#week-plan .lib-panel{width:min(960px,96vw);height:auto;max-height:min(92vh,860px)}
+#week-plan-body .ros-media{margin-left:0}
+.cal-nav{display:flex;align-items:center;gap:10px;margin:4px 0 8px}
+.cal-nav button{padding:2px 8px}
+.cal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:6px;margin-bottom:10px}
+.cal-week{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 8px 7px;min-height:58px;border:1px solid var(--border);border-radius:8px;background:var(--panel);text-align:left;font-family:inherit;cursor:pointer}
+.cal-week b{font-size:13px}
+.cal-week span{font-size:11px;color:var(--muted)}
+.cal-week.set{border-color:#34d399}
+.cal-week.set span{color:#34d399}
+.cal-week.empty{border-style:dashed}
+.cal-week.empty:not(.past) span{color:#f59e0b}
+.cal-week.past{opacity:.7}
+.cal-week.now{box-shadow:0 0 0 2px var(--accent) inset}
+.cal-week .cal-month{position:absolute;top:-7px;left:6px;padding:0 4px;background:var(--panel);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.club-hist-week{padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px}
+.club-hist-week b{display:block;font-size:12px;color:var(--muted)}
+.club-hist-week span{margin-right:10px}
 .ros-task button.has-media{color:var(--accent-2)}
 .ros-task button.open{background:var(--accent);border-color:var(--accent);color:#fff}
 .ros-media{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 10px 18px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2)}

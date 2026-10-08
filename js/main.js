@@ -4,7 +4,7 @@ import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, AR
 import { makeSim, facingOf, goalieSquareTo, goalieHome, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, usDate, parseUsDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
-import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus, clubDoc, TASK_UNITS, isoWeek, weekStart, shiftWeek } from './access.js';
+import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus, clubDoc, TASK_UNITS, isoWeek, weekStart, shiftWeek, tasksForWeek, migrateClubTeam } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
@@ -916,6 +916,7 @@ document.addEventListener('keydown', e => {
   if (!editorOn) return;
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#club-output').hidden) { if (e.key === 'Escape') $('#club-output').hidden = true; return; } // the output table sits over the team manager
+  if (!$('#week-plan').hidden) { if (e.key === 'Escape' && !isEditing()) closeWeekPlan(); return; } // so does a week's design pane
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
   if (!$('#settings').hidden) { if (e.key === 'Escape') closeSettings(); return; }
   if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
@@ -1939,6 +1940,7 @@ function currentMgrTeam() {
 
 function openTeamMgr() {
   finishActive();
+  if ((store.roster.teams || []).some(t => t.club && Array.isArray(t.tasks))) { for (const t of store.roster.teams) if (t.club) migrateClubTeam(t, isoWeek()); store.saveRoster(); } // a recurring list from before becomes this week's, and is saved as such
   if (!store.roster.teams.length) {
     store.roster.teams.push({ id: uid(), name: store.practice.team || 'My team', coaches: [], players: [] });
     store.saveRoster();
@@ -2024,19 +2026,9 @@ function renderTeamMgr() {
     <label class="field inline ros-team-name"><span>Team name</span><input data-field="teamname" value="${escHtml(t.name || '')}"></label>
     <label class="check"><input type="checkbox" data-field="club" ${t.club ? 'checked' : ''}> Official club team — weekly tasks, player profiles and each player's weekly output</label>
     ${t.club ? `<h3>Weekly tasks</h3>
-    ${(t.tasks || []).map(k => `
-    <div class="ros-row ros-task" data-tid="${k.id}">
-      <input placeholder="Task — e.g. Shots on goal" data-field="title" value="${escHtml(k.title || '')}">
-      <select data-field="unit" title="What gets counted">${Object.entries(TASK_UNITS).map(([v, l]) => `<option value="${v}" ${(k.unit || 'reps') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <input type="number" min="0" step="1" placeholder="amount" title="How much each time — e.g. 25 shots" data-field="target" value="${+k.target || 0}">
-      <span class="ros-x muted small">×</span>
-      <input type="number" min="1" step="1" placeholder="times" title="How many times a week — e.g. 3" data-field="times" value="${Math.max(1, +k.times || 1)}">
-      <span class="ros-x muted small">a week</span>
-      <button data-act="media" class="${k.audio || k.video || k.videoUrl ? 'has-media' : ''}${taskMediaOpen === k.id ? ' open' : ''}" title="Explain how it's done: record audio, upload or link a video">${k.audio ? '🎙' : ''}${k.video || k.videoUrl ? '🎬' : ''}${k.audio || k.video || k.videoUrl ? '' : '🎙🎬'}</button>
-      <button data-act="deltask" title="Remove task">${icon('x')}</button>
-    </div>${taskMediaOpen === k.id ? taskMediaHTML(t, k) : ''}`).join('') || '<p class="muted small">No tasks yet — add shooting, stickhandling, balance work…</p>'}
-    <div class="row"><button data-act="addtask">＋ Add task</button><button data-act="output" class="primary">📊 Weekly output</button></div>
-    <p class="muted small">Families see their player's profile on their practice list and add the week's numbers; coaches and you see every player's output. The team's players and contacts below decide who may log for whom.</p>` : ''}
+    ${weekCalendarHTML(t)}
+    <div class="row"><button data-act="output" class="primary">📊 Weekly output</button></div>
+    <p class="muted small">Each week gets its own task list — tap a week to set it up. Families see their player's profile on their practice list and add that week's numbers; coaches and you see every player's output. The team's players and contacts below decide who may log for whom.</p>` : ''}
     <h3>Coaches</h3>
     ${coachRows || '<p class="muted small">No coaches yet.</p>'}
     <div class="row"><button data-act="addcoach">＋ Add coach</button></div>
@@ -2120,12 +2112,12 @@ async function taskMediaAction(act, t, k, btn) {
     let rec = null;
     try { rec = await startRecording(); } catch (e) { note(`Microphone not available: ${e?.message || e}`); return; }
     taskRec = { taskId: k.id, rec };
-    renderTeamMgr();
+    rerenderTasks();
     taskRec.timer = setInterval(() => { const b = $('#team-body [data-act="tm-stop"]'); if (b && taskRec) b.textContent = `■ Stop (${((performance.now() - taskRec.rec.since) / 1000).toFixed(0)} s · ${fmtKB(taskRec.rec.size())})`; }, 500);
   } else if (act === 'tm-stop') {
     const r = taskRec; if (!r) return; taskRec = null; clearInterval(r.timer);
     const { blob, mime, secs } = await r.rec.stop();
-    if (!blob.size || secs < 0.5) { renderTeamMgr(); return; }
+    if (!blob.size || secs < 0.5) { rerenderTasks(); return; }
     const at = Date.now();
     if (k.audio) { const old = taskAudioKey(t.id, k); forgetClip(old); idbDelClip(old).catch(() => {}); }
     k.audio = { at, mime, secs, size: blob.size };
@@ -2133,15 +2125,15 @@ async function taskMediaAction(act, t, k, btn) {
     let up = { ok: false, error: 'not signed in' };
     if (cloudBackend?.saveClubMedia && cloudSync?.user) { try { await cloudBackend.saveClubMedia(t.id, `${k.id}_audio`, { mime, data: await blobToBase64(blob), secs, at }); up = { ok: true }; } catch (e) { up = { ok: false, error: e?.message || String(e) }; } }
     k.audio.cloud = up.ok; if (up.error) k.audio.cloudError = up.error;
-    store.saveRoster(); renderTeamMgr();
+    store.saveRoster(); rerenderTasks();
   } else if (act === 'tm-play') {
     if (taskPlaying) { taskPlaying.stop(); return; }
     const entry = await fetchTaskAudio(t.id, k); if (!entry) { note('No copy of the recording here — record it again.'); return; }
-    taskPlaying = playClip(entry, { onEnd: () => { taskPlaying = null; renderTeamMgr(); } }); taskPlaying.taskId = k.id; renderTeamMgr();
+    taskPlaying = playClip(entry, { onEnd: () => { taskPlaying = null; rerenderTasks(); } }); taskPlaying.taskId = k.id; rerenderTasks();
   } else if (act === 'tm-delaudio') {
     const key = taskAudioKey(t.id, k); forgetClip(key); idbDelClip(key).catch(() => {});
     if (cloudBackend?.removeClubMedia && cloudSync?.user) cloudBackend.removeClubMedia(t.id, `${k.id}_audio`).catch(() => {});
-    delete k.audio; store.saveRoster(); renderTeamMgr();
+    delete k.audio; store.saveRoster(); rerenderTasks();
   } else if (act === 'tm-pick') {
     const input = panel.querySelector('.tm-file'); if (!input) return;
     input.onchange = () => { const f = input.files?.[0]; if (f) encodeTaskVideo(t, k, f); };
@@ -2154,14 +2146,14 @@ async function taskMediaAction(act, t, k, btn) {
     const old = k.video;
     const key = taskVideoKey(t.id, k); forgetClip(key); idbDelClip(key).catch(() => {});
     if (old?.cloud && cloudBackend?.removeClubMedia && cloudSync?.user) for (let i = 0; i < (old.chunks || 0); i++) cloudBackend.removeClubMedia(t.id, `${k.id}_video_${old.at}_${i}`).catch(() => {});
-    delete k.video; store.saveRoster(); renderTeamMgr();
+    delete k.video; store.saveRoster(); rerenderTasks();
   }
 }
 /** Re-encode a dropped file small (js/video.js) and store it in chunks under the club — the task keeps the metadata. */
 async function encodeTaskVideo(t, k, file) {
   if (taskVid) return;
-  taskVid = { taskId: k.id, status: 'Starting the encoder…' }; renderTeamMgr();
-  const progress = msg => { taskVid.status = msg; const el = $(`#team-body .ros-media[data-tid="${k.id}"] b`)?.parentElement; if (el && el.textContent.includes('Show it')) el.innerHTML = `<b>🎬 Show it</b> — ${escHtml(msg)}`; };
+  taskVid = { taskId: k.id, status: 'Starting the encoder…' }; rerenderTasks();
+  const progress = msg => { taskVid.status = msg; const el = $(`#week-plan-body .ros-media[data-tid="${k.id}"] b`)?.parentElement; if (el && el.textContent.includes('Show it')) el.innerHTML = `<b>🎬 Show it</b> — ${escHtml(msg)}`; };
   try {
     const out = await transcodeVideo(file, { onProgress: (s, total) => progress(`Encoding… ${s.toFixed(0)}${Number.isFinite(total) ? ` / ${total.toFixed(0)}` : ''} s`) });
     const at = Date.now(), chunks = await blobToChunks(out.blob);
@@ -2180,8 +2172,100 @@ async function encodeTaskVideo(t, k, file) {
     k.video.cloud = up.ok; if (up.error) k.video.cloudError = up.error;
     store.saveRoster();
   } catch (e) { alert(`Encoding failed: ${e?.message || e}`); }
-  taskVid = null; renderTeamMgr();
+  taskVid = null; rerenderTasks();
 }
+
+// ----- weeks: the calendar in the team manager, and the design pane for one week's task list -----
+const CAL_WEEKS = 16; // weeks shown per calendar page
+let calFrom = shiftWeek(isoWeek(), -3); // the first week on the calendar page
+let weekPlanOpen = null; // { teamId, week } while a week's design pane is open
+/** The task array being edited: the open week's (created on demand), else nothing. */
+function weekTasks(t) {
+  if (!weekPlanOpen || weekPlanOpen.teamId !== t.id) return [];
+  const w = (t.weeks ||= {})[weekPlanOpen.week] ||= { tasks: [] };
+  return (w.tasks ||= []);
+}
+const weekRange = w => { const s = weekStart(w); const e = new Date(s); e.setDate(e.getDate() + 6); const f = d => `${d.getMonth() + 1}/${d.getDate()}`; return `${f(s)}–${f(e)}`; };
+function weekCalendarHTML(t) {
+  const now = isoWeek();
+  const cells = [];
+  for (let i = 0, w = calFrom; i < CAL_WEEKS; i++, w = shiftWeek(w, 1)) {
+    const list = (t.weeks?.[w]?.tasks || []).filter(k => String(k.title || '').trim());
+    const s = weekStart(w);
+    const month = i === 0 || s.getDate() <= 7 ? `<span class="cal-month">${s.toLocaleString(undefined, { month: 'short' })}</span>` : '';
+    cells.push(`<button class="cal-week${list.length ? ' set' : ' empty'}${w === now ? ' now' : ''}${w < now ? ' past' : ''}" data-act="cal-week" data-week="${w}" title="${w} · ${weekRange(w)}${list.length ? ` · ${list.length} task${list.length === 1 ? '' : 's'}` : ' · no task list yet'}">
+      ${month}<b>${weekRange(w)}</b><span>${list.length ? `✓ ${list.length} task${list.length === 1 ? '' : 's'}` : 'missing'}</span></button>`);
+  }
+  return `<div class="cal-nav"><button data-act="cal-prev" title="Earlier weeks">◀</button><span class="muted small">${weekRange(calFrom)} → ${weekRange(shiftWeek(calFrom, CAL_WEEKS - 1))}</span><button data-act="cal-next" title="Later weeks">▶</button></div>
+    <div class="cal-grid">${cells.join('')}</div>`;
+}
+function openWeekPlan(teamId, week) {
+  weekPlanOpen = { teamId, week }; taskMediaOpen = null;
+  $('#week-plan').hidden = false;
+  renderWeekPlan();
+}
+function closeWeekPlan() { weekPlanOpen = null; $('#week-plan').hidden = true; renderTeamMgr(); }
+function rerenderTasks() { if (weekPlanOpen) renderWeekPlan(); else renderTeamMgr(); }
+const taskRowHTML = (t, k) => `
+    <div class="ros-row ros-task" data-tid="${k.id}">
+      <input placeholder="Task — e.g. Shots on goal" data-field="title" value="${escHtml(k.title || '')}">
+      <select data-field="unit" title="What gets counted">${Object.entries(TASK_UNITS).map(([v, l]) => `<option value="${v}" ${(k.unit || 'reps') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <input type="number" min="0" step="1" placeholder="amount" title="How much each time — e.g. 25 shots" data-field="target" value="${+k.target || 0}">
+      <span class="ros-x muted small">×</span>
+      <input type="number" min="1" step="1" placeholder="times" title="How many times this week — e.g. 3" data-field="times" value="${Math.max(1, +k.times || 1)}">
+      <span class="ros-x muted small">this week</span>
+      <button data-act="media" class="${k.audio || k.video || k.videoUrl ? 'has-media' : ''}${taskMediaOpen === k.id ? ' open' : ''}" title="Explain how it's done: record audio, upload or link a video">${k.audio ? '🎙' : ''}${k.video || k.videoUrl ? '🎬' : ''}${k.audio || k.video || k.videoUrl ? '' : '🎙🎬'}</button>
+      <button data-act="deltask" title="Remove task">${icon('x')}</button>
+    </div>${taskMediaOpen === k.id ? taskMediaHTML(t, k) : ''}`;
+function renderWeekPlan() {
+  if (!weekPlanOpen) return;
+  const t = (store.roster.teams || []).find(x => x.id === weekPlanOpen.teamId); if (!t) { closeWeekPlan(); return; }
+  const { week } = weekPlanOpen, tasks = weekTasks(t), now = isoWeek();
+  $('#week-plan-title').textContent = `${t.name || 'Team'} · ${weekRange(week)}${week === now ? ' · this week' : week < now ? ' · past' : ''}`;
+  const prev = shiftWeek(week, -1), prevTasks = (t.weeks?.[prev]?.tasks || []).filter(k => String(k.title || '').trim());
+  const copyFrom = Object.keys(t.weeks || {}).filter(w => w !== week && (t.weeks[w]?.tasks || []).some(k => String(k.title || '').trim())).sort().reverse().slice(0, 12);
+  $('#week-plan-body').innerHTML = `
+    ${tasks.map(k => taskRowHTML(t, k)).join('') || `<p class="muted">No tasks for this week yet.${prevTasks.length ? ' Copy last week\'s list and adjust it, or start from scratch.' : ''}</p>`}
+    <div class="row">
+      <button data-act="addtask">＋ Add task</button>
+      ${copyFrom.length ? `<label class="check small">Copy from <select class="week-copy"><option value="">— a week —</option>${copyFrom.map(w => `<option value="${w}">${weekRange(w)}${w === prev ? ' (last week)' : ''}</option>`).join('')}</select></label><button data-act="copyweek" title="Add that week's tasks to this one">Copy</button>` : ''}
+      <span class="spacer"></span>
+      ${tasks.length ? '<button data-act="delweek" class="danger">✕ Clear this week</button>' : ''}
+    </div>
+    <p class="muted small">Amount each time × how many times this week. The 🎙🎬 button on a task attaches a how-to. Copied tasks share their how-to media with the week they came from.</p>`;
+}
+$('#week-plan-close').addEventListener('click', closeWeekPlan);
+$('#week-plan').addEventListener('click', e => { if (e.target === e.currentTarget) closeWeekPlan(); });
+$('#week-plan-prev').addEventListener('click', () => { if (weekPlanOpen) { weekPlanOpen.week = shiftWeek(weekPlanOpen.week, -1); taskMediaOpen = null; renderWeekPlan(); } });
+$('#week-plan-next').addEventListener('click', () => { if (weekPlanOpen) { weekPlanOpen.week = shiftWeek(weekPlanOpen.week, 1); taskMediaOpen = null; renderWeekPlan(); } });
+// The week pane's inputs and buttons behave like the team manager's: same field saving, same task actions.
+$('#week-plan-body').addEventListener('input', e => {
+  const el = e.target, t = (store.roster.teams || []).find(x => x.id === weekPlanOpen?.teamId);
+  if (!t || !el.dataset.field) return;
+  const row = el.closest('[data-tid]'); if (!row) return;
+  const k = weekTasks(t).find(x => x.id === row.dataset.tid); if (!k) return;
+  k[el.dataset.field] = el.dataset.field === 'target' ? Math.max(0, Math.round(+el.value || 0)) : el.dataset.field === 'times' ? Math.max(1, Math.round(+el.value || 1)) : el.value;
+  store.saveRoster();
+});
+$('#week-plan-body').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn?.dataset.act) return;
+  const t = (store.roster.teams || []).find(x => x.id === weekPlanOpen?.teamId); if (!t) return;
+  const tasks = weekTasks(t);
+  switch (btn.dataset.act) {
+    case 'addtask': tasks.push({ id: uid(), title: '', unit: 'reps', target: 0, times: 1 }); break;
+    case 'deltask': t.weeks[weekPlanOpen.week].tasks = tasks.filter(k => k.id !== btn.closest('[data-tid]').dataset.tid); break;
+    case 'delweek': if (!confirm('Clear every task from this week?')) return; delete t.weeks[weekPlanOpen.week]; break;
+    case 'copyweek': {
+      const from = $('#week-plan-body .week-copy')?.value; const src = t.weeks?.[from]?.tasks || []; if (!from || !src.length) return;
+      for (const k of src) if (String(k.title || '').trim()) tasks.push({ ...JSON.parse(JSON.stringify(k)), id: uid() }); // the same how-to media, a fresh task id
+      break;
+    }
+    case 'media': { const id = btn.closest('[data-tid]').dataset.tid; taskMediaOpen = taskMediaOpen === id ? null : id; renderWeekPlan(); return; }
+    case 'tm-rec': case 'tm-stop': case 'tm-play': case 'tm-delaudio': case 'tm-pick': case 'tm-watch': case 'tm-delvideo': taskMediaAction(btn.dataset.act, t, tasks.find(k => k.id === btn.closest('[data-tid]').dataset.tid), btn); return;
+    default: return;
+  }
+  store.saveRoster(); renderWeekPlan();
+});
 $('#btn-team').addEventListener('click', openTeamMgr);
 $('#team-close').addEventListener('click', closeTeamMgr);
 $('#team-select').addEventListener('change', e => { teamSelId = e.target.value; renderTeamMgr(); });
@@ -2208,7 +2292,7 @@ $('#team-body').addEventListener('input', e => {
   if (!row) return;
   const obj = row.dataset.cid ? t.coaches.find(c => c.id === row.dataset.cid)
     : row.dataset.kid ? t.players.flatMap(p => p.contacts || []).find(k => k.id === row.dataset.kid)
-    : row.dataset.tid ? (t.tasks || []).find(k => k.id === row.dataset.tid)
+    : row.dataset.tid ? weekTasks(t).find(k => k.id === row.dataset.tid)
     : t.players.find(p => p.id === row.dataset.pid);
   if (!obj) return;
   obj[el.dataset.field] = el.dataset.field === 'target' ? Math.max(0, Math.round(+el.value || 0)) : el.dataset.field === 'times' ? Math.max(1, Math.round(+el.value || 1)) : el.value;
@@ -2216,7 +2300,7 @@ $('#team-body').addEventListener('input', e => {
 });
 let renameFrom = null; // a roster team's name before the current edit: its practices are renamed with it
 $('#team-body').addEventListener('change', e => {
-  if (e.target.dataset.field === 'club') { const t = currentMgrTeam(); if (!t) return; t.club = e.target.checked; if (t.club && !t.tasks) t.tasks = []; store.saveRoster(); renderTeamMgr(); return; }
+  if (e.target.dataset.field === 'club') { const t = currentMgrTeam(); if (!t) return; t.club = e.target.checked; if (t.club) t.weeks ||= {}; store.saveRoster(); renderTeamMgr(); return; }
   if (e.target.dataset.field !== 'teamname') return;
   const from = renameFrom, to = e.target.value.trim(); renameFrom = null;
   if (from && to && from.trim().toLowerCase() !== to.toLowerCase()) {
@@ -2244,10 +2328,9 @@ $('#team-body').addEventListener('click', e => {
       settle(clear, req); break;
     }
     case 'req-deny': if (req) settle(fromAttempt ? cloudBackend.removeAttempt : cloudBackend.denyRequest, req); return;
-    case 'addtask': (t.tasks ||= []).push({ id: uid(), title: '', unit: 'reps', target: 0, times: 1 }); break;
-    case 'media': { const id = btn.closest('[data-tid]').dataset.tid; taskMediaOpen = taskMediaOpen === id ? null : id; renderTeamMgr(); return; }
-    case 'tm-rec': case 'tm-stop': case 'tm-play': case 'tm-delaudio': case 'tm-pick': case 'tm-watch': case 'tm-delvideo': taskMediaAction(btn.dataset.act, t, (t.tasks || []).find(k => k.id === btn.closest('[data-tid]').dataset.tid), btn); return;
-    case 'deltask': t.tasks = (t.tasks || []).filter(k => k.id !== btn.closest('[data-tid]').dataset.tid); break;
+    case 'cal-prev': calFrom = shiftWeek(calFrom, -CAL_WEEKS); break;
+    case 'cal-next': calFrom = shiftWeek(calFrom, CAL_WEEKS); break;
+    case 'cal-week': openWeekPlan(t.id, btn.dataset.week); return;
     case 'output': openClubOutput(t.id, { modal: true }); return;
     case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
     case 'delcoach': t.coaches = t.coaches.filter(c => c.id !== btn.closest('[data-cid]').dataset.cid); break;
@@ -4841,7 +4924,7 @@ function renderClub({ keepFocus = false } = {}) {
   const nav = `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= isoWeek() ? 'disabled' : ''}>▶</button></div>`;
   const note = `<div class="club-note muted small${/✗/.test(clubState.busy) ? ' warn' : ''}">${escHtml(clubState.busy)}</div>`;
   if (!d) { m.innerHTML = `<div class="club-head"><h3>Club</h3></div>${note}`; return; }
-  const tasks = d.tasks || [];
+  const tasks = tasksForWeek(d, week); // each week has its own list; an unset week is empty
   if (clubState.player) { // one player's profile: this week's tasks to fill in, then the recent weeks
     const pl = d.players?.[clubState.player] || { name: 'Player' };
     const s = statFor(clubState.player, week);
@@ -4852,9 +4935,9 @@ function renderClub({ keepFocus = false } = {}) {
       return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${k.target || k.times > 1 ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}${howto ? `<div class="club-howto">${howto}</div>` : ''}</div><div class="club-ins">${boxes}</div></div><div class="club-media-box" data-task-box="${k.id}"></div>`;
     }).join('');
     const weeks = [...new Set([week, ...[...clubState.stats.values()].map(x => x.week)])].sort().reverse().slice(0, 8);
-    const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3><table class="club-table"><thead><tr><th>Week</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}</th>`).join('')}</tr></thead><tbody>${weeks.map(w => { const st = statFor(clubState.player, w); return `<tr><td>${escHtml(weekLabel(w).replace('This week · ', ''))}</td>${tasks.map(k => `<td class="num">${k.times > 1 ? `${st.done?.[k.id] ?? '·'}<span class="muted">/${k.times}×</span> · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `<span class="muted">/${k.target * (k.times || 1)}</span>` : ''}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>` : '';
+    const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3>${weeks.filter(w => w !== week).map(w => { const st = statFor(clubState.player, w), wt = tasksForWeek(d, w); return `<div class="club-hist-week"><b>${escHtml(weekLabel(w).replace('This week · ', ''))}</b> ${wt.length ? wt.map(k => `<span>${escHtml(k.title)}: ${k.times > 1 ? `${st.done?.[k.id] ?? '·'}/${k.times}× · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `/${k.target * (k.times || 1)}` : ''}</span>`).join(' ') : '<span class="muted">no tasks</span>'}</div>`; }).join('')}</div>` : '';
     m.innerHTML = `<div class="club-head"><h3>🏒 ${escHtml(pl.name || 'Player')} <span class="muted small">· ${escHtml(d.name)}</span></h3>${nav}<button data-club="close" title="Close">✕</button></div>
-      ${tasks.length ? rows : '<p class="muted">No weekly tasks set yet — the coach adds them under the team.</p>'}${note}
+      ${tasks.length ? rows : '<p class="muted">No tasks set for this week.</p>'}${note}
       <p class="muted small">Type the week's numbers as you go — how many times it was done, and the total — each is saved when you leave the field. The bar fills toward the week's goal.</p>${hist}`;
     return;
   }
@@ -4868,7 +4951,7 @@ function renderClub({ keepFocus = false } = {}) {
   };
   const total = pl => { const s = statFor(pl.id, week); const t = tasks.filter(k => k.target || k.times > 1); if (!t.length) return ''; const pct = t.reduce((a, k) => a + progressOf(k, s), 0) / t.length; return `<td class="num">${(pct * 100).toFixed(0)}%<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div></td>`; };
   m.innerHTML = `<div class="club-head"><h3>📊 ${escHtml(d.name)} <span class="muted small">· weekly output</span></h3>${nav}${clubState.mount === $('#present-club-body') ? '<button data-club="close" title="Close">✕</button>' : ''}</div>
-    ${tasks.length && players.length ? `<table class="club-table"><thead><tr><th>Player</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}<br><span class="muted">${escHtml(goalText(k))}</span></th>`).join('')}${tasks.some(k => k.target) ? '<th class="num">Week</th>' : ''}</tr></thead><tbody>${players.map(pl => `<tr><td>${escHtml(pl.name)}</td>${tasks.map(k => cell(pl, k)).join('')}${total(pl)}</tr>`).join('')}</tbody></table>` : `<p class="muted">${tasks.length ? 'No players on the roster yet.' : 'No weekly tasks set yet — add them under 👥 Team.'}</p>`}
+    ${tasks.length && players.length ? `<table class="club-table"><thead><tr><th>Player</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}<br><span class="muted">${escHtml(goalText(k))}</span></th>`).join('')}${tasks.some(k => k.target) ? '<th class="num">Week</th>' : ''}</tr></thead><tbody>${players.map(pl => `<tr><td>${escHtml(pl.name)}</td>${tasks.map(k => cell(pl, k)).join('')}${total(pl)}</tr>`).join('')}</tbody></table>` : `<p class="muted">${tasks.length ? 'No players on the roster yet.' : 'No task list for this week — set one up on the team\'s calendar under 👥 Team.'}</p>`}
     ${note}<p class="muted small">${mayLog ? 'Families log their own player\'s numbers from their practice list; you can type a number in for anyone — it saves when you leave the field.' : 'Numbers come from each player\'s family, logged from their practice list.'}</p>`;
 }
 /** A task's how-to from the profile: play the clip (tap again to stop), or open the video under the task. */

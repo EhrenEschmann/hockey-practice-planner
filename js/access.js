@@ -97,8 +97,19 @@ export function clubDoc(t) {
   const media = x => ({ ...(x.audio?.at ? { audio: { at: +x.audio.at, mime: String(x.audio.mime || ''), secs: +x.audio.secs || 0, size: +x.audio.size || 0 } } : {}),
     ...(x.video?.at ? { video: { at: +x.video.at, mime: String(x.video.mime || ''), secs: +x.video.secs || 0, size: +x.video.size || 0, width: +x.video.width || 0, height: +x.video.height || 0, chunks: +x.video.chunks || 0 } } : {}),
     ...(String(x.videoUrl || '').trim() ? { videoUrl: String(x.videoUrl).trim() } : {}) });
-  const tasks = (t.tasks || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)), times: Math.max(1, Math.round(+x.times || 1)), ...media(x) }));
-  return { id: t.id, name: t.name || '', tasks, coaches: coach, members, players, updatedAt: t.updatedAt || 0 };
+  const clean = list => (list || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)), times: Math.max(1, Math.round(+x.times || 1)), ...media(x) }));
+  // Tasks are set week by week: weeks['YYYY-Www'] = [tasks]. A week with no list is simply absent.
+  const weeks = {};
+  for (const [w, wk] of Object.entries(t.weeks || {})) { if (!/^\d{4}-W\d{2}$/.test(w)) continue; const list = clean(wk?.tasks); if (list.length) weeks[w] = list; }
+  return { id: t.id, name: t.name || '', weeks, coaches: coach, members, players, updatedAt: t.updatedAt || 0 };
+}
+/** The task list a club document holds for a week ([] when none is set). */
+export const tasksForWeek = (doc, week) => doc?.weeks?.[week] || [];
+/** A legacy team that still carries one recurring list: it becomes this week's list. */
+export function migrateClubTeam(t, thisWeek) {
+  if (!t) return t;
+  if (Array.isArray(t.tasks)) { t.weeks ||= {}; if (t.tasks.length && !t.weeks[thisWeek]?.tasks?.length) t.weeks[thisWeek] = { tasks: t.tasks }; delete t.tasks; }
+  return t;
 }
 /** The ISO week a date falls in, as 'YYYY-Www' (weeks start on Monday) — the key a week's stats are filed under. */
 export function isoWeek(d = new Date()) {

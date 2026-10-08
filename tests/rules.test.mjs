@@ -68,6 +68,11 @@ ok('a parent lists their own player\'s weeks', await query(PARENT, 'club/t1', 's
 ok('a parent cannot list the whole team', await query(PARENT, 'club/t1', 'stats', ['week', '2026-W41']), r => r.status !== 200);
 ok('a stranger gets nothing', await get(STRANGER, 'club/t1/stats/pl1_2026-W41'), DENY);
 ok('only the planner deletes numbers', await del(PARENT, 'club/t1/stats/pl1_2026-W41'), DENY);
+ok('the planner stores a task\'s how-to clip', await set(PLANNER, 'club/t1/media/k1_audio', { mime: 'audio/webm', data: 'abc', secs: 3, at: 1 }), ALLOW);
+ok('a family plays a task\'s how-to', await get(PARENT, 'club/t1/media/k1_audio'), ALLOW);
+ok('a coach plays it too', await get(COACH_A, 'club/t1/media/k1_audio'), ALLOW);
+ok('a stranger cannot', await get(STRANGER, 'club/t1/media/k1_audio'), DENY);
+ok('a family cannot replace it', await set(PARENT, 'club/t1/media/k1_audio', { data: 'x' }), DENY);
 ok('the planner reads everything', await get(PLANNER, 'club/t1/stats/pl1_2026-W41'), ALLOW);
 
 console.log('working document, roster, access lists: planner only');

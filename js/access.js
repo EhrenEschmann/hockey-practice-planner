@@ -10,6 +10,7 @@
 //   requests/{uid}                  an access request from someone who is on no roster
 //   club/{teamId}                   an official club team's weekly tasks + who may log for which player (clubDoc below)
 //   club/{teamId}/stats/{pid_week}  one player's numbers for one week — their family (or a coach) writes, coaches read
+//   club/{teamId}/media/{mid}       a task's how-to: `{taskId}_audio` (base64 clip) or `{taskId}_video_{at}_{i}` (chunks) — planner writes, members read
 
 export const STAGES = ['draft', 'coaches', 'team'];
 export const STAGE_LABELS = { draft: 'Draft — only you', coaches: 'Out to coaches for feedback', team: 'Released to the team' };
@@ -91,7 +92,12 @@ export function clubDoc(t) {
   for (const pl of t.players || []) players[pl.id] = { name: pl.name || '', contacts: emails((pl.contacts || []).map(k => k.email)) };
   const members = emails([...coach, ...Object.values(players).flatMap(p => p.contacts)]);
   // A task is "`target` `unit` per session, `times` sessions a week" — e.g. 25 shots, 3 times a week.
-  const tasks = (t.tasks || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)), times: Math.max(1, Math.round(+x.times || 1)) }));
+  // A task may carry how-to media: a recorded explanation (`audio`), an uploaded clip (`video`, in chunks under
+  // club/{teamId}/media) or a link (`videoUrl`). Only the metadata rides here; the bytes are fetched on demand.
+  const media = x => ({ ...(x.audio?.at ? { audio: { at: +x.audio.at, mime: String(x.audio.mime || ''), secs: +x.audio.secs || 0, size: +x.audio.size || 0 } } : {}),
+    ...(x.video?.at ? { video: { at: +x.video.at, mime: String(x.video.mime || ''), secs: +x.video.secs || 0, size: +x.video.size || 0, width: +x.video.width || 0, height: +x.video.height || 0, chunks: +x.video.chunks || 0 } } : {}),
+    ...(String(x.videoUrl || '').trim() ? { videoUrl: String(x.videoUrl).trim() } : {}) });
+  const tasks = (t.tasks || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)), times: Math.max(1, Math.round(+x.times || 1)), ...media(x) }));
   return { id: t.id, name: t.name || '', tasks, coaches: coach, members, players, updatedAt: t.updatedAt || 0 };
 }
 /** The ISO week a date falls in, as 'YYYY-Www' (weeks start on Monday) — the key a week's stats are filed under. */

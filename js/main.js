@@ -2032,8 +2032,9 @@ function renderTeamMgr() {
       <span class="ros-x muted small">×</span>
       <input type="number" min="1" step="1" placeholder="times" title="How many times a week — e.g. 3" data-field="times" value="${Math.max(1, +k.times || 1)}">
       <span class="ros-x muted small">a week</span>
+      <button data-act="media" class="${k.audio || k.video || k.videoUrl ? 'has-media' : ''}${taskMediaOpen === k.id ? ' open' : ''}" title="Explain how it's done: record audio, upload or link a video">${k.audio ? '🎙' : ''}${k.video || k.videoUrl ? '🎬' : ''}${k.audio || k.video || k.videoUrl ? '' : '🎙🎬'}</button>
       <button data-act="deltask" title="Remove task">${icon('x')}</button>
-    </div>`).join('') || '<p class="muted small">No tasks yet — add shooting, stickhandling, balance work…</p>'}
+    </div>${taskMediaOpen === k.id ? taskMediaHTML(t, k) : ''}`).join('') || '<p class="muted small">No tasks yet — add shooting, stickhandling, balance work…</p>'}
     <div class="row"><button data-act="addtask">＋ Add task</button><button data-act="output" class="primary">📊 Weekly output</button></div>
     <p class="muted small">Families see their player's profile on their practice list and add the week's numbers; coaches and you see every player's output. The team's players and contacts below decide who may log for whom.</p>` : ''}
     <h3>Coaches</h3>
@@ -2044,6 +2045,143 @@ function renderTeamMgr() {
     <div class="row"><button data-act="addplayer">＋ Add player</button></div>`;
 }
 
+// ----- a task's how-to media: recorded audio and an uploaded (or linked) video, stored under club/{teamId}/media -----
+let taskMediaOpen = null; // the task whose media panel is open in the team manager
+let taskRec = null;       // an audio recording in progress: { taskId, rec, timer }
+let taskVid = null;       // a video being encoded / uploaded: { taskId, status }
+let taskPlaying = null;   // the how-to clip playing in the editor: { taskId, stop() }
+const taskAudioKey = (teamId, k) => clipKey(`club:${teamId}`, 'task', k.id, k.audio?.at);
+const taskVideoKey = (teamId, k) => clipKey(`clubvideo:${teamId}`, 'task', k.id, k.video?.at);
+/** A task's how-to clip as { url, mime, secs }: this device first, then the club's media document (cached for next time). */
+async function fetchTaskAudio(teamId, k) {
+  if (!k.audio) return null;
+  const key = taskAudioKey(teamId, k);
+  if (clipMem.has(key)) return clipMem.get(key);
+  let rec = null;
+  try { rec = await idbGetClip(key); } catch { rec = null; }
+  if (!rec && cloudBackend?.loadClubMedia && cloudSync?.user) {
+    try { const c = await cloudBackend.loadClubMedia(teamId, `${k.id}_audio`); if (c?.data) { rec = { mime: c.mime, blob: base64ToBlob(c.data, c.mime), secs: c.secs }; idbPutClip(key, rec).catch(() => {}); } } catch { rec = null; }
+  }
+  if (!rec?.blob) return null;
+  const entry = { url: URL.createObjectURL(rec.blob), mime: rec.mime, secs: rec.secs };
+  clipMem.set(key, entry); return entry;
+}
+/** A task's how-to video the same way, from its chunk documents. */
+async function fetchTaskVideo(teamId, k, onChunk = () => {}) {
+  if (!k.video) return null;
+  const key = taskVideoKey(teamId, k);
+  if (clipMem.has(key)) return clipMem.get(key);
+  let rec = null;
+  try { rec = await idbGetClip(key); } catch { rec = null; }
+  if (!rec && cloudBackend?.loadClubMedia && cloudSync?.user) {
+    try {
+      const chunks = [];
+      for (let i = 0; i < (k.video.chunks || 0); i++) { onChunk(i + 1, k.video.chunks); const c = await cloudBackend.loadClubMedia(teamId, `${k.id}_video_${k.video.at}_${i}`); if (!c?.data) throw new Error('missing chunk'); chunks.push(c.data); }
+      rec = { mime: k.video.mime, blob: chunksToBlob(chunks, k.video.mime), secs: k.video.secs };
+      idbPutClip(key, rec).catch(() => {});
+    } catch { rec = null; }
+  }
+  if (!rec?.blob) return null;
+  const entry = { url: URL.createObjectURL(rec.blob), mime: rec.mime, secs: rec.secs };
+  clipMem.set(key, entry); return entry;
+}
+function taskMediaHTML(t, k) {
+  const rec = taskRec?.taskId === k.id, enc = taskVid?.taskId === k.id;
+  const a = k.audio, v = k.video, link = k.videoUrl ? videoEmbed(k.videoUrl) : null;
+  return `<div class="ros-media" data-tid="${k.id}">
+    <div class="ros-media-col">
+      <div class="muted small"><b>🎙 Explain it</b> — ${rec ? '● Recording — describe how to do it' : a ? `recorded · ${(+a.secs || 0).toFixed(1)} s · ${fmtKB(a.size)}${a.cloud === true ? ' · ☁ in the cloud' : a.cloud === false ? ` · <span class="warn">⚠ not in the cloud${a.cloudError ? ` (${escHtml(a.cloudError)})` : ''}</span>` : ''}` : 'no recording yet'}</div>
+      <div class="row">
+        ${rec ? '<button data-act="tm-stop" class="danger">■ Stop</button>' : `<button data-act="tm-rec" ${canRecord() && !taskRec ? '' : 'disabled'}>● ${a ? 'Re-record' : 'Record'}</button>`}
+        <button data-act="tm-play" ${a && !rec ? '' : 'disabled'}>${taskPlaying?.taskId === k.id ? '■ Stop' : '▶ Listen'}</button>
+        <button data-act="tm-delaudio" ${a && !rec ? '' : 'disabled'}>✕ Delete</button>
+      </div>
+    </div>
+    <div class="ros-media-col">
+      <div class="muted small"><b>🎬 Show it</b> — ${enc ? escHtml(taskVid.status) : v ? `video · ${fmtSecs(v.secs)} · ${(v.size / 1048576).toFixed(1)} MB${v.cloud === true ? ' · ☁ in the cloud' : v.cloud === false ? ` · <span class="warn">⚠ not in the cloud${v.cloudError ? ` (${escHtml(v.cloudError)})` : ''}</span>` : ''}` : 'no video yet'}</div>
+      <div class="row">
+        <button data-act="tm-pick" ${enc ? 'disabled' : ''}>📼 ${v ? 'Replace' : 'Upload'} a video</button><input type="file" class="tm-file" accept="video/*,.mov,.mp4,.webm" hidden>
+        <button data-act="tm-watch" ${v && !enc ? '' : 'disabled'}>▶ Watch</button>
+        <button data-act="tm-delvideo" ${v && !enc ? '' : 'disabled'}>✕ Delete</button>
+      </div>
+      <input class="ros-link" data-field="videoUrl" value="${escHtml(k.videoUrl || '')}" placeholder="…or paste a YouTube / Vimeo link" spellcheck="false">
+      ${k.videoUrl && !link ? '<div class="warn small">⚠ Not a link this app can embed — use a YouTube, Vimeo or Cloudflare Stream page link.</div>' : ''}
+      <div class="tm-player"></div>
+    </div>
+    <p class="muted small ros-media-note">Families get these on the player's profile next to the task. Audio is one small document; a video is re-encoded here (640 px, a few MB a minute) and stored in pieces beside the team — a shorter clip is kinder to phones.</p>
+  </div>`;
+}
+async function taskMediaAction(act, t, k, btn) {
+  if (!k) return;
+  const panel = btn.closest('.ros-media');
+  const note = msg => { const el = panel?.querySelector('.ros-media-note'); if (el) el.textContent = msg; };
+  if (act === 'tm-rec') {
+    if (taskRec) return;
+    let rec = null;
+    try { rec = await startRecording(); } catch (e) { note(`Microphone not available: ${e?.message || e}`); return; }
+    taskRec = { taskId: k.id, rec };
+    renderTeamMgr();
+    taskRec.timer = setInterval(() => { const b = $('#team-body [data-act="tm-stop"]'); if (b && taskRec) b.textContent = `■ Stop (${((performance.now() - taskRec.rec.since) / 1000).toFixed(0)} s · ${fmtKB(taskRec.rec.size())})`; }, 500);
+  } else if (act === 'tm-stop') {
+    const r = taskRec; if (!r) return; taskRec = null; clearInterval(r.timer);
+    const { blob, mime, secs } = await r.rec.stop();
+    if (!blob.size || secs < 0.5) { renderTeamMgr(); return; }
+    const at = Date.now();
+    if (k.audio) { const old = taskAudioKey(t.id, k); forgetClip(old); idbDelClip(old).catch(() => {}); }
+    k.audio = { at, mime, secs, size: blob.size };
+    try { await idbPutClip(taskAudioKey(t.id, k), { mime, blob, secs }); } catch { /* the cloud copy still serves this device */ }
+    let up = { ok: false, error: 'not signed in' };
+    if (cloudBackend?.saveClubMedia && cloudSync?.user) { try { await cloudBackend.saveClubMedia(t.id, `${k.id}_audio`, { mime, data: await blobToBase64(blob), secs, at }); up = { ok: true }; } catch (e) { up = { ok: false, error: e?.message || String(e) }; } }
+    k.audio.cloud = up.ok; if (up.error) k.audio.cloudError = up.error;
+    store.saveRoster(); renderTeamMgr();
+  } else if (act === 'tm-play') {
+    if (taskPlaying) { taskPlaying.stop(); return; }
+    const entry = await fetchTaskAudio(t.id, k); if (!entry) { note('No copy of the recording here — record it again.'); return; }
+    taskPlaying = playClip(entry, { onEnd: () => { taskPlaying = null; renderTeamMgr(); } }); taskPlaying.taskId = k.id; renderTeamMgr();
+  } else if (act === 'tm-delaudio') {
+    const key = taskAudioKey(t.id, k); forgetClip(key); idbDelClip(key).catch(() => {});
+    if (cloudBackend?.removeClubMedia && cloudSync?.user) cloudBackend.removeClubMedia(t.id, `${k.id}_audio`).catch(() => {});
+    delete k.audio; store.saveRoster(); renderTeamMgr();
+  } else if (act === 'tm-pick') {
+    const input = panel.querySelector('.tm-file'); if (!input) return;
+    input.onchange = () => { const f = input.files?.[0]; if (f) encodeTaskVideo(t, k, f); };
+    input.click();
+  } else if (act === 'tm-watch') {
+    const box = panel.querySelector('.tm-player'); box.innerHTML = '<span class="muted small">Loading…</span>';
+    const entry = await fetchTaskVideo(t.id, k, (i, n) => { box.textContent = `Downloading ${i} / ${n}…`; });
+    box.innerHTML = entry ? `<div class="video-box"><video src="${entry.url}" controls playsinline autoplay></video></div>` : '<span class="warn small">No copy of this video is available here.</span>';
+  } else if (act === 'tm-delvideo') {
+    const old = k.video;
+    const key = taskVideoKey(t.id, k); forgetClip(key); idbDelClip(key).catch(() => {});
+    if (old?.cloud && cloudBackend?.removeClubMedia && cloudSync?.user) for (let i = 0; i < (old.chunks || 0); i++) cloudBackend.removeClubMedia(t.id, `${k.id}_video_${old.at}_${i}`).catch(() => {});
+    delete k.video; store.saveRoster(); renderTeamMgr();
+  }
+}
+/** Re-encode a dropped file small (js/video.js) and store it in chunks under the club — the task keeps the metadata. */
+async function encodeTaskVideo(t, k, file) {
+  if (taskVid) return;
+  taskVid = { taskId: k.id, status: 'Starting the encoder…' }; renderTeamMgr();
+  const progress = msg => { taskVid.status = msg; const el = $(`#team-body .ros-media[data-tid="${k.id}"] b`)?.parentElement; if (el && el.textContent.includes('Show it')) el.innerHTML = `<b>🎬 Show it</b> — ${escHtml(msg)}`; };
+  try {
+    const out = await transcodeVideo(file, { onProgress: (s, total) => progress(`Encoding… ${s.toFixed(0)}${Number.isFinite(total) ? ` / ${total.toFixed(0)}` : ''} s`) });
+    const at = Date.now(), chunks = await blobToChunks(out.blob);
+    const old = k.video;
+    k.video = { at, mime: out.mime, secs: out.secs, size: out.blob.size, width: out.width, height: out.height, chunks: chunks.length };
+    try { await idbPutClip(taskVideoKey(t.id, k), { mime: out.mime, blob: out.blob, secs: out.secs }); } catch { /* fine */ }
+    let up = { ok: false, error: 'not signed in' };
+    if (cloudBackend?.saveClubMedia && cloudSync?.user) {
+      try {
+        for (let i = 0; i < chunks.length; i++) { progress(`Uploading ${i + 1} / ${chunks.length}…`); await cloudBackend.saveClubMedia(t.id, `${k.id}_video_${at}_${i}`, { i, n: chunks.length, data: chunks[i], mime: out.mime, secs: out.secs, size: out.blob.size, width: out.width, height: out.height, at }); }
+        up = { ok: true };
+        if (old?.cloud) for (let i = 0; i < (old.chunks || 0); i++) cloudBackend.removeClubMedia(t.id, `${k.id}_video_${old.at}_${i}`).catch(() => {});
+      } catch (e) { up = { ok: false, error: e?.message || String(e) }; }
+    }
+    if (old) { const oldKey = clipKey(`clubvideo:${t.id}`, 'task', k.id, old.at); forgetClip(oldKey); idbDelClip(oldKey).catch(() => {}); }
+    k.video.cloud = up.ok; if (up.error) k.video.cloudError = up.error;
+    store.saveRoster();
+  } catch (e) { alert(`Encoding failed: ${e?.message || e}`); }
+  taskVid = null; renderTeamMgr();
+}
 $('#btn-team').addEventListener('click', openTeamMgr);
 $('#team-close').addEventListener('click', closeTeamMgr);
 $('#team-select').addEventListener('change', e => { teamSelId = e.target.value; renderTeamMgr(); });
@@ -2107,6 +2245,8 @@ $('#team-body').addEventListener('click', e => {
     }
     case 'req-deny': if (req) settle(fromAttempt ? cloudBackend.removeAttempt : cloudBackend.denyRequest, req); return;
     case 'addtask': (t.tasks ||= []).push({ id: uid(), title: '', unit: 'reps', target: 0, times: 1 }); break;
+    case 'media': { const id = btn.closest('[data-tid]').dataset.tid; taskMediaOpen = taskMediaOpen === id ? null : id; renderTeamMgr(); return; }
+    case 'tm-rec': case 'tm-stop': case 'tm-play': case 'tm-delaudio': case 'tm-pick': case 'tm-watch': case 'tm-delvideo': taskMediaAction(btn.dataset.act, t, (t.tasks || []).find(k => k.id === btn.closest('[data-tid]').dataset.tid), btn); return;
     case 'deltask': t.tasks = (t.tasks || []).filter(k => k.id !== btn.closest('[data-tid]').dataset.tid); break;
     case 'output': openClubOutput(t.id, { modal: true }); return;
     case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
@@ -4708,7 +4848,8 @@ function renderClub({ keepFocus = false } = {}) {
     const rows = tasks.map(k => {
       const v = s.values?.[k.id], n = s.done?.[k.id], pct = progressOf(k, s);
       const boxes = `${k.times > 1 ? `<label class="club-in"><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="done" value="${n ?? ''}" placeholder="0"><span>of ${k.times} times</span></label>` : ''}<label class="club-in"><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="total" value="${v ?? ''}" placeholder="0"><span>${escHtml(unitName(k))} in all</span></label>`;
-      return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${k.target || k.times > 1 ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}</div><div class="club-ins">${boxes}</div></div>`;
+      const howto = `${k.audio ? `<button class="wp-toggle" data-howto="audio" data-task="${k.id}">${clubState.playing?.taskId === k.id ? '■ Stop' : '🎙 Listen'}</button>` : ''}${k.video ? `<button class="wp-toggle" data-howto="video" data-task="${k.id}">🎬 Watch</button>` : ''}${!k.video && k.videoUrl && videoEmbed(k.videoUrl) ? `<button class="wp-toggle" data-howto="link" data-task="${k.id}">🎬 Watch</button>` : ''}`;
+      return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${k.target || k.times > 1 ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}${howto ? `<div class="club-howto">${howto}</div>` : ''}</div><div class="club-ins">${boxes}</div></div><div class="club-media-box" data-task-box="${k.id}"></div>`;
     }).join('');
     const weeks = [...new Set([week, ...[...clubState.stats.values()].map(x => x.week)])].sort().reverse().slice(0, 8);
     const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3><table class="club-table"><thead><tr><th>Week</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}</th>`).join('')}</tr></thead><tbody>${weeks.map(w => { const st = statFor(clubState.player, w); return `<tr><td>${escHtml(weekLabel(w).replace('This week · ', ''))}</td>${tasks.map(k => `<td class="num">${k.times > 1 ? `${st.done?.[k.id] ?? '·'}<span class="muted">/${k.times}×</span> · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `<span class="muted">/${k.target * (k.times || 1)}</span>` : ''}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>` : '';
@@ -4730,10 +4871,28 @@ function renderClub({ keepFocus = false } = {}) {
     ${tasks.length && players.length ? `<table class="club-table"><thead><tr><th>Player</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}<br><span class="muted">${escHtml(goalText(k))}</span></th>`).join('')}${tasks.some(k => k.target) ? '<th class="num">Week</th>' : ''}</tr></thead><tbody>${players.map(pl => `<tr><td>${escHtml(pl.name)}</td>${tasks.map(k => cell(pl, k)).join('')}${total(pl)}</tr>`).join('')}</tbody></table>` : `<p class="muted">${tasks.length ? 'No players on the roster yet.' : 'No weekly tasks set yet — add them under 👥 Team.'}</p>`}
     ${note}<p class="muted small">${mayLog ? 'Families log their own player\'s numbers from their practice list; you can type a number in for anyone — it saves when you leave the field.' : 'Numbers come from each player\'s family, logged from their practice list.'}</p>`;
 }
+/** A task's how-to from the profile: play the clip (tap again to stop), or open the video under the task. */
+async function playTaskHowto(kind, taskId) {
+  const k = (clubState.doc?.tasks || []).find(x => x.id === taskId); if (!k) return;
+  const box = clubState.mount?.querySelector(`[data-task-box="${taskId}"]`);
+  if (kind === 'audio') {
+    if (clubState.playing) { const was = clubState.playing.taskId; clubState.playing.stop(); if (was === taskId) return; }
+    const entry = await fetchTaskAudio(clubState.teamId, k); if (!entry) { if (box) box.innerHTML = '<span class="warn small">Could not load the recording.</span>'; return; }
+    clubState.playing = playClip(entry, { onEnd: () => { clubState.playing = null; renderClub(); } }); clubState.playing.taskId = taskId; renderClub();
+    return;
+  }
+  if (!box) return;
+  if (box.firstChild) { box.innerHTML = ''; return; } // tap again: close it
+  if (kind === 'link') { box.innerHTML = videoPlayerHTML(videoEmbed(k.videoUrl)); return; }
+  box.innerHTML = '<span class="muted small">Loading…</span>';
+  const entry = await fetchTaskVideo(clubState.teamId, k, (i, n) => { box.textContent = `Downloading ${i} / ${n}…`; });
+  box.innerHTML = entry ? `<div class="video-box"><video src="${entry.url}" controls playsinline autoplay></video></div>` : '<span class="warn small">Could not load the video.</span>';
+}
 for (const sel of ['#club-output-body', '#present-club-body']) {
   $(sel).addEventListener('click', e => {
+    const h = e.target.closest('[data-howto]'); if (h) { playTaskHowto(h.dataset.howto, h.dataset.task); return; }
     const b = e.target.closest('[data-club]'); if (!b) return;
-    if (b.dataset.club === 'close') { $('#present-club').hidden = true; return; }
+    if (b.dataset.club === 'close') { $('#present-club').hidden = true; clubState.playing?.stop(); return; }
     clubState.week = shiftWeek(clubState.week, b.dataset.club === 'prev' ? -1 : 1);
     if (clubState.player) renderClub(); else loadClubWeek();
   });
@@ -4744,7 +4903,7 @@ for (const sel of ['#club-output-body', '#present-club-body']) {
 }
 $('#club-output-close').addEventListener('click', () => { $('#club-output').hidden = true; });
 $('#club-output').addEventListener('click', e => { if (e.target === e.currentTarget) $('#club-output').hidden = true; });
-$('#present-club').addEventListener('click', e => { if (e.target === e.currentTarget) $('#present-club').hidden = true; });
+$('#present-club').addEventListener('click', e => { if (e.target === e.currentTarget) { $('#present-club').hidden = true; clubState.playing?.stop(); } });
 $('#present-home').addEventListener('click', () => { if (['coach', 'team', 'planner'].includes(who.persona) && screen.as) navigate(`/${screen.as === 'coach' ? 'coach' : 'team'}`); });
 
 // ---------- request access: someone signed in who is on no roster ----------

@@ -95,6 +95,10 @@ assert.deepEqual(cd.tasks, [{ id: 'k1', title: 'Shots on goal', unit: 'shots', t
 assert.deepEqual(cd.coaches, ['head@x.io']); assert.deepEqual(cd.members.sort(), ['dad@x.io', 'head@x.io', 'mom@x.io']);
 assert.deepEqual(cd.players, { pl1: { name: 'Sam', contacts: ['mom@x.io', 'dad@x.io'] }, pl2: { name: 'Alex', contacts: ['head@x.io'] } });
 assert.equal(clubDoc({ ...clubTeam, club: false }), null, 'only a team flagged as a club gets a document');
+const withMedia = clubDoc({ ...clubTeam, tasks: [{ id: 'k9', title: 'Toe drag', unit: 'reps', target: 10, audio: { at: 5, mime: 'audio/webm', secs: 12.5, size: 9000, cloud: true, blob: 'never' }, video: { at: 6, mime: 'video/mp4', secs: 20, size: 1e6, width: 640, height: 360, chunks: 2, cloud: true }, videoUrl: ' https://youtu.be/abc123xyz ' }] });
+assert.deepEqual(withMedia.tasks[0].audio, { at: 5, mime: 'audio/webm', secs: 12.5, size: 9000 }, 'audio metadata only, no local fields');
+assert.deepEqual(withMedia.tasks[0].video, { at: 6, mime: 'video/mp4', secs: 20, size: 1e6, width: 640, height: 360, chunks: 2 });
+assert.equal(withMedia.tasks[0].videoUrl, 'https://youtu.be/abc123xyz');
 const clubInbox = inboxDocs({ teams: [clubTeam] }, []);
 assert.deepEqual(clubInbox.get('head@x.io').club, { t1: { name: 'Mites', role: 'coach', players: [{ id: 'pl1', name: 'Sam' }, { id: 'pl2', name: 'Alex' }] } }, 'a coach (even as a parent) gets every player');
 assert.deepEqual(clubInbox.get('mom@x.io').club, { t1: { name: 'Mites', role: 'family', players: [{ id: 'pl1', name: 'Sam' }] } }, 'a family gets its own players');

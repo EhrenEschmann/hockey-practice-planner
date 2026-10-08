@@ -9,6 +9,7 @@ rules_version = '2';
 //   requests/{uid}                  an access request — the requester and the planner only
 //   club/{teamId}                   an official club team: weekly tasks + { coaches, members, players: { id: { contacts } } } — planner writes, members read
 //   club/{teamId}/stats/{pid_week}  a player's numbers for one week — written by that player's family (or a coach), read by coaches and that family
+//   club/{teamId}/media/{mid}       a task's how-to audio / video — planner writes, members read
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -110,6 +111,10 @@ service cloud.firestore {
         allow read: if isPlanner() || clubCoach() || familyOf(resource.data.playerId);
         allow create, update: if wellFormed() && (isPlanner() || clubCoach() || familyOf(request.resource.data.playerId));
         allow delete: if isPlanner();
+      }
+      match /media/{mid} {
+        allow write: if isPlanner();
+        allow read: if isPlanner() || (signedIn() && me() in club().members);
       }
     }
 

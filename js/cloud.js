@@ -89,6 +89,10 @@ export async function firebaseBackend(config) {
     async loadClub(teamId) { const s = await fs.getDoc(fs.doc(db, 'club', teamId)); return s.exists() ? s.data() : null; },
     async saveStat(teamId, data) { await fs.setDoc(fs.doc(db, 'club', teamId, 'stats', statId(data.playerId, data.week)), data); },
     async loadWeekStats(teamId, week) { return (await fs.getDocs(fs.query(fs.collection(db, 'club', teamId, 'stats'), fs.where('week', '==', week)))).docs.map(d => d.data()); },
+    // A task's how-to media: club/{teamId}/media/{taskId}_audio (one base64 document) or {taskId}_video_{at}_{i} (chunks).
+    async saveClubMedia(teamId, id, data) { await fs.setDoc(fs.doc(db, 'club', teamId, 'media', id), data); },
+    async loadClubMedia(teamId, id) { const s = await fs.getDoc(fs.doc(db, 'club', teamId, 'media', id)); return s.exists() ? s.data() : null; },
+    async removeClubMedia(teamId, id) { await fs.deleteDoc(fs.doc(db, 'club', teamId, 'media', id)); },
     async loadPlayerStats(teamId, playerId) { return (await fs.getDocs(fs.query(fs.collection(db, 'club', teamId, 'stats'), fs.where('playerId', '==', playerId)))).docs.map(d => d.data()); },
     async removeInbox(email) { await fs.deleteDoc(fs.doc(db, 'inbox', email)); },
     // Viewer: who am I here (null = on no roster), and one released practice, live.

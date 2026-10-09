@@ -8,7 +8,7 @@ const WANTED = {
   cone: ['cone', 'triangle'], minicone: ['triangle'], tire: ['life-buoy'], puck: ['circle-dot'],
   pile: ['database'], net: ['grid-3x3', 'grid'], obstacle: ['rectangle-horizontal', 'minus'],
   raisedpad: ['layers', 'layers-3'], jumppad: ['mountain'], barricade: ['construction', 'traffic-cone'],
-  zone: ['square-dashed', 'box-select'], text: ['type'], erase: ['eraser'],
+  zone: ['square-dashed', 'box-select'], text: ['type'],
   undo: ['undo-2'], redo: ['redo-2'], play: ['play'], pause: ['pause'], stop: ['square'],
   notes: ['sticky-note'], edit: ['pencil'], up: ['chevron-up'], down: ['chevron-down'],
   copy: ['copy'], x: ['x'], check: ['check'], library: ['library', 'library-big'], calendar: ['calendar'],

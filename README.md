@@ -115,7 +115,7 @@ With a config in place the app is **gated**: a sign-in screen covers the planner
 | V / H | Select / Pan |
 | S, K, G, A | Skater, Coach, Goalie, Arrow |
 | C, M, T, P, L, N, O, R, J | Cone, Small cone, Tire, Puck, Puck pile, Net, Obstacle, Raised pad, Jump pad |
-| B, Z, F, X, E | Barricade, Zone, Focus area, Text, Erase |
+| B, Z, F, X | Barricade, Zone, Focus area, Text |
 | Enter / Esc | Finish current path or polyline |
 | Delete | Remove selection |
 | Arrows (+Shift) | Nudge selection 1 ft (5 ft) |

@@ -271,7 +271,6 @@ const HINTS = {
   zone: 'Drag a box to mark a section / station',
   focusarea: 'Drag a box around the space to work in — or click corner points for any shape (Enter/double-click closes it). The rest of the ice grays out',
   text: 'Click to place a text label',
-  erase: 'Click an object to remove it',
 };
 
 function setTool(t) {
@@ -674,7 +673,6 @@ function onPointerDown(e) {
       renderCanvas();
       break;
     }
-    case 'erase': if (id) deleteObject(id); break;
   }
 }
 
@@ -1008,7 +1006,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', i: 'contact', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', f: 'focusarea', x: 'text', e: 'erase' };
+  const keys = { v: 'select', h: 'pan', s: 'skater', k: 'coach', g: 'goalie', i: 'contact', r: 'raisedpad', j: 'jumppad', l: 'pile', a: 'arrow', c: 'cone', m: 'minicone', t: 'tire', p: 'puck', n: 'net', o: 'obstacle', b: 'barricade', z: 'zone', f: 'focusarea', x: 'text' };
   const t = keys[e.key.toLowerCase()];
   if (t) setTool(t);
 });

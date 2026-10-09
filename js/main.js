@@ -5032,7 +5032,8 @@ $('#present-body').addEventListener('click', e => {
 // ({ playerId, week, values: { taskId: n }, by, updatedAt }). Weeks are ISO weeks, Monday to Sunday.
 /** The club teams this person has a part in: for the planner every club team as a coach; for others from their list document. */
 function clubsFor() {
-  if (who.persona === 'planner') return (store.roster.teams || []).filter(t => t.club).map(t => ({ id: t.id, name: t.name || '', role: 'coach', players: (t.players || []).map(pl => ({ id: pl.id, name: pl.name || '' })) }));
+  // The planner is a coach of every club team; `players` are their own skaters there (the roster's contacts name them), as for anyone else.
+  if (who.persona === 'planner') return (store.roster.teams || []).filter(t => t.club).map(t => ({ id: t.id, name: t.name || '', role: 'coach', players: (t.players || []).filter(pl => pl.id && (pl.contacts || []).some(k => String(k.email || '').trim().toLowerCase() === myEmail())).map(pl => ({ id: pl.id, name: pl.name || '' })) }));
   return Object.entries(viewerInbox?.teams || {}).filter(([, t]) => t.club).map(([id, t]) => ({ id, name: t.name || '', role: t.role === 'coach' ? 'coach' : 'family', players: t.players || [] }));
 }
 const clubRole = teamId => who.persona === 'planner' ? 'coach' : ((who.teams || []).find(t => t.id === teamId)?.role === 'coach' ? 'coach' : 'family');

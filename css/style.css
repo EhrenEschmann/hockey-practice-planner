@@ -73,8 +73,13 @@ input.invalid{border-color:var(--danger)}
 .ctx-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);width:56px;flex:none}
 .ctx-unit{color:var(--muted);font-size:12px}
 .ctx-pos{font-variant-numeric:tabular-nums;color:var(--muted);min-width:32px;text-align:center}
-#plist-wrap,#practice-wrap{position:relative}
+#plist-wrap,#practice-wrap,#team-wrap{position:relative}
 #btn-practices{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#btn-teams{max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#team-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:260px;max-height:min(78vh,700px);overflow-y:auto;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+#team-pop h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+#team-items{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+#team-manage{background:transparent;border-color:transparent;color:var(--accent-2);font-size:12px;padding:2px 4px}
 #plist-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:320px;max-height:min(78vh,700px);overflow-y:auto;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
 #plist-pop h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
 #plist-items{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
@@ -366,7 +371,7 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .tabs button{padding:3px 10px;font-size:12.5px}
 .tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .cal-week.sel{background:#1e2a44;border-color:var(--accent)}
-#team-pick{max-width:170px}
+
 .cal-nav{display:flex;align-items:center;gap:10px;margin:4px 0 8px}
 .cal-nav button{padding:2px 8px}
 .cal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:6px;margin-bottom:10px}

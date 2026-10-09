@@ -16,7 +16,14 @@
 
 <header id="topbar">
   <div class="brand">🏒 Practice Planner</div>
-  <select id="team-pick" title="Which team you are working on — the picker shows that team's practices and games"></select>
+  <div id="team-wrap">
+    <button id="btn-teams" title="Which team you are working on — the practice picker beside it shows that team's practices and games"><span id="team-current"></span> ▾</button>
+    <div id="team-pop" hidden>
+      <h3>Teams</h3>
+      <div id="team-items"></div>
+      <button id="team-manage" class="small-link">＋ Manage teams…</button>
+    </div>
+  </div>
   <div id="plist-wrap">
     <button id="btn-practices" title="Your practices — switch, or create a new one"><span id="plist-current"></span> ▾</button>
     <div id="plist-pop" hidden>

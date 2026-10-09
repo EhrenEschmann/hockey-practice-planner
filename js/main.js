@@ -201,16 +201,21 @@ function setCurrentTeam(id) {
   renderAll();
 }
 function renderTeamPick() {
-  const el = $('#team-pick'), t = currentTeam(), teams = store.roster.teams || [];
-  el.innerHTML = (teams.length ? teams.map(x => `<option value="${x.id}" ${t && x.id === t.id ? 'selected' : ''}>${escHtml(x.name || 'unnamed team')}</option>`).join('') : '<option value="">— no team yet —</option>') + `<option value="${MANAGE_TEAMS}">＋ Manage teams…</option>`;
-  if (t) el.value = t.id;
+  const t = currentTeam(), teams = store.roster.teams || [];
+  $('#team-current').textContent = t ? (t.name || 'unnamed team') : 'No team yet';
+  if (!$('#team-pop').hidden) {
+    const count = x => store.live.filter(p => inTeam(p, x)).length;
+    $('#team-items').innerHTML = teams.map(x => `<button class="plist-item${t && x.id === t.id ? ' current' : ''}" data-team="${x.id}" title="${escHtml(x.name || 'unnamed team')}">
+      <b>${escHtml(x.name || 'unnamed team')}</b><span class="when">${count(x)} practice${count(x) === 1 ? '' : 's'}${x.club ? ' · club' : ''}</span></button>`).join('') || '<p class="muted small">No team yet — add one under Manage teams.</p>';
+  }
   $('#btn-tasks').hidden = !t;
   $('#btn-tasks').title = t ? `${t.name || 'This team'}: weekly tasks — a calendar of weeks, each week's task list and how-tos, and every player's output${t.club ? '' : ' (marks the team as an official club team)'}` : '';
 }
-$('#team-pick').addEventListener('change', e => {
-  if (e.target.value === MANAGE_TEAMS) { renderTeamPick(); openTeamMgr(); return; }
-  setCurrentTeam(e.target.value);
+$('#team-items').addEventListener('click', e => {
+  const b = e.target.closest('[data-team]'); if (!b) return;
+  $('#team-pop').hidden = true; setCurrentTeam(b.dataset.team);
 });
+$('#team-manage').addEventListener('click', () => { $('#team-pop').hidden = true; openTeamMgr(); });
 
 /** Open the practice/drill named in the URL; fall back to the last drill viewed in that practice. */
 function applyRoute() {
@@ -3942,6 +3947,7 @@ const safeName = s => (s || 'practice').replace(/[^\w\-]+/g, '_');
 
 $('#btn-export-json').addEventListener('click', () => { closePopovers(); $('#btn-export').click(); });
 wirePopover('#btn-export-more', '#export-pop', '#btn-export-json');
+wirePopover('#btn-teams', '#team-pop', '#team-manage');
 wirePopover('#btn-account', '#account-pop', '#btn-settings');
 $('#btn-export').addEventListener('click', () => {
   const p = store.practice;

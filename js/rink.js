@@ -1,6 +1,10 @@
 // Rink drawing. Coordinates are feet; origin top-left; NHL-size 200 x 85.
 
 export const RINK = { W: 200, H: 85, R: 28 };
+/** The drawing surfaces: ice (the rink), or dryland — a gym floor / field of the same size, no ice markings. Absent = ice. */
+export const SURFACES = { ice: 'Ice', dryland: 'Dryland' };
+export const surfaceOf = p => (p?.surface === 'dryland' ? 'dryland' : 'ice');
+export const isDryland = p => surfaceOf(p) === 'dryland';
 
 export const VIEWS = {
   full:      { x: -3,   y: -3, w: 206, h: 91 },
@@ -28,6 +32,10 @@ export function nearestBoardPoint(p) {
 export const SVG_STYLE = `
   .ice{fill:#f7fbff}
   .boards{fill:none;stroke:#1d2430;stroke-width:1.2}
+  .floor{fill:#f1e8d6} /* dryland: a gym floor */
+  .floor-grid{stroke:#d9cdb3;stroke-width:.14} /* 10-ft squares for spacing stations */
+  .floor-mid{stroke:#b9a988;stroke-width:.35;stroke-dasharray:2 1.5}
+  .walls{fill:none;stroke:#4a4034;stroke-width:1}
   .goal-line{stroke:#d7263d;stroke-width:.35}
   .blue-line{fill:#1f5fd6}
   .red-line{fill:#d7263d}
@@ -108,7 +116,8 @@ export const SVG_STYLE = `
   .focus .stripe{fill:none;stroke:#f5a623;stroke-width:.4;stroke-dasharray:1.4 1.4;stroke-linecap:butt}
 `;
 
-export function rinkSVG() {
+export function rinkSVG(surface = 'ice') {
+  if (surface === 'dryland') return floorSVG();
   const { W, H, R } = RINK;
   const cx = W / 2, cy = H / 2;
   const p = [];
@@ -139,6 +148,17 @@ export function rinkSVG() {
   p.push(crease(W - 11, cy, -1));
   p.push(`</g>`);
   p.push(`<rect x="0" y="0" width="${W}" height="${H}" rx="${R}" ry="${R}" class="boards"/>`);
+  return p.join('');
+}
+
+/** Dryland: a plain floor the size of the rink, 10-ft grid squares to pace stations by, a dashed centre line, walls. */
+function floorSVG() {
+  const { W, H } = RINK;
+  const p = [`<rect x="0" y="0" width="${W}" height="${H}" rx="2" ry="2" class="floor"/>`];
+  for (let x = 10; x < W; x += 10) p.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" class="floor-grid"/>`);
+  for (let y = 10; y < H; y += 10) p.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" class="floor-grid"/>`);
+  p.push(`<line x1="${W / 2}" y1="0" x2="${W / 2}" y2="${H}" class="floor-mid"/>`);
+  p.push(`<rect x="0" y="0" width="${W}" height="${H}" rx="2" ry="2" class="walls"/>`);
   return p.join('');
 }
 

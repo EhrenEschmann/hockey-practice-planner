@@ -15,7 +15,7 @@ export const isGame = p => p?.kind === 'game';
 export const docNoun = p => (isGame(p) ? 'game' : 'practice');
 export const itemNoun = p => (isGame(p) ? 'coaching point' : 'drill');
 /** The document's name: the team, or for a game "Team vs Opponent". Works on inbox cards too (they carry the same fields). */
-export const docTitle = p => (isGame(p) ? `${p.team || 'Game'} vs ${p.opponent || '?'}` : (p.team || 'Practice'));
+export const docTitle = p => (isGame(p) ? `${p.team || 'Game'} vs ${p.opponent || '?'}` : `${p.team || 'Practice'}${p.surface === 'dryland' ? ' · Dryland' : ''}`);
 
 export function newDrill(n = 1, kind = null) {
   if (kind === 'game') return newCoachingPoint(n);
@@ -38,8 +38,9 @@ export function newCoachingPoint(n = 1) {
   ] };
 }
 
-export function newPractice(team = '', kind = null, opponent = '', teamId = null) {
-  const base = { id: uid(), team, ...(teamId ? { teamId } : {}), date: new Date().toISOString().slice(0, 10), drills: [newDrill(1, kind)] };
+/** `surface` 'dryland' makes an off-ice practice: the same drills and tools on a gym floor instead of a rink. */
+export function newPractice(team = '', kind = null, opponent = '', teamId = null, surface = null) {
+  const base = { id: uid(), team, ...(teamId ? { teamId } : {}), ...(surface === 'dryland' ? { surface } : {}), date: new Date().toISOString().slice(0, 10), drills: [newDrill(1, kind)] };
   return kind === 'game' ? { ...base, kind: 'game', opponent } : base;
 }
 

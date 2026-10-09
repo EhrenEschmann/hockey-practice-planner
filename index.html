@@ -32,7 +32,7 @@
       <button id="plist-more" class="small-link" hidden></button>
       <button id="plist-trash-toggle" class="small-link" hidden title="Deleted practices and games: restore one, or delete it for good"></button>
       <div id="plist-trash" hidden></div>
-      <div class="row plist-new"><button id="plist-create" class="primary">＋ Create practice</button><button id="plist-create-game" title="Game-prep material: coaching points on a half-ice rink (nets and dividing boards in place), shared with the coaches and the team like a practice">＋ Create game</button></div>
+      <div class="row plist-new"><button id="plist-create" class="primary">＋ Create practice</button><button id="plist-create-dryland" title="An off-ice practice: the same drills and tools on a gym floor instead of the rink">＋ Dryland</button><button id="plist-create-game" title="Game-prep material: coaching points on a half-ice rink (nets and dividing boards in place), shared with the coaches and the team like a practice">＋ Create game</button></div>
       <form id="plist-form" hidden>
         <h3 id="plist-form-title">New practice</h3>
         <label class="field"><span>Team</span><select id="new-team" required></select></label>
@@ -53,6 +53,7 @@
       <h3 id="practice-pop-title">Current practice</h3>
       <label class="field"><span>Team</span><select id="practice-team" title="Which team this practice is for — the roster under 👥 Team decides who can open it"></select></label>
       <label class="field" id="practice-opponent-wrap" hidden><span>Opponent</span><input id="practice-opponent" placeholder="Who we play" autocomplete="off"></label>
+      <label class="field" id="practice-surface-wrap"><span>Surface</span><select id="practice-surface" title="Ice: the rink. Dryland: the same drills on a gym floor — no ice markings"><option value="ice">Ice</option><option value="dryland">Dryland</option></select></label>
       <label class="field"><span>Date</span><span class="datewrap">
         <input id="practice-date" type="text" inputmode="numeric" placeholder="MM/DD/YYYY" autocomplete="off">
         <button type="button" class="datepick" title="Pick from calendar" data-icon="calendar"></button>

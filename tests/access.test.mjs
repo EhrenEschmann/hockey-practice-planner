@@ -80,6 +80,7 @@ const hp = { id: 'p1', teamId: 't1', team: 'Mites', date: '2026-09-21', time: '1
 const hh = practiceHeader(hp);
 assert.deepEqual(hh, { id: 'p1', teamId: 't1', team: 'Mites', date: '2026-09-21', time: '17:00', sharedTeam: ['guest@x.io'], updatedAt: 9, stage: 'team', drillNames: ['Warmup', 'Rush'], drillCount: 2, minutes: 25, hasVideo: true }, 'the header: card fields plus a summary of the visible drills, no drills');
 assert.equal(practiceHeader({ ...hp, deleted: 5 }).stage, 'draft', 'a deleted practice reads as a draft');
+assert.equal(practiceHeader({ ...hp, surface: 'dryland' }).surface, 'dryland', 'a dryland practice says so on its header'); assert.equal(practiceFromParts(practiceHeader({ ...hp, surface: 'dryland' }), practiceBody(hp)).surface, 'dryland');
 assert.deepEqual(practiceBody(hp), { id: 'p1', teamId: 't1', drills: hp.drills, updatedAt: 9 });
 assert.deepEqual(practiceFromParts(hh, practiceBody(hp)), { id: 'p1', teamId: 't1', team: 'Mites', date: '2026-09-21', time: '17:00', sharedTeam: ['guest@x.io'], updatedAt: 9, stage: 'team', drills: hp.drills }, 'header + body round-trip to the practice');
 // the practice the calendar points at: the next one (today's counts all day), else the most recent

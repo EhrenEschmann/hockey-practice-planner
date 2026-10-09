@@ -79,11 +79,12 @@ export const DRILL_SCHEMA = obj({
 export const RINK_GUIDE = `Rink coordinates are feet, origin at the top-left corner of a 200 x 85 NHL rink: x runs 0 (left end boards) to 200 (right end boards), y runs 0 (top boards) to 85 (bottom boards). Goal lines are at x = 11 and x = 189 with the nets centred on y = 42.5; a net at x = 11 faces +x (rot 0), one at x = 189 faces −x (rot 180). Blue lines are at x = 75 and 125, the centre red line at x = 100, the centre circle radius 15. End-zone faceoff dots are at (31, 20.5), (31, 64.5), (169, 20.5), (169, 64.5); neutral-zone dots at x = 80 / 120, same y. A goalie standing in a crease is about 2.2 ft in front of the goal line, tucked into the net's mouth (x ≈ 13.2 or 186.8).`;
 
 /** The system prompt: rink facts, what is already on the ice, and how the animation reads the numbers. */
-export function systemPrompt({ game = false, view = null, existing = [] } = {}) {
+export function systemPrompt({ game = false, view = null, existing = [], dryland = false } = {}) {
   const box = view ? `The drawing is set to the view x ${Math.round(view.x)}–${Math.round(view.x + view.w)}, y ${Math.round(view.y)}–${Math.round(view.y + view.h)}; keep everything inside it.` : '';
   const have = existing.length ? `Already on the ice (do not add these again): ${existing.map(o => `${o.type}${o.label ? ` "${o.label}"` : ''} at (${Math.round(o.x)}, ${Math.round(o.y)})${o.type === 'net' ? `, mouth facing ${({ 0: 'right', 90: 'down', 180: 'left', 270: 'up' })[((o.rot || 0) % 360 + 360) % 360] || o.rot + '°'}` : ''}`).join('; ')}.` : '';
   return [
-    `You lay out youth hockey ${game ? 'game coaching points' : 'practice drills'} on a rink diagram for a coach. Answer only with the JSON the schema asks for.`,
+    `You lay out youth hockey ${game ? 'game coaching points' : dryland ? 'dryland (off-ice) practice drills' : 'practice drills'} on a ${dryland ? 'gym-floor' : 'rink'} diagram for a coach. Answer only with the JSON the schema asks for.`,
+    ...(dryland ? ['This is a DRYLAND session on a plain floor the size of a rink (same coordinates, no ice markings, no goal lines or circles): players run, jump and stickhandle with balls or pucks; use cones, tires, pads, nets and zones as stations.'] : []),
     RINK_GUIDE,
     game ? 'This is half-ice game prep for mites (8U): play uses the left half of the rink, x from 0 to 100. Dividing boards run along x = 100, so nothing crosses it. The two nets are already placed (see below): the real one on the goal line at (11, 42.5) facing right and a second at (85, 42.5) facing left.' : '',
     box, have,

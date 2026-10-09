@@ -92,7 +92,7 @@ export const playerDocs = t => new Map((t.players || []).filter(pl => pl.id).map
 export const teamDoc = t => ({ id: t.id, name: t.name || '', club: !!t.club, admins: emails(t.admins || []), updatedAt: t.updatedAt || 0 });
 
 // ---- a practice in the cloud: a light HEADER (lists, calendars, the rules) and a heavy BODY (the drills)
-const HEADER_FIELDS = ['id', 'teamId', 'kind', 'team', 'opponent', 'date', 'time', 'coaches', 'open', 'sharedWith', 'sharedTeam', 'sentCoachesAt', 'sentTeamAt', 'deleted', 'updatedAt', 'owner', 'showPaths'];
+const HEADER_FIELDS = ['id', 'teamId', 'kind', 'surface', 'team', 'opponent', 'date', 'time', 'coaches', 'open', 'sharedWith', 'sharedTeam', 'sentCoachesAt', 'sentTeamAt', 'deleted', 'updatedAt', 'owner', 'showPaths'];
 export function practiceHeader(p) {
   const h = {};
   for (const k of HEADER_FIELDS) if (p[k] !== undefined && p[k] !== null) h[k] = p[k];

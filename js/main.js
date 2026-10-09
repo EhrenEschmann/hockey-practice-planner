@@ -1,4 +1,4 @@
-import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint } from './rink.js';
+import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint, surfaceOf, isDryland } from './rink.js';
 import * as G from './geometry.js';
 import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES, starPoints } from './render.js';
 import { makeSim, facingOf, goalieSquareTo, goalieHome, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
@@ -18,6 +18,15 @@ const isEditing = () => /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?
 // ---------- setup ----------
 const svg = $('#rink');
 svg.innerHTML = `<style>${SVG_STYLE}</style><g id="rink-layer">${rinkSVG()}</g><g id="obj-layer"></g><g id="fx-layer"></g><g id="overlay-layer"></g>`;
+let paintedSurface = 'ice';
+/** The surface under the open practice: the rink, or a dryland floor. Redrawn only when it changes. */
+function paintSurface() {
+  const s = surfaceOf(store.practice);
+  if (s === paintedSurface) return;
+  paintedSurface = s;
+  svg.querySelector('#rink-layer').innerHTML = rinkSVG(s);
+  $('#viewbar [data-view="full"]').textContent = s === 'dryland' ? 'Full floor' : 'Full ice';
+}
 const objLayer = svg.querySelector('#obj-layer');
 const fxLayer = svg.querySelector('#fx-layer');
 const overlay = svg.querySelector('#overlay-layer');
@@ -107,6 +116,7 @@ $('#ps-list').addEventListener('click', e => {
 
 function renderCanvas() {
   const d = drill();
+  paintSurface();
   syncFollowers(d); // shared routes: followers pick up any edit to their leader's path
   renderPSMode(d);
   svg.setAttribute('viewBox', `${d.view.x} ${d.view.y} ${d.view.w} ${d.view.h}`);
@@ -1779,7 +1789,7 @@ function renderPracticeSelect() {
   $('#plist-items').innerHTML = shown.map(p => {
     const st = stageOf(p), fb = openFeedbackFor(p.id).length;
     return `<button class="plist-item${p.id === cur.id ? ' current' : ''}" data-pid="${p.id}" title="${escHtml(practiceLabel(p))}">
-      <b>${escHtml(isGame(p) ? docTitle(p) : (p.team || 'No team'))}</b><span class="when">${escHtml(whenLabel(p))}</span>
+      <b>${escHtml(isGame(p) || isDryland(p) ? docTitle(p) : (p.team || 'No team'))}</b><span class="when">${escHtml(whenLabel(p))}</span>
       ${fb ? `<span class="fb">💬${fb}</span>` : ''}<span class="st ${st}">${stName[st]}</span></button>`;
   }).join('');
   const more = $('#plist-more');
@@ -1792,7 +1802,7 @@ function renderPracticeSelect() {
   tb.textContent = `${plistTrashOpen ? '▾' : '▸'} Deleted (${trash.length})`;
   $('#plist-trash').hidden = !trash.length || !plistTrashOpen;
   $('#plist-trash').innerHTML = trash.map(p => `<div class="plist-item trashed" title="Deleted ${escHtml(stamp(p.deleted))}">
-      <b>${escHtml(isGame(p) ? docTitle(p) : (p.team || 'No team'))}</b><span class="when">${escHtml(whenLabel(p))}</span>
+      <b>${escHtml(isGame(p) || isDryland(p) ? docTitle(p) : (p.team || 'No team'))}</b><span class="when">${escHtml(whenLabel(p))}</span>
       <button class="small-link" data-restore="${p.id}" title="Put it back in the list (sharing resumes where it was)">↶ Restore</button>
       <button class="small-link danger-link" data-purge="${p.id}" title="Delete for good — this cannot be undone">✕ Forever</button></div>`).join('');
 }
@@ -1813,13 +1823,13 @@ $('#plist-items').addEventListener('click', e => {
   $('#plist-pop').hidden = true; renderAll();
 });
 $('#plist-more').addEventListener('click', () => { plistAll = !plistAll; renderPracticeSelect(); });
-let plistKind = null; // what the create form is making: null = a practice, 'game' = game-prep material
+let plistKind = null; // what the create form is making: null = a practice, 'dryland' = an off-ice practice, 'game' = game-prep material
 function openCreateForm(kind) {
   const f = $('#plist-form'), teams = store.roster.teams.map(t => t.name || '').filter(Boolean);
   if (!teams.length) { $('#plist-pop').hidden = true; alert(`Add a team under 👥 Team first — a ${kind === 'game' ? 'game' : 'practice'} belongs to a team, and the roster is who gets it.`); openTeamMgr(); return; }
   plistKind = kind;
   const cur = currentTeam()?.name || store.practice.team || '';
-  $('#plist-form-title').textContent = kind === 'game' ? 'New game' : 'New practice';
+  $('#plist-form-title').textContent = kind === 'game' ? 'New game' : kind === 'dryland' ? 'New dryland practice' : 'New practice';
   $('#new-opponent-wrap').hidden = kind !== 'game'; $('#new-opponent').value = '';
   $('#new-time-label').textContent = kind === 'game' ? 'Game time' : 'Start time';
   $('#new-team').innerHTML = teams.map(n => `<option value="${escHtml(n)}"${n.toLowerCase() === cur.toLowerCase() ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
@@ -1829,6 +1839,7 @@ function openCreateForm(kind) {
 }
 $('#plist-create').addEventListener('click', () => openCreateForm(null));
 $('#plist-create-game').addEventListener('click', () => openCreateForm('game'));
+$('#plist-create-dryland').addEventListener('click', () => openCreateForm('dryland'));
 $('#plist-cancel').addEventListener('click', () => { $('#plist-form').hidden = true; $('.plist-new').hidden = false; });
 $('#plist-form').addEventListener('submit', e => {
   e.preventDefault();
@@ -1838,7 +1849,7 @@ $('#plist-form').addEventListener('submit', e => {
   if (!team || !time) return; // `required` — the browser has already said which
   finishActive();
   const tm = (store.roster.teams || []).find(t => (t.name || '') === team);
-  const p = newPractice(team, plistKind, $('#new-opponent').value.trim(), tm?.id || null); p.date = date; p.time = time;
+  const p = newPractice(team, plistKind === 'game' ? 'game' : null, $('#new-opponent').value.trim(), tm?.id || null, plistKind === 'dryland' ? 'dryland' : null); p.date = date; p.time = time;
   if (tm) setCurrentTeam(tm.id); // a practice for another team moves the editor to that team
   store.addPractice(p);
   sel = null; stopAnim();
@@ -1857,6 +1868,8 @@ function renderPracticeProps() {
   $('#btn-del-practice').textContent = `🗑 Delete this ${docNoun(p)}`;
   $('#btn-dup-practice').textContent = `⧉ Duplicate this ${docNoun(p)}`;
   $('#practice-opponent-wrap').hidden = !game;
+  $('#practice-surface-wrap').hidden = game;
+  if (document.activeElement !== $('#practice-surface')) $('#practice-surface').value = surfaceOf(p);
   for (const [id, key] of PRACTICE_FIELDS) {
     const el = $(id);
     if (el.tagName === 'SELECT') renderTeamSelect();
@@ -1927,6 +1940,10 @@ for (const [id, key] of PRACTICE_FIELDS) {
     store.commitPending(); renderUI();
   });
 }
+$('#practice-surface').addEventListener('change', e => { // ice ↔ dryland: the drills stay, the floor under them changes
+  commit(() => { if (e.target.value === 'dryland') store.practice.surface = 'dryland'; else delete store.practice.surface; });
+  renderAll();
+});
 // The team is picked from the roster (👥 Team), never typed: the roster is what decides who can open the practice.
 const MANAGE_TEAMS = '__manage-teams__';
 
@@ -2944,7 +2961,7 @@ async function aiAction(act, li) {
   try {
     if (!sdkModule) { aiStatus = 'Loading the Claude SDK…'; renderPlan(); sdkModule = await import(SDK_URL); aiStatus = 'Asking Claude…'; renderPlan(); }
     const draft = newDrill(p.drills.length + 1, p.kind); // a game's coaching point brings its nets and divider; Claude is told they are there
-    const sys = systemPrompt({ game: isGame(p), view: draft.view, existing: draft.objects.filter(o => o.type === 'net').map(o => ({ type: o.type, x: o.x, y: o.y, rot: o.rot })) });
+    const sys = systemPrompt({ game: isGame(p), dryland: isDryland(p), view: draft.view, existing: draft.objects.filter(o => o.type === 'net').map(o => ({ type: o.type, x: o.x, y: o.y, rot: o.rot })) });
     const { layout, usage } = await generateLayout({ sdk: sdkModule, apiKey: aiKey, prompt: aiPrompt, system: sys, signal: aiAbort.signal });
     const objects = layoutToObjects(layout, { uid, zoneColors: ZONE_COLORS });
     if (!objects.length) throw new Error('Claude returned an empty layout — try describing the players and where they start');
@@ -3293,7 +3310,7 @@ function libraryCards(filter) {
     if (q && !`${d.name} ${p.team || ''} ${p.date || ''} ${usDate(p.date)}`.toLowerCase().includes(q)) continue;
     const v = d.view || VIEWS.full;
     cards.push(`<div class="lib-card">
-      <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG()}${renderObjects(d, null)}</svg>
+      <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG(surfaceOf(p))}${renderObjects(d, null)}</svg>
       <div class="lib-name" title="${escHtml(d.name)}">${escHtml(d.name)}</div>
       <div class="lib-meta" title="${escHtml(practiceLabel(p))}">${escHtml(practiceLabel(p))} · ${+d.duration || 0} min</div>
       <button data-lib-add="${p.id}:${d.id}">+ Add to this practice</button>
@@ -3989,7 +4006,7 @@ $('#file-import').addEventListener('change', async e => {
 $('#btn-png').addEventListener('click', async () => {
   closePopovers(); // picked from the Export menu
   const d = drill();
-  const svgStr = standaloneSVG(d, rinkSVG(), SVG_STYLE);
+  const svgStr = standaloneSVG(d, rinkSVG(surfaceOf(store.practice)), SVG_STYLE);
   const scale = 3;
   const img = new Image();
   const url = URL.createObjectURL(new Blob([svgStr], { type: 'image/svg+xml' }));
@@ -4084,7 +4101,7 @@ const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? dayDate(date, 
 $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
   const drills = activeDrills(p);
-  const rink = rinkSVG();
+  const rink = rinkSVG(surfaceOf(p));
   const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const startMin = parseStart(p);
   let t = startMin;
@@ -4258,7 +4275,7 @@ function reviewEstimate(p) {
 }
 function presentHTML(p) {
   const fbBtn = key => feedbackOn ? `<button class="pr-fb wp-toggle" data-fb="${key}" title="Only the head coach sees what you write">💬 Feedback</button>` : '';
-  const rink = rinkSVG();
+  const rink = rinkSVG(surfaceOf(p));
   const drills = activeDrills(p);
   const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const startMin = parseStart(p);
@@ -4433,7 +4450,7 @@ function wirePresentAnims(p) {
     presentPSTiles.push(v);
     presentPSObserver.observe(fig);
   }
-  const rinkStr = rinkSVG();
+  const rinkStr = rinkSVG(surfaceOf(p));
   for (const d of p.drills) { if (d.intro) fetchClip(presentOwner, p.id, d); primeNarration(presentOwner, p.id, d); } // intros and voice-overs ready in memory before the first tap
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     wireRules(sec); // rules-only stations have no animation but do have something to say
@@ -4881,7 +4898,7 @@ function watchTeamList(teamId) {
   teamLists.set(teamId, rec);
   rec.unsub = cloudBackend.subscribeTeamPractices(teamId, role === 'coach' ? ['coaches', 'team'] : ['team'], (heads, err) => {
     if (err) { rec.ready = true; rec.error = err; refreshScreen(); return; }
-    rec.items = (heads || []).map(h => ({ pid: h.id, role, stage: h.stage, team: h.team || '', teamId, date: h.date || '', time: h.time || '', drillCount: h.drillCount || 0, minutes: h.minutes || 0, drillNames: h.drillNames || [], ...(h.kind === 'game' ? { kind: 'game', opponent: h.opponent || '' } : {}) }));
+    rec.items = (heads || []).map(h => ({ pid: h.id, role, stage: h.stage, team: h.team || '', teamId, date: h.date || '', time: h.time || '', drillCount: h.drillCount || 0, minutes: h.minutes || 0, drillNames: h.drillNames || [], ...(h.surface === 'dryland' ? { surface: 'dryland' } : {}), ...(h.kind === 'game' ? { kind: 'game', opponent: h.opponent || '' } : {}) }));
     rec.ready = true; rec.error = null;
     try { localStorage.setItem(teamListKey(teamId), JSON.stringify(rec.items)); } catch { /* fine */ } // the list from the last visit: the rink has no signal
     refreshScreen();
@@ -4891,7 +4908,7 @@ function watchTeamList(teamId) {
 function practiceItems(as) {
   if (who.persona === 'planner') {
     return store.live.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
-      .map(p => { const ds = (p.drills || []).filter(d => !d.hidden); return { pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, drillCount: ds.length, minutes: ds.reduce((a, d) => a + (+d.duration || 0), 0), drillNames: ds.map(d => d.name || ''), ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }; });
+      .map(p => { const ds = (p.drills || []).filter(d => !d.hidden); return { pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, drillCount: ds.length, minutes: ds.reduce((a, d) => a + (+d.duration || 0), 0), drillNames: ds.map(d => d.name || ''), ...(isDryland(p) ? { surface: 'dryland' } : {}), ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }; });
   }
   return [...teamLists.values()].flatMap(r => r.items);
 }
@@ -4920,7 +4937,7 @@ function paintWhen() {
     const listed = items.some(x => x.pid === p.id);
     const today = todayISO();
     const teams = new Set(items.map(x => String(x.team || '').trim().toLowerCase()));
-    const say = x => `${teams.size > 1 || (x.kind === 'game') ? `${docTitle(x)} · ` : ''}${whenLabel(x)}`;
+    const say = x => `${teams.size > 1 || x.kind === 'game' || x.surface === 'dryland' ? `${docTitle(x)} · ` : ''}${whenLabel(x)}`;
     bar.hidden = false;
     $('#when-team').textContent = docTitle(p);
     const opt = (x, extra = '') => `<option value="${escHtml(itemPath(presentAudience, x))}"${x.pid === p.id ? ' selected' : ''}>${escHtml(say(x))}${x.date === today ? ' · today' : ''}${extra}</option>`;
@@ -4992,7 +5009,7 @@ function showList(r) {
     const rest = practices.filter(x => x !== focus);
     const upcoming = rest.filter(x => (x.date || '') >= today).sort(byCalendar), past = rest.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
     const hero = focus ? `<a class="pl-item pl-hero" href="${itemPath(as, focus)}" data-nav>
-      <small>${focus.date === today ? 'Today’s practice' : (focus.date || '') > today ? 'Next practice' : 'Last practice'}</small>
+      <small>${focus.date === today ? 'Today’s' : (focus.date || '') > today ? 'Next' : 'Last'} ${focus.surface === 'dryland' ? 'dryland' : 'practice'}</small>
       <b>${escHtml(whenLabel(focus, true))}</b>
       <span>${focus.drillCount || 0} drill${focus.drillCount === 1 ? '' : 's'}${focus.minutes ? ` · ${focus.minutes} min` : ''}</span>
       <em>Open ▶</em></a>` : '';

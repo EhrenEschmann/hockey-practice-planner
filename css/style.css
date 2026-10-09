@@ -114,6 +114,10 @@ input.invalid{border-color:var(--danger)}
 .ai-status{margin-top:6px;line-height:1.4}
 #practice-pop h3{margin:14px 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
 #practice-pop h3:first-child{margin-top:0}
+.danger-zone{margin-top:14px;padding:10px 12px;border:1px solid rgba(248,113,113,.45);border-radius:8px;background:rgba(248,113,113,.06)}
+.danger-zone h3{margin:0 0 8px;color:#f87171}
+.danger-zone button{width:100%}
+.danger-zone p{margin:6px 0 0;line-height:1.35}
 #practice-pop .row{display:flex;gap:6px;margin-bottom:4px}
 #practice-pop .row button{flex:1;font-size:12px;padding:4px 6px}
 #practice-pop .field input{width:100%}

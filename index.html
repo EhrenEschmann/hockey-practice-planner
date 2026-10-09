@@ -77,13 +77,17 @@
       </div>
       <h3>Who has looked</h3>
       <button id="btn-views" title="The audit log: every drill view and play by the coaches and families you shared this practice with, with names and times">👁 Views log</button>
+      <div class="danger-zone">
+        <h3>Danger zone</h3>
+        <button id="btn-del-practice" title="Delete — moves it to Deleted in the picker, where it can be restored" class="danger">🗑 Delete this practice</button>
+        <p class="muted small" id="del-note">It goes to Deleted at the bottom of the picker, where it can be restored or removed for good. Coaches and the team lose access at once.</p>
+      </div>
     </div>
   </div>
   <button id="btn-team" title="Manage your team: coaches with emails, players with parent / grandparent contacts — the roster decides who can open released practices. Access requests show up here.">👥 Team</button>
   <button id="btn-tasks" title="This team's weekly tasks: a calendar of weeks, each week's task list and how-tos, and every player's output" hidden>📅 Tasks</button>
   <button id="btn-feedback" title="Feedback the coaches left on this practice — only you can read it">💬</button>
   <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
-  <button id="btn-del-practice" title="Delete — moves it to Deleted in the picker, where it can be restored" class="danger">Delete</button>
   <div class="spacer"></div>
   <button id="btn-undo" title="Undo (Ctrl+Z)"><span data-icon="undo"></span> Undo</button>
   <button id="btn-redo" title="Redo (Ctrl+Y)"><span data-icon="redo"></span> Redo</button>

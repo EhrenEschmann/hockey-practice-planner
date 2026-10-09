@@ -1842,6 +1842,7 @@ function renderPracticeProps() {
   $('#btn-new-practice').textContent = game ? '✎ Game' : '✎ Practice';
   $('#btn-new-practice').title = `Details of the ${docNoun(p)} that is open: team, ${game ? 'opponent, ' : ''}date, time, coaches, sharing`;
   $('#practice-pop-title').textContent = game ? 'Current game' : 'Current practice';
+  $('#btn-del-practice').textContent = `🗑 Delete this ${docNoun(p)}`;
   $('#practice-opponent-wrap').hidden = !game;
   for (const [id, key] of PRACTICE_FIELDS) {
     const el = $(id);

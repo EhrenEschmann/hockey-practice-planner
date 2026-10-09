@@ -15,6 +15,7 @@ const WANTED = {
   prev: ['chevron-left'], next: ['chevron-right'], rotate: ['rotate-cw'], fullscreen: ['maximize'], unfullscreen: ['minimize'],
   list: ['rows-3', 'list'], focus: ['smartphone'], sync: ['refresh-cw'], eye: ['eye'], eyeoff: ['eye-off'], focusarea: ['scan', 'focus'],
   account: ['circle-user', 'user'], signout: ['log-out'], mic: ['mic'], video: ['video', 'clapperboard'],
+  qp: ['pin'], // the Quick place badge on a tool
 };
 
 // Hand-drawn, in Lucide's own grammar (24×24, 2px round strokes): what the tool puts on the ice, as the rink draws it.

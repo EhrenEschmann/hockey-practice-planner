@@ -150,12 +150,11 @@
     <button class="tool" data-tool="select"    title="Select / move (V)&#10;Drag objects; drag waypoint handles to reshape a path (double-click the path line to add a waypoint, double-click a handle to remove it).&#10;Arrow keys nudge (Shift = 5 ft) · Delete removes."><span class="ico" data-icon="select"></span><span>Select</span></button>
     <button class="tool" data-tool="pan"       title="Pan (H) — or hold Space / middle mouse, or just scroll (two fingers on a trackpad)&#10;Pinch, or Ctrl/⌘ + scroll, zooms around the cursor; + / − and Fit all are on the view bar."><span class="ico" data-icon="pan"></span><span>Pan</span></button>
     <div class="tool-sep"></div>
-    <button class="tool" data-tool="skater"    title="Skater + path (S) — or drag onto the ice&#10;Click to place, keep clicking to add waypoints (or drag to draw freehand). Enter/Esc finishes. Click an existing skater to extend their path.&#10;Delay a start in their panel: &quot;starts when #1 reaches…&quot; a waypoint."><span class="ico" data-icon="skater"></span><span>Skater</span></button>
+    <button class="tool" data-tool="skater"    title="Skater + path (S) — or drag onto the ice&#10;Click to place, keep clicking to add waypoints (or drag to draw freehand). Enter/Esc finishes. Click an existing skater to extend their path.&#10;Delay a start in their panel: &quot;starts when #1 reaches…&quot; a waypoint."><span class="ico" data-icon="skater"></span><span>Skater</span><span class="qp" data-qp="skater" role="switch" aria-checked="false" title="Quick place: keep the Skater tool selected — every click on open ice places another skater (the one before is finished as it stands). Click a skater to draw its path. Press V or click Select when you’re done."><span data-icon="qp"></span></span></button><input type="checkbox" id="skater-keep" hidden>
     <div class="side-switch" title="New skaters: O = offense (blue), D = defense (red), numbered per side.&#10;Change a skater's side (and colour) later in its Selection panel.">
       <button data-side="O" class="active" title="New skaters are offensive players (blue)"><span class="dot" style="background:#1e56d6"></span>O</button>
       <button data-side="D" title="New skaters are defensive players (red)"><span class="dot" style="background:#d62828"></span>D</button>
     </div>
-    <label class="tool-opt" title="Keep the Skater tool selected: every click on open ice places another skater (the one before is finished as it stands). Click a skater to draw its path. Press V or click Select when you’re done."><input type="checkbox" id="skater-keep"> Skaters: keep placing</label>
     <button class="tool" data-tool="coach"     title="Coach (K) — click to place, or drag onto the ice&#10;A diamond marker with a label. Coaches can receive passes and pass or shoot: use the Puck tool on a coach (or drop a puck on them) and set their Facing.&#10;They can move too — use the Skater tool on a coach to give them a path."><span class="ico" data-icon="coach"></span><span>Coach</span></button>
     <button class="tool" data-tool="goalie"    title="Goalie (G) — click or drop near a net to put a goalie in its crease, facing out&#10;Or select a net and press Add goalie."><span class="ico" data-icon="goalie"></span><span>Goalie</span></button>
     <button class="tool" data-tool="contact"   title="Contact point (I) — click where two skaters should collide; their timing syncs so they meet there&#10;Pick who gets the worse of it on the animation bar: they stagger, slow down and lose the puck to the winner."><span class="ico" data-icon="contact"></span><span>Contact</span></button>
@@ -163,9 +162,8 @@
     <div class="tool-sep"></div>
     <button class="tool" data-tool="cone"      title="Cone (C) — or drag onto the ice"><span class="ico" data-icon="cone"></span><span>Cone</span></button>
     <button class="tool" data-tool="minicone"  title="Small cone (M) — click for one, drag to lay a row; skaters stickhandle the puck through them"><span class="ico" data-icon="minicone"></span><span>Small cone</span></button>
-    <button class="tool" data-tool="tire"      title="Tire (T) — or drag onto the ice"><span class="ico" data-icon="tire"></span><span>Tire</span></button>
+    <button class="tool" data-tool="tire"      title="Tire (T) — or drag onto the ice"><span class="ico" data-icon="tire"></span><span>Tire</span><span class="qp" data-qp="tire" role="switch" aria-checked="false" title="Quick place: keep the Tire tool selected after each tire, so a row of tires takes one click each. Press V or click Select when you’re done."><span data-icon="qp"></span></span></button><input type="checkbox" id="tire-keep" hidden>
     <button class="tool" data-tool="puck"      title="Puck (P) — click a skater or coach to give them a puck, a pile to take one, or open ice for a loose puck&#10;Select a puck to add passes &amp; shots: Mark on path sets where it happens (drag the P/S marker); a pass can be timed by the receiver, or banked off the boards (drag the B marker)."><span class="ico" data-icon="puck"></span><span>Puck</span></button>
-    <label class="tool-opt" title="Keep the Tire tool selected after each tire is placed, so a row of tires takes one click each. Press V or click Select when you’re done."><input type="checkbox" id="tire-keep"> Tires: keep placing</label>
     <button class="tool" data-tool="pile"      title="Puck pile (L) — a heap of pucks skaters take from; click to place or drag onto the ice&#10;In a skater's panel press Take puck from pile — they pick one up where their path passes the pile (or use Give a puck to… on the pile)."><span class="ico" data-icon="pile"></span><span>Puck pile</span></button>
     <button class="tool" data-tool="net"       title="Net (N) — or drag onto the ice"><span class="ico" data-icon="net"></span><span>Net</span></button>
     <button class="tool" data-tool="obstacle"  title="Obstacle / pad — drag a box (O)"><span class="ico" data-icon="obstacle"></span><span>Obstacle</span></button>
@@ -280,8 +278,8 @@
       </section>
       <section class="set-sec">
         <h3>✏️ Editor <span class="muted small">— this device</span></h3>
-        <label class="check"><input type="checkbox" data-set="tire-keep"> Tires: keep placing after each one</label>
-        <label class="check"><input type="checkbox" data-set="skater-keep"> Skaters: keep placing after each one</label>
+        <label class="check"><input type="checkbox" data-set="tire-keep"> Quick place tires (the tool stays selected after each one)</label>
+        <label class="check"><input type="checkbox" data-set="skater-keep"> Quick place skaters (the tool stays selected after each one)</label>
         <label class="check"><input type="checkbox" data-set="plan-pin"> Keep the Drills pane pinned open</label>
         <label class="check"><input type="checkbox" data-set="video-wide"> Hide the rink while a 🎬 video row is open</label>
         <label class="check"><input type="checkbox" data-set="voice"> 🔊 Voice: play intros, voice-overs and spoken cues</label>

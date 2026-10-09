@@ -464,14 +464,20 @@ function select(id) { sel = id; renderCanvas(); renderProps(); }
 // skater's path is drawn by clicking the skater itself, which extends its path as it always has.
 const keepTool = { tire: false, skater: false };
 let skaterExtending = false; // the active skater was clicked to extend its path (so, with keep placing on, clicks add waypoints)
+// The switch is a pin badge on the tool's own button (plus a hidden checkbox the Settings panel mirrors).
 for (const [t, box] of [['tire', '#tire-keep'], ['skater', '#skater-keep']]) {
   try { keepTool[t] = localStorage.getItem(`hpp.keep.${t}`) === '1'; } catch { /* fine */ }
-  $(box).checked = keepTool[t];
+  const btn = $(`#toolbar .tool[data-tool="${t}"]`), badge = btn.querySelector('.qp');
+  const paint = () => { btn.classList.toggle('qp-on', keepTool[t]); badge.setAttribute('aria-checked', String(keepTool[t])); };
+  $(box).checked = keepTool[t]; paint();
   $(box).addEventListener('change', e => {
-    keepTool[t] = e.target.checked;
+    keepTool[t] = e.target.checked; paint();
     try { localStorage.setItem(`hpp.keep.${t}`, keepTool[t] ? '1' : '0'); } catch { /* fine */ }
     if (tool === t) $('#hint').textContent = HINTS[t] + (keepTool[t] ? ' · keeps placing until you press V' : '');
   });
+  // The badge toggles without selecting the tool or starting a drag from the palette.
+  badge.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); });
+  badge.addEventListener('click', e => { e.stopPropagation(); $(box).checked = !$(box).checked; $(box).dispatchEvent(new Event('change')); });
 }
 function placed(id) {
   select(id);

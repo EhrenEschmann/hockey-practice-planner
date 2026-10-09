@@ -64,9 +64,16 @@ input.invalid{border-color:var(--danger)}
 #toolbar .tool:hover{background:var(--panel-2)}
 #toolbar .tool.active{background:var(--accent);border-color:var(--accent);color:#fff}
 #toolbar .tool-sep{grid-column:1/-1;height:1px;background:var(--border);margin:4px 6px}
-#toolbar .tool-opt{grid-column:1/-1;display:flex;align-items:center;gap:4px;margin:0 4px 2px;padding:2px 4px;font-size:10.5px;color:var(--muted);cursor:pointer;white-space:nowrap}
-#toolbar .tool-opt input{margin:0;width:12px;height:12px}
-#toolbar .tool-opt:hover{color:var(--text)}
+/* Quick place: a pin badge on the corner of the Skater and Tire tools — lit when the tool stays selected after each placement */
+#toolbar .tool{position:relative}
+#toolbar .tool .qp{position:absolute;top:2px;right:2px;width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--panel-2);border:1px solid var(--border);color:var(--muted);opacity:.6;cursor:pointer;transition:opacity .15s,background .15s,color .15s}
+#toolbar .tool .qp .lucide{width:9px;height:9px;display:block}
+#toolbar .tool:hover .qp{opacity:1}
+#toolbar .tool .qp:hover{color:var(--text);border-color:var(--muted)}
+#toolbar .tool.qp-on .qp{opacity:1;background:var(--accent);border-color:var(--accent);color:#fff}
+#toolbar .tool.active .qp{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.35);color:#fff}
+#toolbar .tool.active.qp-on .qp{background:#fff;border-color:#fff;color:var(--accent)}
+#drag-ghost .qp{display:none}
 
 #stage{display:flex;flex-direction:column;min-width:0;min-height:0}
 .pin-row{display:flex;align-items:center;gap:5px}

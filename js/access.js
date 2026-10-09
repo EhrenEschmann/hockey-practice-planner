@@ -190,6 +190,7 @@ export function calendarFocus(items, today) {
 }
 
 /** Where a URL points: { view: 'root' | 'editor' | 'coach' | 'team' | 'request' | 'unknown', pid, did, legacy }. */
+export const LIST_TABS = ['practice', 'tasks', 'games']; // the team home's tabs; 'practice' is the bare list path
 export function parseRoute({ pathname = '/', hash = '' } = {}) {
   let h = hash;
   try { h = decodeURIComponent(h); } catch { /* a stray % — match it as it is */ }
@@ -205,13 +206,15 @@ export function parseRoute({ pathname = '/', hash = '' } = {}) {
   if (a === 'editor' && seg.length <= 3) return { view: 'editor', pid: b || null, did: c || null };
   // /coach/{teamId}/{pid}; /coach/{teamId} is a team's list. A lone /coach/{x} is either (older links named the practice
   // alone): `ambiguous` — resolveRoute tells a team id from a practice id by what the person is on.
+  // /coach/{teamId}/tasks and /games are the team home's other tabs (the first is the practice list).
+  if ((a === 'coach' || a === 'team') && seg.length === 3 && LIST_TABS.includes(c)) return { view: a, teamId: b, pid: null, did: null, tab: c };
   if ((a === 'coach' || a === 'team') && seg.length <= 3) return c ? { view: a, teamId: b, pid: c, did: null } : { view: a, teamId: null, pid: b || null, did: null, ambiguous: !!b };
   if (a === 'request-access' && seg.length === 1) return { view: 'request', pid: null, did: null };
   return { view: 'unknown', pid: null, did: null };
 }
-export function routePath({ view, teamId = null, pid, did }) {
+export function routePath({ view, teamId = null, pid, did, tab = null }) {
   if (view === 'editor') return `/editor${pid ? `/${pid}${did ? `/${did}` : ''}` : ''}`;
-  if (view === 'coach' || view === 'team') return `/${view}${teamId ? `/${teamId}` : ''}${pid ? `/${pid}` : ''}`;
+  if (view === 'coach' || view === 'team') return `/${view}${teamId ? `/${teamId}` : ''}${pid ? `/${pid}` : teamId && tab && tab !== 'practice' ? `/${tab}` : ''}`;
   if (view === 'request') return '/request-access';
   return '/';
 }
@@ -245,7 +248,7 @@ export function resolveRoute(route, who) {
   // anyone signed in watch (probe: a refusal sends them on to request access); anything else → request access.
   if (persona === 'unknown') return (view === 'coach' || view === 'team') && pid ? { screen: 'practice', as: 'team', teamId, pid, probe: true } : view === 'request' ? { screen: 'request' } : { go: '/request-access' };
   // A list needs a team: one team → straight to it; several → choose; none → an empty list.
-  const listFor = as => teamId ? { screen: 'list', as, teamId } : teams.length === 1 ? { go: routePath({ view: as, teamId: teams[0].id }) } : teams.length ? { screen: 'teams', as } : { screen: 'list', as, teamId: null };
+  const listFor = as => teamId ? { screen: 'list', as, teamId, tab: route.tab || 'practice' } : teams.length === 1 ? { go: routePath({ view: as, teamId: teams[0].id, tab: route.tab }) } : teams.length ? { screen: 'teams', as } : { screen: 'list', as, teamId: null, tab: 'practice' };
   if (persona === 'planner') {
     if (view === 'editor') return { screen: 'editor', pid, did: route.did };
     if (view === 'coach' || view === 'team') return pid ? { screen: 'practice', as: view, teamId, pid } : listFor(view);
@@ -254,7 +257,7 @@ export function resolveRoute(route, who) {
   // coach or team
   const home = `/${persona}`;
   if (view === 'root' || view === 'editor' || view === 'request') return { go: home };
-  if (view === 'coach' && persona === 'team') return { go: routePath({ view: 'team', teamId, pid }) };
+  if (view === 'coach' && persona === 'team') return { go: routePath({ view: 'team', teamId, pid, tab: route.tab }) };
   if (!pid) return listFor(view);
   const role = teams.find(t => t.id === teamId)?.role; // their role on that team: 'coach' or 'family' (a coach of one team can be a parent on another)
   if (!role) return { screen: 'practice', as: 'team', teamId, pid, probe: true }; // not their team (or an older link with no team): still tried — an open practice is for anyone signed in, and a refusal explains

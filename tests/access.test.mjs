@@ -45,6 +45,8 @@ assert.equal(routePath({ view: 'editor', pid: 'p', did: 'd' }), '/editor/p/d');
 assert.deepEqual(at('/coach/abc'), { view: 'coach', teamId: null, pid: 'abc', did: null, ambiguous: true }, 'a lone id: team or practice, resolveRoute decides');
 assert.deepEqual(at('/coach/t1/abc'), { view: 'coach', teamId: 't1', pid: 'abc', did: null });
 assert.deepEqual(at('/team/t1'), { view: 'team', teamId: null, pid: 't1', did: null, ambiguous: true });
+assert.deepEqual(at('/team/t1/tasks'), { view: 'team', teamId: 't1', pid: null, did: null, tab: 'tasks' }); assert.deepEqual(at('/coach/t1/games'), { view: 'coach', teamId: 't1', pid: null, did: null, tab: 'games' });
+assert.equal(routePath({ view: 'team', teamId: 't1', tab: 'tasks' }), '/team/t1/tasks'); assert.equal(routePath({ view: 'team', teamId: 't1', tab: 'practice' }), '/team/t1'); assert.equal(routePath({ view: 'team', teamId: 't1', pid: 'p', tab: 'games' }), '/team/t1/p');
 assert.equal(routePath({ view: 'coach', teamId: 't1', pid: 'p' }), '/coach/t1/p'); assert.equal(routePath({ view: 'team', teamId: 't1' }), '/team/t1'); assert.equal(routePath({ view: 'team', pid: 'p' }), '/team/p');
 
 // stages, incl. practices shared before stages existed

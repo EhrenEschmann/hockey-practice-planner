@@ -4584,7 +4584,7 @@ const CHECKING = 'Checking your sign-in…';
 /** Sign out of the viewer. The offline practice copies on this device go too: they belong to the account that could read them. */
 async function presentSignOut() {
   closeAcct();
-  try { for (const k of Object.keys(localStorage)) if (k.startsWith('hpp.viewcache.') || k.startsWith('hpp.inbox.')) localStorage.removeItem(k); } catch { /* storage blocked */ }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('hpp.viewcache.') || k.startsWith('hpp.inbox.') || k.startsWith('hpp.teamlist.')) localStorage.removeItem(k); } catch { /* storage blocked */ }
   try { localStorage.removeItem(viewQueueKey); } catch { /* fine */ }
   leavePractice();
   try { await cloudSync?.signOut(); } catch (e) { presentMsg(`Sign-out failed: ${e?.message || e}`); }
@@ -4713,7 +4713,7 @@ function watchInbox() {
     viewerInbox = doc; inboxStale = false;
     try {
       if (doc) localStorage.setItem(inboxKey(email), JSON.stringify(doc));
-      else for (const k of Object.keys(localStorage)) if (k === inboxKey(email) || k.startsWith('hpp.viewcache.')) localStorage.removeItem(k); // off every roster: the offline copies go too
+      else for (const k of Object.keys(localStorage)) if (k === inboxKey(email) || k.startsWith('hpp.viewcache.') || k.startsWith('hpp.teamlist.')) localStorage.removeItem(k); // off every roster: the offline copies go too
     } catch { /* fine */ }
     refreshScreen();
   });
@@ -4775,6 +4775,7 @@ function refreshScreen() {
   $('#present-account').hidden = !cloudSync?.user;
   if (!cloudSync?.user) closeAcct();
   applyPresentMode();
+  $('#present-tabs').hidden = !(r.screen === 'list' && r.teamId); // the tab bar belongs to a team's home
   const offlineMsg = `Couldn't connect. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again.${cloudBootError ? ` (${cloudBootError})` : ''}`;
   switch (r.screen) {
     case 'practice': showPractice(r); paintWhen(); break; // the list may have changed under an open practice (a newer one released)
@@ -4867,6 +4868,7 @@ const plannerTeams = () => (store.roster.teams || []).filter(t => t.id).map(t =>
 // A viewer's lists come straight from each team's practice headers, live: the query carries the stages their role may
 // read (coaches: out to coaches or released; families: released), so it is small and the rules can prove it.
 const teamLists = new Map(); // teamId → { items, ready, error, unsub }
+const teamListKey = teamId => `hpp.teamlist.${teamId}`;
 function watchTeamList(teamId) {
   const mine = (who.teams || []).find(t => t.id === teamId);
   if (!teamId || !mine || !cloudBackend?.subscribeTeamPractices || !cloudSync?.user || who.persona === 'planner') return; // only someone on the team may list it
@@ -4875,18 +4877,21 @@ function watchTeamList(teamId) {
   if (had?.role === role) return;
   had?.unsub?.(); // their role on the team changed: the list is asked for again with the stages that role may read
   const rec = { role, items: [], ready: false, error: null, unsub: null };
+  try { rec.items = JSON.parse(localStorage.getItem(teamListKey(teamId)) || '[]').filter(x => x.role === role); } catch { /* fine */ }
   teamLists.set(teamId, rec);
   rec.unsub = cloudBackend.subscribeTeamPractices(teamId, role === 'coach' ? ['coaches', 'team'] : ['team'], (heads, err) => {
     if (err) { rec.ready = true; rec.error = err; refreshScreen(); return; }
-    rec.items = (heads || []).map(h => ({ pid: h.id, role, stage: h.stage, team: h.team || '', teamId, date: h.date || '', time: h.time || '', ...(h.kind === 'game' ? { kind: 'game', opponent: h.opponent || '' } : {}) }));
-    rec.ready = true; rec.error = null; refreshScreen();
+    rec.items = (heads || []).map(h => ({ pid: h.id, role, stage: h.stage, team: h.team || '', teamId, date: h.date || '', time: h.time || '', drillCount: h.drillCount || 0, minutes: h.minutes || 0, drillNames: h.drillNames || [], ...(h.kind === 'game' ? { kind: 'game', opponent: h.opponent || '' } : {}) }));
+    rec.ready = true; rec.error = null;
+    try { localStorage.setItem(teamListKey(teamId), JSON.stringify(rec.items)); } catch { /* fine */ } // the list from the last visit: the rink has no signal
+    refreshScreen();
   });
 }
 /** The practices this person can open on /coach or /team: { pid, role, team, teamId, date, time }. The planner previewing one practice (`all`) can step through drafts too. */
 function practiceItems(as) {
   if (who.persona === 'planner') {
     return store.live.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
-      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }));
+      .map(p => { const ds = (p.drills || []).filter(d => !d.hidden); return { pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, drillCount: ds.length, minutes: ds.reduce((a, d) => a + (+d.duration || 0), 0), drillNames: ds.map(d => d.name || ''), ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }; });
   }
   return [...teamLists.values()].flatMap(r => r.items);
 }
@@ -4949,36 +4954,71 @@ function showTeams(r) {
   $('#present-body').innerHTML = `<div class="pl-list"><h2>Teams</h2>${(who.teams || []).map(t => `<a class="pl-item" href="${routePath({ view: as === 'coach' && t.role === 'coach' ? 'coach' : 'team', teamId: t.id })}" data-nav><b>${escHtml(t.name || 'Team')}</b><span>${t.role === 'coach' ? 'coach' : 'family'}</span></a>`).join('')}</div>`;
   $('#present-scroll').scrollTop = 0;
 }
+/** A team's home, as an app: Practice (the one the calendar points at, then the rest), Tasks (a club team's week) and Games (notes). */
+const LIST_TAB_DEFS = [['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games']];
+let listKey = null; // which home is on screen, so a repaint doesn't wipe the Tasks tab while someone types
 function showList(r) {
   ensureLatestViewer();
-  const as = r.as;
+  const as = r.as, tab = r.tab || 'practice';
   if (r.teamId) watchTeamList(r.teamId); else for (const t of who.teams || []) watchTeamList(t.id);
-  const items = practiceItems(as).filter(x => !r.teamId || x.teamId === r.teamId); // one team's list
-  const rec = r.teamId ? teamLists.get(r.teamId) : null, loading = who.persona !== 'planner' && rec && !rec.ready;
+  const all = practiceItems(as).filter(x => !r.teamId || x.teamId === r.teamId); // one team's list
+  const rec = r.teamId ? teamLists.get(r.teamId) : null, loading = who.persona !== 'planner' && rec && !rec.ready && !rec.items.length;
   const today = todayISO();
-  const upcoming = items.filter(x => (x.date || '') >= today).sort(byCalendar), past = items.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
+  const tn = r.teamId ? teamName(r.teamId) : '';
+  $('#present-title').textContent = `${tn || 'Practices'}${who.persona === 'planner' ? ` — ${as} view` : ''}`;
+  $('#present-gate').hidden = true; presentNote(inboxStale || (rec && !rec.ready && rec.items.length) ? 'Offline — this is the list from your last visit.' : '');
+  $('#present-home').title = (who.teams || []).length > 1 ? 'Your teams' : 'All your practices';
+  const club = r.teamId ? clubsFor().find(c => c.id === r.teamId) : null;
+  // The tab bar: Tasks only on an official club team.
+  $('#present-tabs').innerHTML = LIST_TAB_DEFS.filter(([k]) => k !== 'tasks' || club).map(([k, label, ic]) => `<a class="pr-tab${k === tab ? ' active' : ''}" href="${routePath({ view: as, teamId: r.teamId, tab: k })}" data-nav>${icon(ic)}<span>${label}</span></a>`).join('');
+  const key = `${as}/${r.teamId}/${tab}`;
+  if (tab === 'tasks') { if (listKey === key && $('#tasks-tab')) return; listKey = key; renderTasksTab(club); $('#present-scroll').scrollTop = 0; return; }
+  listKey = key;
+  const empty = loading ? '<p class="muted">Loading…</p>' : rec?.error && !rec.items.length ? `<p class="warn">Could not load this team's practices: ${escHtml(rec.error.message || rec.error)}</p>` : null;
   const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
       <b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}</span>
       ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
-  const tn = r.teamId ? teamName(r.teamId) : '';
-  $('#present-title').textContent = `${tn || 'Practices'}${who.persona === 'planner' ? ` — ${as} view` : ''}`;
-  $('#present-gate').hidden = true; presentNote(inboxStale ? 'Offline — this is the list from your last visit.' : '');
-  $('#present-home').title = (who.teams || []).length > 1 ? 'Your teams' : 'All your practices';
-  const clubs = clubsFor().filter(c => !r.teamId || c.id === r.teamId);
-  const clubRows = clubs.map(c => c.role === 'coach'
-    ? `<button class="pl-item pl-club" data-club-output="${escHtml(c.id)}"><b>📊 ${escHtml(c.name || 'Club team')} — weekly output</b><span>every player's numbers for the week</span></button>`
-    : c.players.map(pl => `<button class="pl-item pl-club" data-club-player="${escHtml(c.id)}:${escHtml(pl.id)}"><b>🏒 ${escHtml(pl.name || 'Player')}</b><span>${escHtml(c.name || 'Club team')} · this week's tasks and progress</span></button>`).join('')).join('');
-  $('#present-body').innerHTML = `<div class="pl-list">
-    ${items.length ? '' : loading ? '<p class="muted">Loading…</p>' : rec?.error ? `<p class="warn">Could not load this team's practices: ${escHtml(rec.error.message || rec.error)}</p>` : '<p class="muted">Nothing here yet — practices show up once your coach sends them out.</p>'}
-    ${clubRows ? `<h2>Club</h2>${clubRows}` : ''}
-    ${upcoming.length ? `<h2>Upcoming</h2>${upcoming.map(row).join('')}` : ''}
-    ${past.length ? `<h2>Earlier</h2>${past.map(row).join('')}` : ''}
-  </div>`;
+  let html;
+  if (tab === 'games') {
+    // Game notes: each game with its coaching points listed; open it for the diagrams, video and the coach's voice.
+    const games = all.filter(x => x.kind === 'game').sort(byCalendar).reverse();
+    const grow = x => `<a class="pl-item pl-game" href="${itemPath(as, x)}" data-nav><b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}${x.date === today ? ' · today' : ''}</span>
+      ${x.drillNames?.length ? `<ul class="pl-points">${x.drillNames.map(n => `<li>${escHtml(n || 'Coaching point')}</li>`).join('')}</ul>` : ''}</a>`;
+    html = games.length ? `<h2>Game notes</h2>${games.map(grow).join('')}` : empty || '<p class="muted">No game notes yet — they show up here once your coach sends a game out.</p>';
+  } else {
+    // The practice the calendar points at (today's, else the next, else the most recent) up top; the rest below it.
+    const practices = all.filter(x => x.kind !== 'game');
+    const focus = practices.length ? calendarFocus(practices, today) : null;
+    const rest = practices.filter(x => x !== focus);
+    const upcoming = rest.filter(x => (x.date || '') >= today).sort(byCalendar), past = rest.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
+    const hero = focus ? `<a class="pl-item pl-hero" href="${itemPath(as, focus)}" data-nav>
+      <small>${focus.date === today ? 'Today’s practice' : (focus.date || '') > today ? 'Next practice' : 'Last practice'}</small>
+      <b>${escHtml(whenLabel(focus, true))}</b>
+      <span>${focus.drillCount || 0} drill${focus.drillCount === 1 ? '' : 's'}${focus.minutes ? ` · ${focus.minutes} min` : ''}</span>
+      <em>Open ▶</em></a>` : '';
+    html = `${hero}${!practices.length ? (empty || '<p class="muted">Nothing here yet — practices show up once your coach sends them out.</p>') : ''}
+      ${upcoming.length ? `<h2>Upcoming</h2>${upcoming.map(row).join('')}` : ''}
+      ${past.length ? `<h2>Earlier</h2>${past.map(row).join('')}` : ''}`;
+  }
+  $('#present-body').innerHTML = `<div class="pl-list">${html}</div>`;
   $('#present-scroll').scrollTop = 0;
+}
+/** The Tasks tab: a family logs their player's week right here; a coach gets the team's weekly output. */
+function renderTasksTab(club) {
+  const body = $('#present-body');
+  if (!club) { body.innerHTML = '<div class="pl-list" id="tasks-tab"><p class="muted">Weekly tasks aren’t set up for this team.</p></div>'; return; }
+  const family = club.role !== 'coach', players = club.players || [];
+  const chips = family && players.length > 1 ? `<div class="tab-players">${players.map((pl, i) => `<button class="chip${i === 0 ? ' active' : ''}" data-tab-player="${escHtml(pl.id)}">${escHtml(pl.name || 'Player')}</button>`).join('')}</div>` : '';
+  body.innerHTML = `<div class="pl-list" id="tasks-tab">${chips}<div id="tasks-mount" class="club-body"></div></div>`;
+  const mount = $('#tasks-mount');
+  if (!family) openClubOutput(club.id, { mount });
+  else if (players.length) openProfile(club.id, players[0].id, { mount });
+  else mount.innerHTML = '<p class="muted">None of your players is on this team’s roster yet.</p>';
 }
 $('#present-body').addEventListener('click', e => {
   const out = e.target.closest('[data-club-output]'); if (out) { openClubOutput(out.dataset.clubOutput, { mount: $('#present-club-body'), sheet: true }); return; }
   const pl = e.target.closest('[data-club-player]'); if (pl) { const [teamId, playerId] = pl.dataset.clubPlayer.split(':'); openProfile(teamId, playerId); return; }
+  const chip = e.target.closest('[data-tab-player]'); if (chip) { $$('.tab-players .chip').forEach(x => x.classList.toggle('active', x === chip)); openProfile(screen.teamId, chip.dataset.tabPlayer, { mount: $('#tasks-mount') }); return; }
   const a = e.target.closest('a[data-nav]'); if (!a || e.metaKey || e.ctrlKey) return;
   e.preventDefault(); navigate(a.getAttribute('href'));
 });
@@ -5022,9 +5062,9 @@ async function openClubOutput(teamId, { mount, sheet = false, week = weekKey(), 
   if (!clubState.doc) { clubState.busy = '✗ Could not load this club team — are the latest firestore.rules deployed?'; renderClub(); return; }
   await loadClubWeek();
 }
-async function openProfile(teamId, playerId) {
+async function openProfile(teamId, playerId, { mount = $('#present-club-body'), sheet = mount === $('#present-club-body') } = {}) {
   clubState.teamId = teamId; clubState.player = playerId; clubState.week = weekKey(); clubState.stats = new Map(); clubState.busy = 'Loading…';
-  clubState.mount = $('#present-club-body'); $('#present-club').hidden = false;
+  clubState.mount = mount; if (sheet) $('#present-club').hidden = false;
   renderClub();
   clubState.doc = await loadClubDoc(teamId);
   if (!clubState.doc) { clubState.busy = '✗ Could not load this club team.'; renderClub(); return; }
@@ -5130,7 +5170,7 @@ async function playTaskHowto(kind, taskId) {
   const entry = await fetchTaskVideo(clubState.teamId, k, (i, n) => { box.textContent = `Downloading ${i} / ${n}…`; });
   box.innerHTML = entry ? `<div class="video-box"><video src="${entry.url}" controls playsinline autoplay></video></div>` : '<span class="warn small">Could not load the video.</span>';
 }
-for (const sel of ['#tasks-output', '#present-club-body']) {
+for (const sel of ['#tasks-output', '#present-club-body', '#present-body']) { // the editor's Tasks panel, the viewer's sheet, and the team home's Tasks tab
   $(sel).addEventListener('click', e => {
     const h = e.target.closest('[data-howto]'); if (h) { playTaskHowto(h.dataset.howto, h.dataset.task); return; }
     const b = e.target.closest('[data-club]'); if (!b) return;

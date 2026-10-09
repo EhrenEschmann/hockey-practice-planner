@@ -77,7 +77,7 @@ try {
   const H = pid => cloud.db.get(`teams/t1/practices/${pid}`);
   ok('every practice (the draft too) is filed under its team as a header, a body and an index entry', ['p0', 'p1', 'p2', 'p3'].every(pid => H(pid) && cloud.db.has(`teams/t1/practices/${pid}/plan/body`) && cloud.db.get(`practiceIndex/${pid}`)?.teamId === 't1'), [...cloud.db.keys()]);
   const h1 = H('p1');
-  ok('the header carries the stage, the sharing lists, its owner and a drill summary but no drills', h1.stage === 'team' && h1.sharedWith.join() === 'guest@example.com' && h1.owner === 'own' && h1.drillCount === 3 && !('drills' in h1), h1);
+  ok('the header carries the stage, the sharing lists, its owner and a drill summary but no drills', h1.stage === 'team' && h1.sharedWith.join() === 'guest@example.com' && h1.owner === 'own' && h1.drillCount === 2 && h1.drillNames.join() === 'Warmup,Scrimmage' && !('drills' in h1), h1); // the hidden drill is left out of the summary
   ok('the team, its members and players come from the roster, lower-cased', cloud.db.get('teams/t1')?.name === 'Mites' && cloud.db.get('teams/t1/members/coach.a@example.com')?.role === 'coach' && cloud.db.get('teams/t1/members/coachb@example.com')?.role === 'coach'
     && cloud.db.get('teams/t1/members/parent@example.com')?.role === 'family' && cloud.db.get('teams/t1/players/pl1')?.contacts.join() === 'parent@example.com', [...cloud.db.keys()].filter(k => k.startsWith('teams/t1/') && !k.includes('practices')));
   ok('each person gets their own document naming their teams and role', cloud.db.get('people/coach.a@example.com')?.persona === 'coach' && cloud.db.get('people/coach.a@example.com').teams.t1.role === 'coach'

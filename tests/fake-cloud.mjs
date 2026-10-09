@@ -122,7 +122,8 @@ export const pageBackend = (port, user, signInAs) => `
     async loadPractices(teamIds) { const out = []; for (const t of teamIds) for (const x of await call('list', 'teams/' + t + '/practices')) out.push(await merged(t, x.data)); return out; },
     async savePractice(p, { body = true } = {}) {
       const { drills, ...h } = p; const t = p.teamId;
-      await call('set', P(t, p.id), { ...h, stage: p.stage || 'draft', drillCount: (drills || []).length });
+      const shown = (drills || []).filter(d => !d.hidden); // the header's summary, as practiceHeader() writes it
+      await call('set', P(t, p.id), { ...h, stage: p.stage || 'draft', drillCount: shown.length, drillNames: shown.map(d => d.name || ''), minutes: shown.reduce((a, d) => a + (+d.duration || 0), 0) });
       if (body) await call('set', B(t, p.id), { id: p.id, teamId: t, drills: drills || [], updatedAt: p.updatedAt || 0 });
       await call('set', 'practiceIndex/' + p.id, { teamId: t });
     },

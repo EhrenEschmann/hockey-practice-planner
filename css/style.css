@@ -481,6 +481,23 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
 .pl-item span{color:var(--muted);font-size:14px}
 .pl-item .pl-today{margin-left:auto;color:#fff;background:var(--accent);border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600}
 .pl-item:hover{border-color:var(--accent)}
+/* The team home as an app: a tab bar along the bottom (Practice · Tasks · Games), a hero card for the practice the calendar points at */
+#present-tabs{display:flex;flex:none;background:var(--panel);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom)}
+#present-tabs[hidden]{display:none}
+.pr-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 7px;font-size:11px;font-weight:600;color:var(--muted);text-decoration:none;-webkit-tap-highlight-color:transparent}
+.pr-tab .lucide{width:22px;height:22px}
+.pr-tab.active{color:var(--accent-2)}
+.pl-hero{flex-direction:column;align-items:stretch;gap:2px;border-color:var(--accent);background:linear-gradient(135deg,rgba(59,130,246,.2),var(--panel) 70%)}
+.pl-hero small{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent-2);font-weight:600}
+.pl-hero b{font-size:20px}
+.pl-hero em{font-style:normal;color:var(--accent-2);font-weight:600;margin-top:6px}
+.pl-game{flex-direction:column;align-items:stretch;gap:2px}
+.pl-points{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:14px;line-height:1.4}
+.pl-points li+li{margin-top:2px}
+.tab-players{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.tab-players .chip{border-radius:999px;padding:6px 14px}
+.tab-players .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+#tasks-mount .club-head button[data-club=close]{display:none} /* inline on the Tasks tab: nothing to close */
 #present-home{background:transparent;border-color:transparent;padding:2px 4px;font-size:18px;flex:none}
 #present-request{display:flex;flex-direction:column;gap:8px;text-align:left;margin:4px 0 10px}
 #present-request[hidden],#present-tolist[hidden]{display:none}

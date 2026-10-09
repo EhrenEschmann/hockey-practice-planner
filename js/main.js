@@ -148,6 +148,7 @@ function drawSelection() {
 }
 
 function renderUI() {
+  renderTeamPick();
   renderPracticeSelect();
   renderPracticeProps();
   renderAIPop();
@@ -175,6 +176,41 @@ function updateRoute() {
   const path = routePath({ view: 'editor', pid: p.id, did: d.id });
   if (location.pathname !== path || location.hash) history.replaceState(null, '', path); // replaceState: no history spam
 }
+
+// ---------- the current team: the editor works on one team at a time ----------
+// The picker shows that team's practices and games, new ones belong to it, and 📅 Tasks is its calendar. Remembered per browser.
+const TEAM_KEY = 'hpp.ui.team';
+let curTeamId = null;
+try { curTeamId = localStorage.getItem(TEAM_KEY) || null; } catch { /* fine */ }
+const teamOf = p => (store.roster.teams || []).find(t => t.id === p?.teamId) || rosterTeamFor(store.roster, p);
+/** The team being worked on: the remembered one when it still exists, else the open practice's, else the first on the roster. */
+function currentTeam() {
+  const teams = store.roster.teams || [];
+  return teams.find(t => t.id === curTeamId) || teamOf(store.practice) || teams[0] || null;
+}
+const inTeam = (p, t) => !!t && (p.teamId ? p.teamId === t.id : String(p.team || '').trim().toLowerCase() === String(t.name || '').trim().toLowerCase());
+/** Switch teams: remember it and open that team's most recent practice (the picker only shows that team). */
+function setCurrentTeam(id) {
+  curTeamId = id;
+  try { localStorage.setItem(TEAM_KEY, id || ''); } catch { /* fine */ }
+  const t = currentTeam();
+  if (t && !inTeam(store.practice, t)) {
+    const mine = store.live.filter(p => inTeam(p, t)).sort((a, b) => byCalendar(b, a));
+    if (mine.length) { finishActive(); store.switchPractice(mine[0].id); sel = null; stopAnim(); }
+  }
+  renderAll();
+}
+function renderTeamPick() {
+  const el = $('#team-pick'), t = currentTeam(), teams = store.roster.teams || [];
+  el.innerHTML = (teams.length ? teams.map(x => `<option value="${x.id}" ${t && x.id === t.id ? 'selected' : ''}>${escHtml(x.name || 'unnamed team')}</option>`).join('') : '<option value="">— no team yet —</option>') + `<option value="${MANAGE_TEAMS}">＋ Manage teams…</option>`;
+  if (t) el.value = t.id;
+  $('#btn-tasks').hidden = !t;
+  $('#btn-tasks').title = t ? `${t.name || 'This team'}: weekly tasks — a calendar of weeks, each week's task list and how-tos, and every player's output${t.club ? '' : ' (marks the team as an official club team)'}` : '';
+}
+$('#team-pick').addEventListener('change', e => {
+  if (e.target.value === MANAGE_TEAMS) { renderTeamPick(); openTeamMgr(); return; }
+  setCurrentTeam(e.target.value);
+});
 
 /** Open the practice/drill named in the URL; fall back to the last drill viewed in that practice. */
 function applyRoute() {
@@ -915,8 +951,7 @@ document.addEventListener('keydown', e => {
   if (presenting) { presentKeydown(e); return; } // presentation is view-only and terminal: no editor shortcuts, no way "back"
   if (!editorOn) return;
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
-  if (!$('#club-output').hidden) { if (e.key === 'Escape') $('#club-output').hidden = true; return; } // the output table sits over the team manager
-  if (!$('#week-plan').hidden) { if (e.key === 'Escape' && !isEditing()) closeWeekPlan(); return; } // so does a week's design pane
+  if (!$('#tasks').hidden) { if (e.key === 'Escape' && !isEditing()) closeTasks(); return; } // the Tasks panel
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
   if (!$('#settings').hidden) { if (e.key === 'Escape') closeSettings(); return; }
   if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
@@ -1725,7 +1760,8 @@ function renderPracticeSelect() {
   const cur = store.practice;
   $('#plist-current').textContent = practiceLabel(cur) + (openFeedbackFor(cur.id).length ? ` · 💬${openFeedbackFor(cur.id).length}` : '');
   if ($('#plist-pop').hidden) return;
-  const all = [...store.live].sort((a, b) => byCalendar(b, a));
+  const team = currentTeam();
+  const all = store.live.filter(p => inTeam(p, team) || p.id === cur.id).sort((a, b) => byCalendar(b, a)); // the current team's (the open one always shows)
   const shown = plistAll ? all : all.slice(0, PLIST_N);
   const stName = { draft: 'draft', coaches: 'with coaches', team: 'released' };
   $('#plist-items').innerHTML = shown.map(p => {
@@ -1738,7 +1774,7 @@ function renderPracticeSelect() {
   more.hidden = all.length <= PLIST_N;
   more.textContent = plistAll ? `Show the last ${PLIST_N} only` : `Show all ${all.length}…`;
   // The trash: soft-deleted documents, newest deletion first, each with Restore and Delete forever.
-  const trash = [...store.trashed].sort((a, b) => (+b.deleted || 0) - (+a.deleted || 0));
+  const trash = store.trashed.filter(p => inTeam(p, team)).sort((a, b) => (+b.deleted || 0) - (+a.deleted || 0));
   const tb = $('#plist-trash-toggle');
   tb.hidden = !trash.length;
   tb.textContent = `${plistTrashOpen ? '▾' : '▸'} Deleted (${trash.length})`;
@@ -1770,7 +1806,7 @@ function openCreateForm(kind) {
   const f = $('#plist-form'), teams = store.roster.teams.map(t => t.name || '').filter(Boolean);
   if (!teams.length) { $('#plist-pop').hidden = true; alert(`Add a team under 👥 Team first — a ${kind === 'game' ? 'game' : 'practice'} belongs to a team, and the roster is who gets it.`); openTeamMgr(); return; }
   plistKind = kind;
-  const cur = store.practice.team || '';
+  const cur = currentTeam()?.name || store.practice.team || '';
   $('#plist-form-title').textContent = kind === 'game' ? 'New game' : 'New practice';
   $('#new-opponent-wrap').hidden = kind !== 'game'; $('#new-opponent').value = '';
   $('#new-time-label').textContent = kind === 'game' ? 'Game time' : 'Start time';
@@ -1789,7 +1825,9 @@ $('#plist-form').addEventListener('submit', e => {
   if (!date) { $('#new-date').focus(); return; }
   if (!team || !time) return; // `required` — the browser has already said which
   finishActive();
-  const p = newPractice(team, plistKind, $('#new-opponent').value.trim()); p.date = date; p.time = time;
+  const tm = (store.roster.teams || []).find(t => (t.name || '') === team);
+  const p = newPractice(team, plistKind, $('#new-opponent').value.trim(), tm?.id || null); p.date = date; p.time = time;
+  if (tm) setCurrentTeam(tm.id); // a practice for another team moves the editor to that team
   store.addPractice(p);
   sel = null; stopAnim();
   $('#plist-form').hidden = true; $('.plist-new').hidden = false; $('#plist-pop').hidden = true;
@@ -1864,7 +1902,10 @@ for (const [id, key] of PRACTICE_FIELDS) {
       el.classList.toggle('invalid', !iso);
       if (!iso) return; // keep the old date until the field parses as MM/DD/YYYY
       store.practice.date = iso;
-    } else store.practice[key] = el.value;
+    } else {
+      store.practice[key] = el.value;
+      if (key === 'team') { const tm = (store.roster.teams || []).find(t => (t.name || '') === el.value); if (tm) { store.practice.teamId = tm.id; setCurrentTeam(tm.id); } }
+    }
     store.save(); renderPracticeSelect();
   });
   el.addEventListener('change', () => {
@@ -2025,10 +2066,8 @@ function renderTeamMgr() {
     ${tryRows ? `<h3>Signed in without access</h3>${tryRows}` : ''}
     <label class="field inline ros-team-name"><span>Team name</span><input data-field="teamname" value="${escHtml(t.name || '')}"></label>
     <label class="check"><input type="checkbox" data-field="club" ${t.club ? 'checked' : ''}> Official club team — weekly tasks, player profiles and each player's weekly output</label>
-    ${t.club ? `<h3>Weekly tasks</h3>
-    ${weekCalendarHTML(t)}
-    <div class="row"><button data-act="output" class="primary">📊 Weekly output</button></div>
-    <p class="muted small">Each week gets its own task list — tap a week to set it up. Families see their player's profile on their practice list and add that week's numbers; coaches and you see every player's output. The team's players and contacts below decide who may log for whom.</p>` : ''}
+    ${t.club ? `<p class="muted small">Weekly tasks, their how-tos and every player's output live under <b>📅 Tasks</b> on the top bar. Families see their player's profile on their practice list; the players and contacts below decide who may log for whom.</p>
+    <div class="row"><button data-act="tasks">📅 Open Tasks for this team</button></div>` : ''}
     <h3>Coaches</h3>
     ${coachRows || '<p class="muted small">No coaches yet.</p>'}
     <div class="row"><button data-act="addcoach">＋ Add coach</button></div>
@@ -2153,7 +2192,7 @@ async function taskMediaAction(act, t, k, btn) {
 async function encodeTaskVideo(t, k, file) {
   if (taskVid) return;
   taskVid = { taskId: k.id, status: 'Starting the encoder…' }; rerenderTasks();
-  const progress = msg => { taskVid.status = msg; const el = $(`#week-plan-body .ros-media[data-tid="${k.id}"] b`)?.parentElement; if (el && el.textContent.includes('Show it')) el.innerHTML = `<b>🎬 Show it</b> — ${escHtml(msg)}`; };
+  const progress = msg => { taskVid.status = msg; const el = $(`#tasks-week .ros-media[data-tid="${k.id}"] b`)?.parentElement; if (el && el.textContent.includes('Show it')) el.innerHTML = `<b>🎬 Show it</b> — ${escHtml(msg)}`; };
   try {
     const out = await transcodeVideo(file, { onProgress: (s, total) => progress(`Encoding… ${s.toFixed(0)}${Number.isFinite(total) ? ` / ${total.toFixed(0)}` : ''} s`) });
     const at = Date.now(), chunks = await blobToChunks(out.blob);
@@ -2186,26 +2225,32 @@ function weekTasks(t) {
   return (w.tasks ||= []);
 }
 const weekRange = w => { const s = weekStart(w); const e = new Date(s); e.setDate(e.getDate() + 6); const f = d => `${d.getMonth() + 1}/${d.getDate()}`; return `${f(s)}–${f(e)}`; };
-function weekCalendarHTML(t) {
+function weekCalendarHTML(t, selected = null) {
   const now = isoWeek();
   const cells = [];
   for (let i = 0, w = calFrom; i < CAL_WEEKS; i++, w = shiftWeek(w, 1)) {
     const list = (t.weeks?.[w]?.tasks || []).filter(k => String(k.title || '').trim());
     const s = weekStart(w);
     const month = i === 0 || s.getDate() <= 7 ? `<span class="cal-month">${s.toLocaleString(undefined, { month: 'short' })}</span>` : '';
-    cells.push(`<button class="cal-week${list.length ? ' set' : ' empty'}${w === now ? ' now' : ''}${w < now ? ' past' : ''}" data-act="cal-week" data-week="${w}" title="${w} · ${weekRange(w)}${list.length ? ` · ${list.length} task${list.length === 1 ? '' : 's'}` : ' · no task list yet'}">
+    cells.push(`<button class="cal-week${list.length ? ' set' : ' empty'}${w === now ? ' now' : ''}${w < now ? ' past' : ''}${w === selected ? ' sel' : ''}" data-act="cal-week" data-week="${w}" title="${w} · ${weekRange(w)}${list.length ? ` · ${list.length} task${list.length === 1 ? '' : 's'}` : ' · no task list yet'}">
       ${month}<b>${weekRange(w)}</b><span>${list.length ? `✓ ${list.length} task${list.length === 1 ? '' : 's'}` : 'missing'}</span></button>`);
   }
   return `<div class="cal-nav"><button data-act="cal-prev" title="Earlier weeks">◀</button><span class="muted small">${weekRange(calFrom)} → ${weekRange(shiftWeek(calFrom, CAL_WEEKS - 1))}</span><button data-act="cal-next" title="Later weeks">▶</button></div>
     <div class="cal-grid">${cells.join('')}</div>`;
 }
-function openWeekPlan(teamId, week) {
-  weekPlanOpen = { teamId, week }; taskMediaOpen = null;
-  $('#week-plan').hidden = false;
-  renderWeekPlan();
+// ----- 📅 Tasks: one top-level panel for the current team — the calendar, and under it the selected week's list or output
+let tasksTab = 'tasks'; // 'tasks' | 'output' for the selected week
+function openTasks() {
+  const t = currentTeam(); if (!t) { alert('Pick a team first (the team selector on the top bar).'); return; }
+  if (!t.club) { if (!confirm(`${t.name || 'This team'} isn't marked as an official club team yet. Mark it now?`)) return; t.club = true; t.weeks ||= {}; store.saveRoster(); }
+  closeTeamMgr(); closePopovers();
+  weekPlanOpen = weekPlanOpen?.teamId === t.id ? weekPlanOpen : { teamId: t.id, week: isoWeek() };
+  taskMediaOpen = null;
+  $('#tasks').hidden = false;
+  renderTasks();
 }
-function closeWeekPlan() { weekPlanOpen = null; $('#week-plan').hidden = true; renderTeamMgr(); }
-function rerenderTasks() { if (weekPlanOpen) renderWeekPlan(); else renderTeamMgr(); }
+function closeTasks() { $('#tasks').hidden = true; weekPlanOpen = null; clubState.navless = false; renderUI(); }
+function rerenderTasks() { if (!$('#tasks').hidden) renderTasks(); else renderTeamMgr(); }
 const taskRowHTML = (t, k) => `
     <div class="ros-row ros-task" data-tid="${k.id}">
       <input placeholder="Task — e.g. Shots on goal" data-field="title" value="${escHtml(k.title || '')}">
@@ -2217,14 +2262,20 @@ const taskRowHTML = (t, k) => `
       <button data-act="media" class="${k.audio || k.video || k.videoUrl ? 'has-media' : ''}${taskMediaOpen === k.id ? ' open' : ''}" title="Explain how it's done: record audio, upload or link a video">${k.audio ? '🎙' : ''}${k.video || k.videoUrl ? '🎬' : ''}${k.audio || k.video || k.videoUrl ? '' : '🎙🎬'}</button>
       <button data-act="deltask" title="Remove task">${icon('x')}</button>
     </div>${taskMediaOpen === k.id ? taskMediaHTML(t, k) : ''}`;
-function renderWeekPlan() {
-  if (!weekPlanOpen) return;
-  const t = (store.roster.teams || []).find(x => x.id === weekPlanOpen.teamId); if (!t) { closeWeekPlan(); return; }
-  const { week } = weekPlanOpen, tasks = weekTasks(t), now = isoWeek();
-  $('#week-plan-title').textContent = `${t.name || 'Team'} · ${weekRange(week)}${week === now ? ' · this week' : week < now ? ' · past' : ''}`;
+function renderTasks() {
+  if ($('#tasks').hidden || !weekPlanOpen) return;
+  const t = (store.roster.teams || []).find(x => x.id === weekPlanOpen.teamId); if (!t) { closeTasks(); return; }
+  const { week } = weekPlanOpen, now = isoWeek();
+  $('#tasks-title').textContent = t.name || 'Team';
+  $('#tasks-cal').innerHTML = weekCalendarHTML(t, week);
+  $('#tasks-week-head').innerHTML = `<h3>${escHtml(weekRange(week))}<span class="muted small"> · ${week === now ? 'this week' : week < now ? 'past' : 'ahead'}</span></h3>
+    <div class="tabs"><button data-tab="tasks" class="${tasksTab === 'tasks' ? 'on' : ''}">Tasks</button><button data-tab="output" class="${tasksTab === 'output' ? 'on' : ''}">📊 Output</button></div>`;
+  $('#tasks-week').hidden = tasksTab !== 'tasks'; $('#tasks-output').hidden = tasksTab !== 'output';
+  if (tasksTab === 'output') { if (clubState.mount !== $('#tasks-output') || clubState.teamId !== t.id || clubState.week !== week) openClubOutput(t.id, { mount: $('#tasks-output'), week, navless: true }); return; }
+  const tasks = weekTasks(t);
   const prev = shiftWeek(week, -1), prevTasks = (t.weeks?.[prev]?.tasks || []).filter(k => String(k.title || '').trim());
   const copyFrom = Object.keys(t.weeks || {}).filter(w => w !== week && (t.weeks[w]?.tasks || []).some(k => String(k.title || '').trim())).sort().reverse().slice(0, 12);
-  $('#week-plan-body').innerHTML = `
+  $('#tasks-week').innerHTML = `
     ${tasks.map(k => taskRowHTML(t, k)).join('') || `<p class="muted">No tasks for this week yet.${prevTasks.length ? ' Copy last week\'s list and adjust it, or start from scratch.' : ''}</p>`}
     <div class="row">
       <button data-act="addtask">＋ Add task</button>
@@ -2234,12 +2285,18 @@ function renderWeekPlan() {
     </div>
     <p class="muted small">Amount each time × how many times this week. The 🎙🎬 button on a task attaches a how-to. Copied tasks share their how-to media with the week they came from.</p>`;
 }
-$('#week-plan-close').addEventListener('click', closeWeekPlan);
-$('#week-plan').addEventListener('click', e => { if (e.target === e.currentTarget) closeWeekPlan(); });
-$('#week-plan-prev').addEventListener('click', () => { if (weekPlanOpen) { weekPlanOpen.week = shiftWeek(weekPlanOpen.week, -1); taskMediaOpen = null; renderWeekPlan(); } });
-$('#week-plan-next').addEventListener('click', () => { if (weekPlanOpen) { weekPlanOpen.week = shiftWeek(weekPlanOpen.week, 1); taskMediaOpen = null; renderWeekPlan(); } });
-// The week pane's inputs and buttons behave like the team manager's: same field saving, same task actions.
-$('#week-plan-body').addEventListener('input', e => {
+$('#tasks-close').addEventListener('click', closeTasks);
+$('#tasks').addEventListener('click', e => { if (e.target === e.currentTarget) closeTasks(); });
+$('#tasks-cal').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]'); if (!btn || !weekPlanOpen) return;
+  if (btn.dataset.act === 'cal-prev') calFrom = shiftWeek(calFrom, -CAL_WEEKS);
+  else if (btn.dataset.act === 'cal-next') calFrom = shiftWeek(calFrom, CAL_WEEKS);
+  else if (btn.dataset.act === 'cal-week') { weekPlanOpen.week = btn.dataset.week; taskMediaOpen = null; }
+  renderTasks();
+});
+$('#tasks-week-head').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (!b) return; tasksTab = b.dataset.tab; renderTasks(); });
+// The week's inputs and buttons behave like the team manager's: same field saving, same task actions.
+$('#tasks-week').addEventListener('input', e => {
   const el = e.target, t = (store.roster.teams || []).find(x => x.id === weekPlanOpen?.teamId);
   if (!t || !el.dataset.field) return;
   const row = el.closest('[data-tid]'); if (!row) return;
@@ -2247,7 +2304,7 @@ $('#week-plan-body').addEventListener('input', e => {
   k[el.dataset.field] = el.dataset.field === 'target' ? Math.max(0, Math.round(+el.value || 0)) : el.dataset.field === 'times' ? Math.max(1, Math.round(+el.value || 1)) : el.value;
   store.saveRoster();
 });
-$('#week-plan-body').addEventListener('click', e => {
+$('#tasks-week').addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn?.dataset.act) return;
   const t = (store.roster.teams || []).find(x => x.id === weekPlanOpen?.teamId); if (!t) return;
   const tasks = weekTasks(t);
@@ -2256,16 +2313,18 @@ $('#week-plan-body').addEventListener('click', e => {
     case 'deltask': t.weeks[weekPlanOpen.week].tasks = tasks.filter(k => k.id !== btn.closest('[data-tid]').dataset.tid); break;
     case 'delweek': if (!confirm('Clear every task from this week?')) return; delete t.weeks[weekPlanOpen.week]; break;
     case 'copyweek': {
-      const from = $('#week-plan-body .week-copy')?.value; const src = t.weeks?.[from]?.tasks || []; if (!from || !src.length) return;
+      const from = $('#tasks-week .week-copy')?.value; const src = t.weeks?.[from]?.tasks || []; if (!from || !src.length) return;
       for (const k of src) if (String(k.title || '').trim()) tasks.push({ ...JSON.parse(JSON.stringify(k)), id: uid() }); // the same how-to media, a fresh task id
       break;
     }
-    case 'media': { const id = btn.closest('[data-tid]').dataset.tid; taskMediaOpen = taskMediaOpen === id ? null : id; renderWeekPlan(); return; }
+    case 'media': { const id = btn.closest('[data-tid]').dataset.tid; taskMediaOpen = taskMediaOpen === id ? null : id; renderTasks(); return; }
     case 'tm-rec': case 'tm-stop': case 'tm-play': case 'tm-delaudio': case 'tm-pick': case 'tm-watch': case 'tm-delvideo': taskMediaAction(btn.dataset.act, t, tasks.find(k => k.id === btn.closest('[data-tid]').dataset.tid), btn); return;
     default: return;
   }
-  store.saveRoster(); renderWeekPlan();
+  store.saveRoster(); renderTasks();
 });
+$('#btn-tasks').addEventListener('click', openTasks);
+
 $('#btn-team').addEventListener('click', openTeamMgr);
 $('#team-close').addEventListener('click', closeTeamMgr);
 $('#team-select').addEventListener('change', e => { teamSelId = e.target.value; renderTeamMgr(); });
@@ -2328,10 +2387,7 @@ $('#team-body').addEventListener('click', e => {
       settle(clear, req); break;
     }
     case 'req-deny': if (req) settle(fromAttempt ? cloudBackend.removeAttempt : cloudBackend.denyRequest, req); return;
-    case 'cal-prev': calFrom = shiftWeek(calFrom, -CAL_WEEKS); break;
-    case 'cal-next': calFrom = shiftWeek(calFrom, CAL_WEEKS); break;
-    case 'cal-week': openWeekPlan(t.id, btn.dataset.week); return;
-    case 'output': openClubOutput(t.id, { modal: true }); return;
+    case 'tasks': closeTeamMgr(); setCurrentTeam(t.id); openTasks(); return; // one panel at a time: the team manager closes first
     case 'addcoach': t.coaches.push({ id: uid(), name: '', email: '' }); break;
     case 'delcoach': t.coaches = t.coaches.filter(c => c.id !== btn.closest('[data-cid]').dataset.cid); break;
     case 'addplayer': t.players.push({ id: uid(), name: '', contacts: [] }); break;
@@ -4259,6 +4315,8 @@ function wireRules(sec) {
   });
 }
 function presentDoc(p) {
+  // An older link named the practice alone: now that its team is known, the address gets the full form.
+  if (screen?.screen === 'practice' && !screen.teamId && p.teamId) { screen.teamId = p.teamId; history.replaceState(null, '', routePath({ view: presentAudience, teamId: p.teamId, pid: p.id })); }
   $('#present-title').textContent = practiceLabel(p) + (who.persona === 'planner' ? ` · ${presentAudience} view` : '');
   if (!showingPractice) { showingPractice = true; applyPresentMode(); }
   $('#present-body').innerHTML = presentHTML(p);
@@ -4598,12 +4656,14 @@ function currentWho() {
   if (!authKnown) return { persona: 'checking' };
   const u = cloudSync?.user;
   if (!u) return { persona: 'anonymous' };
-  if (isOwner(u)) return { persona: 'planner' };
+  if (isOwner(u)) return { persona: 'planner', teams: plannerTeams(), practiceTeam: Object.fromEntries(store.data.practices.map(p => [p.id, p.teamId || teamOf(p)?.id || null])) };
   if (u.isAnonymous) return { persona: 'guest', roles: {} }; // may watch open practices; has no inbox
   if (viewerInbox === undefined) return { persona: inboxStale ? 'offline' : 'checking' };
   if (!viewerInbox) return { persona: 'unknown' };
   const roles = Object.fromEntries(Object.entries(viewerInbox.practices || {}).map(([pid, c]) => [pid, c.role === 'coach' ? 'coach' : 'team']));
-  return { persona: viewerInbox.persona === 'coach' ? 'coach' : 'team', roles };
+  const teams = Object.entries(viewerInbox.teams || {}).map(([id, t]) => ({ id, ...t }));
+  const practiceTeam = Object.fromEntries(Object.entries(viewerInbox.practices || {}).map(([pid, c]) => [pid, c.teamId || null]));
+  return { persona: viewerInbox.persona === 'coach' ? 'coach' : 'team', roles, teams, practiceTeam };
 }
 
 /** Follow the signed-in viewer's list document live: being approved, or a practice being released, shows up without a reload. */
@@ -4689,6 +4749,7 @@ function refreshScreen() {
   switch (r.screen) {
     case 'practice': showPractice(r); paintWhen(); break; // the list may have changed under an open practice (a newer one released)
     case 'list': leavePractice(); showList(r); break;
+    case 'teams': leavePractice(); showTeams(r); break;
     case 'request': leavePractice(); showRequest(); break;
     case 'unavailable':
       leavePractice();
@@ -4763,15 +4824,17 @@ function showPractice(r) {
   });
 }
 
-/** The practices this person can open on /coach or /team: { pid, role, team, date, time }. The planner previewing one practice (`all`) can step through drafts too. */
+const plannerTeams = () => (store.roster.teams || []).filter(t => t.id).map(t => ({ id: t.id, name: t.name || '', role: 'coach' }));
+/** The practices this person can open on /coach or /team: { pid, role, team, teamId, date, time }. The planner previewing one practice (`all`) can step through drafts too. */
 function practiceItems(as) {
   if (who.persona === 'planner') {
-    return store.data.practices.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
-      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, date: p.date, time: p.time, ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }));
+    return store.live.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
+      .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }));
   }
   return Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
 }
-const itemPath = (as, x) => routePath({ view: as === 'coach' && x.role === 'coach' ? 'coach' : 'team', pid: x.pid }); // a coach's parent-only practices open as the team sees them
+const itemPath = (as, x) => routePath({ view: as === 'coach' && x.role === 'coach' ? 'coach' : 'team', teamId: x.teamId || null, pid: x.pid }); // a coach's parent-only practices open as the team sees them
+const teamName = id => (who.teams || []).find(t => t.id === id)?.name || '';
 
 /**
  * Which practice is this? The bar under the top bar names the team and has a dropdown of dates to switch to any other
@@ -4789,7 +4852,8 @@ function paintWhen() {
     // the coaches or the team; as a team member, only those released to the team. Never a draft. All teams, so an old
     // one under a different team name is still a way back. The banner points at the calendar's pick (today's, else
     // the next, else the most recent) whenever that is not the one on screen.
-    const items = practiceItems(presentAudience).filter(x => x.stage === 'team' || (x.stage === 'coaches' && presentAudience === 'coach')).sort(byCalendar);
+    const tid = p.teamId || screen?.teamId || null; // the practice's team: the bar switches within it
+    const items = practiceItems(presentAudience).filter(x => (x.stage === 'team' || (x.stage === 'coaches' && presentAudience === 'coach')) && (!tid || x.teamId === tid)).sort(byCalendar);
     const listed = items.some(x => x.pid === p.id);
     const today = todayISO();
     const teams = new Set(items.map(x => String(x.team || '').trim().toLowerCase()));
@@ -4819,18 +4883,28 @@ $('#when-select').addEventListener('change', e => { if (e.target.value && e.targ
 $('#present-warn').addEventListener('click', () => { if (whenTarget) navigate(whenTarget); });
 
 /** /coach and /team: every practice released to this person, upcoming first — one bookmark for the whole season. */
+/** Someone on several teams: pick one. */
+function showTeams(r) {
+  const as = r.as;
+  $('#present-title').textContent = 'Your teams';
+  $('#present-gate').hidden = true; presentNote('');
+  $('#present-body').innerHTML = `<div class="pl-list"><h2>Teams</h2>${(who.teams || []).map(t => `<a class="pl-item" href="${routePath({ view: as === 'coach' && t.role === 'coach' ? 'coach' : 'team', teamId: t.id })}" data-nav><b>${escHtml(t.name || 'Team')}</b><span>${t.role === 'coach' ? 'coach' : 'family'}</span></a>`).join('')}</div>`;
+  $('#present-scroll').scrollTop = 0;
+}
 function showList(r) {
   ensureLatestViewer();
   const as = r.as;
-  const items = practiceItems(as);
+  const items = practiceItems(as).filter(x => !r.teamId || x.teamId === r.teamId); // one team's list
   const today = todayISO();
   const upcoming = items.filter(x => (x.date || '') >= today).sort(byCalendar), past = items.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
   const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
       <b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}</span>
       ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
-  $('#present-title').textContent = who.persona === 'planner' ? `Practices — ${as} view` : 'Practices';
+  const tn = r.teamId ? teamName(r.teamId) : '';
+  $('#present-title').textContent = `${tn || 'Practices'}${who.persona === 'planner' ? ` — ${as} view` : ''}`;
   $('#present-gate').hidden = true; presentNote(inboxStale ? 'Offline — this is the list from your last visit.' : '');
-  const clubs = clubsFor();
+  $('#present-home').title = (who.teams || []).length > 1 ? 'Your teams' : 'All your practices';
+  const clubs = clubsFor().filter(c => !r.teamId || c.id === r.teamId);
   const clubRows = clubs.map(c => c.role === 'coach'
     ? `<button class="pl-item pl-club" data-club-output="${escHtml(c.id)}"><b>📊 ${escHtml(c.name || 'Club team')} — weekly output</b><span>every player's numbers for the week</span></button>`
     : c.players.map(pl => `<button class="pl-item pl-club" data-club-player="${escHtml(c.id)}:${escHtml(pl.id)}"><b>🏒 ${escHtml(pl.name || 'Player')}</b><span>${escHtml(c.name || 'Club team')} · this week's tasks and progress</span></button>`).join('')).join('');
@@ -4843,7 +4917,7 @@ function showList(r) {
   $('#present-scroll').scrollTop = 0;
 }
 $('#present-body').addEventListener('click', e => {
-  const out = e.target.closest('[data-club-output]'); if (out) { openClubOutput(out.dataset.clubOutput, { modal: false }); return; }
+  const out = e.target.closest('[data-club-output]'); if (out) { openClubOutput(out.dataset.clubOutput, { mount: $('#present-club-body'), sheet: true }); return; }
   const pl = e.target.closest('[data-club-player]'); if (pl) { const [teamId, playerId] = pl.dataset.clubPlayer.split(':'); openProfile(teamId, playerId); return; }
   const a = e.target.closest('a[data-nav]'); if (!a || e.metaKey || e.ctrlKey) return;
   e.preventDefault(); navigate(a.getAttribute('href'));
@@ -4866,14 +4940,13 @@ async function loadClubDoc(teamId) {
   if (!cloudBackend?.loadClub) return null;
   try { return await cloudBackend.loadClub(teamId); } catch { return null; }
 }
-async function openClubOutput(teamId, { modal }) {
-  clubState.teamId = teamId; clubState.player = null; clubState.week = isoWeek(); clubState.stats = new Map(); clubState.busy = 'Loading…';
-  clubState.mount = modal ? $('#club-output-body') : $('#present-club-body');
-  if (modal) { $('#club-output').hidden = false; $('#club-output-title').textContent = ''; } else $('#present-club').hidden = false;
+async function openClubOutput(teamId, { mount, sheet = false, week = isoWeek(), navless = false }) {
+  clubState.teamId = teamId; clubState.player = null; clubState.week = week; clubState.stats = new Map(); clubState.busy = 'Loading…'; clubState.navless = navless;
+  clubState.mount = mount;
+  if (sheet) $('#present-club').hidden = false;
   renderClub();
   clubState.doc = await loadClubDoc(teamId);
   if (!clubState.doc) { clubState.busy = '✗ Could not load this club team — are the latest firestore.rules deployed?'; renderClub(); return; }
-  if (modal) $('#club-output-title').textContent = clubState.doc.name;
   await loadClubWeek();
 }
 async function openProfile(teamId, playerId) {
@@ -4921,7 +4994,7 @@ function renderClub({ keepFocus = false } = {}) {
   const m = clubState.mount; if (!m) return;
   if (keepFocus && m.contains(document.activeElement)) return; // typing: the numbers are already in state; repaint when the field blurs
   const d = clubState.doc, week = clubState.week;
-  const nav = `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= isoWeek() ? 'disabled' : ''}>▶</button></div>`;
+  const nav = clubState.navless ? '' : `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= isoWeek() ? 'disabled' : ''}>▶</button></div>`;
   const note = `<div class="club-note muted small${/✗/.test(clubState.busy) ? ' warn' : ''}">${escHtml(clubState.busy)}</div>`;
   if (!d) { m.innerHTML = `<div class="club-head"><h3>Club</h3></div>${note}`; return; }
   const tasks = tasksForWeek(d, week); // each week has its own list; an unset week is empty
@@ -4950,7 +5023,7 @@ function renderClub({ keepFocus = false } = {}) {
     return `<td class="num">${k.times > 1 ? `${box('done', n, '×')}<span class="muted small">/${k.times}×</span> ` : ''}${box('total', v, '·')}${k.target ? `<span class="muted small">/${k.target * (k.times || 1)}${met ? ' ✓' : ''}</span>` : ''}</td>`;
   };
   const total = pl => { const s = statFor(pl.id, week); const t = tasks.filter(k => k.target || k.times > 1); if (!t.length) return ''; const pct = t.reduce((a, k) => a + progressOf(k, s), 0) / t.length; return `<td class="num">${(pct * 100).toFixed(0)}%<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div></td>`; };
-  m.innerHTML = `<div class="club-head"><h3>📊 ${escHtml(d.name)} <span class="muted small">· weekly output</span></h3>${nav}${clubState.mount === $('#present-club-body') ? '<button data-club="close" title="Close">✕</button>' : ''}</div>
+  m.innerHTML = `${clubState.navless ? '' : `<div class="club-head"><h3>📊 ${escHtml(d.name)} <span class="muted small">· weekly output</span></h3>${nav}${clubState.mount === $('#present-club-body') ? '<button data-club="close" title="Close">✕</button>' : ''}</div>`}
     ${tasks.length && players.length ? `<table class="club-table"><thead><tr><th>Player</th>${tasks.map(k => `<th class="num">${escHtml(k.title)}<br><span class="muted">${escHtml(goalText(k))}</span></th>`).join('')}${tasks.some(k => k.target) ? '<th class="num">Week</th>' : ''}</tr></thead><tbody>${players.map(pl => `<tr><td>${escHtml(pl.name)}</td>${tasks.map(k => cell(pl, k)).join('')}${total(pl)}</tr>`).join('')}</tbody></table>` : `<p class="muted">${tasks.length ? 'No players on the roster yet.' : 'No task list for this week — set one up on the team\'s calendar under 👥 Team.'}</p>`}
     ${note}<p class="muted small">${mayLog ? 'Families log their own player\'s numbers from their practice list; you can type a number in for anyone — it saves when you leave the field.' : 'Numbers come from each player\'s family, logged from their practice list.'}</p>`;
 }
@@ -4971,7 +5044,7 @@ async function playTaskHowto(kind, taskId) {
   const entry = await fetchTaskVideo(clubState.teamId, k, (i, n) => { box.textContent = `Downloading ${i} / ${n}…`; });
   box.innerHTML = entry ? `<div class="video-box"><video src="${entry.url}" controls playsinline autoplay></video></div>` : '<span class="warn small">Could not load the video.</span>';
 }
-for (const sel of ['#club-output-body', '#present-club-body']) {
+for (const sel of ['#tasks-output', '#present-club-body']) {
   $(sel).addEventListener('click', e => {
     const h = e.target.closest('[data-howto]'); if (h) { playTaskHowto(h.dataset.howto, h.dataset.task); return; }
     const b = e.target.closest('[data-club]'); if (!b) return;
@@ -4984,10 +5057,12 @@ for (const sel of ['#club-output-body', '#present-club-body']) {
     logStat(el.dataset.player || clubState.player, el.dataset.log, el.value, el.dataset.kind || 'total');
   });
 }
-$('#club-output-close').addEventListener('click', () => { $('#club-output').hidden = true; });
-$('#club-output').addEventListener('click', e => { if (e.target === e.currentTarget) $('#club-output').hidden = true; });
 $('#present-club').addEventListener('click', e => { if (e.target === e.currentTarget) { $('#present-club').hidden = true; clubState.playing?.stop(); } });
-$('#present-home').addEventListener('click', () => { if (['coach', 'team', 'planner'].includes(who.persona) && screen.as) navigate(`/${screen.as === 'coach' ? 'coach' : 'team'}`); });
+$('#present-home').addEventListener('click', () => { // this team's list; on several teams with no team in hand, the chooser
+  if (!['coach', 'team', 'planner'].includes(who.persona) || !screen.as) return;
+  const view = screen.as === 'coach' ? 'coach' : 'team';
+  navigate(routePath({ view, teamId: screen.screen === 'teams' ? null : (screen.teamId || presentPractice?.teamId || null) }));
+});
 
 // ---------- request access: someone signed in who is on no roster ----------
 let myRequest;           // undefined = not loaded; null = none filed; else the requests/{uid} document
@@ -5383,7 +5458,7 @@ async function keepAwake(on) {
 document.addEventListener('visibilitychange', () => { if (presenting && document.visibilityState === 'visible') keepAwake(true); });
 
 // Presentation is its own destination (the very URL coaches / families get) — a new tab, so the editor stays put.
-const openPresentation = view => window.open(`${location.origin}${routePath({ view, pid: store.practice.id })}`, '_blank');
+const openPresentation = view => window.open(`${location.origin}${routePath({ view, teamId: store.practice.teamId || teamOf(store.practice)?.id || null, pid: store.practice.id })}`, '_blank');
 $('#btn-present').addEventListener('click', () => openPresentation('coach'));
 $('#btn-open-team').addEventListener('click', () => openPresentation('team'));
 $('#btn-open-coach').addEventListener('click', () => openPresentation('coach'));
@@ -5400,7 +5475,7 @@ $('#present-tolist').addEventListener('click', e => navigate(e.currentTarget.dat
 $('#present-reload').addEventListener('click', () => location.reload()); // a failed module import stays failed for the page's lifetime: start over
 /** Copy one of the two links: /coach/<id> or /team/<id>. Who can open it is decided by the stage and the roster, not by having the link. */
 async function copyShareLink(btn, view) {
-  const url = `${location.origin}${routePath({ view, pid: store.practice.id })}`;
+  const url = `${location.origin}${routePath({ view, teamId: store.practice.teamId || teamOf(store.practice)?.id || null, pid: store.practice.id })}`;
   try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); return; }
   const old = btn.textContent;
   btn.textContent = '✓ Copied';

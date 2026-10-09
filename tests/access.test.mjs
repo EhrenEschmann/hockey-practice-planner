@@ -4,35 +4,48 @@ import { calendarFocus, stageOf, accessFor, publishedCopy, inboxDocs, parseRoute
 import { newPractice, newDrill, practiceLabel, docTitle, itemNoun, docNoun, isGame } from '../js/store.js';
 
 const at = (pathname, hash = '') => parseRoute({ pathname, hash });
-const go = (path, who, hash) => { const r = resolveRoute(at(path, hash), who); return r.go || `${r.screen}${r.as ? `:${r.as}` : ''}${r.pid ? `:${r.pid}` : ''}`; };
-const anon = { persona: 'anonymous' }, planner = { persona: 'planner' }, unknown = { persona: 'unknown' };
-const coach = { persona: 'coach', roles: { a: 'coach', b: 'team' } }, team = { persona: 'team', roles: { a: 'team' } };
+const go = (path, who, hash) => { const r = resolveRoute(at(path, hash), who); return r.go || `${r.screen}${r.as ? `:${r.as}` : ''}${r.teamId ? `:${r.teamId}` : ''}${r.pid ? `:${r.pid}` : ''}`; };
+const anon = { persona: 'anonymous' }, unknown = { persona: 'unknown' };
+const planner = { persona: 'planner', teams: [{ id: 't1', name: 'Mites' }], practiceTeam: { a: 't1', b: 't1' } };
+const coach = { persona: 'coach', roles: { a: 'coach', b: 'team' }, teams: [{ id: 't1', name: 'Mites' }], practiceTeam: { a: 't1', b: 't1' } };
+const team = { persona: 'team', roles: { a: 'team' }, teams: [{ id: 't1', name: 'Mites' }], practiceTeam: { a: 't1' } };
 
-// the matrix:            "/"               /editor           /coach         /coach/a            /team        /team/a
+// the matrix — lists are per team: "/"  /editor  /coach  /coach/t1  /coach/t1/a  /team  /team/t1  /team/t1/a
 const M = [
-  [anon,    ['signin',          'signin',         'signin',      'signin',           'signin',     'signin']],
-  [planner, ['/editor',         'editor',         'list:coach',  'practice:coach:a', 'list:team',  'practice:team:a']],
-  [coach,   ['/coach',          '/coach',         'list:coach',  'practice:coach:a', 'list:team',  'practice:team:a']],
-  [team,    ['/team',           '/team',          '/team',       '/team/a',          'list:team',  'practice:team:a']],
-  [unknown, ['/request-access', '/request-access', '/request-access', 'practice:team:a', '/request-access', 'practice:team:a']], // a practice link is tried (it may be open); the app asks for access if refused
+  [anon,    ['signin',          'signin',          'signin',          'signin',          'signin',                'signin',          'signin',          'signin']],
+  [planner, ['/editor',         'editor',          '/coach/t1',       'list:coach:t1',   'practice:coach:t1:a',   '/team/t1',        'list:team:t1',    'practice:team:t1:a']],
+  [coach,   ['/coach',          '/coach',          '/coach/t1',       'list:coach:t1',   'practice:coach:t1:a',   '/team/t1',        'list:team:t1',    'practice:team:t1:a']],
+  [team,    ['/team',           '/team',           '/team',           '/team/t1',        '/team/t1/a',            '/team/t1',        'list:team:t1',    'practice:team:t1:a']],
+  [unknown, ['/request-access', '/request-access', '/request-access', 'practice:team:t1', 'practice:team:t1:a',    '/request-access', 'practice:team:t1', 'practice:team:t1:a']], // on no roster a lone id is tried as an older practice link (a refusal → request access)
 ];
-for (const [who, row] of M) ['/', '/editor', '/coach', '/coach/a', '/team', '/team/a'].forEach((p, i) => assert.equal(go(p, who), row[i], `${who.persona} on ${p}`));
+for (const [who, row] of M) ['/', '/editor', '/coach', '/coach/t1', '/coach/t1/a', '/team', '/team/t1', '/team/t1/a'].forEach((p, i) => assert.equal(go(p, who), row[i], `${who.persona} on ${p}`));
 assert.equal(go('/request-access', unknown), 'request');
 assert.equal(go('/request-access', coach), '/coach');
 assert.equal(go('/request-access', planner), '/editor');
-assert.equal(go('/coach/b', coach), '/team/b', 'a coach who is only a parent on that practice gets the team link');
-assert.equal(go('/coach/zzz', coach), 'practice:team:zzz', 'a practice not on their list is still tried, as the team sees it (an open practice is for anyone signed in)');
-assert.equal(go('/team/zzz', team), 'practice:team:zzz');
-assert.equal(resolveRoute(at('/team/zzz'), team).probe, true, '…marked as a probe so a refusal is explained as "not on your list yet"');
+assert.equal(go('/coach/t1/b', coach), '/team/t1/b', 'a coach who is only a parent on that practice gets the team link');
+assert.equal(go('/coach/t1/zzz', coach), 'practice:team:t1:zzz', 'a practice not on their list is still tried, as the team sees it (an open practice is for anyone signed in)');
+assert.equal(go('/team/t1/zzz', team), 'practice:team:t1:zzz');
+assert.equal(resolveRoute(at('/team/t1/zzz'), team).probe, true, '…marked as a probe so a refusal is explained as "not on your list yet"');
+// older links named the practice alone: a known practice is sent to its full path; a lone team id is that team's list
+assert.equal(go('/coach/a', coach), '/coach/t1/a', 'an older /coach/{practice} link goes to /coach/{team}/{practice}');
+assert.equal(go('/team/a', team), '/team/t1/a');
+assert.equal(go('/coach/t1', coach), 'list:coach:t1', 'a lone team id is the list');
+assert.equal(go('/coach/zzz', coach), 'practice:team:zzz', 'a lone unknown id is tried as a practice (the app fills the team in once it loads)');
+const twoTeams = { persona: 'coach', roles: {}, teams: [{ id: 't1', name: 'Mites' }, { id: 't2', name: 'Squirts' }] };
+assert.equal(go('/coach', twoTeams), 'teams:coach', 'on several teams, /coach offers a choice of team');
+assert.equal(go('/coach', { persona: 'coach', roles: {}, teams: [] }), 'list:coach', 'on no team at all: an empty list');
 assert.equal(go('/editor/p/d', planner), 'editor:p');
 assert.equal(go('/nope', anon), '/');
-assert.equal(go('/coach/a/b', coach), '/');
+assert.equal(go('/coach/a/b/c', coach), '/', 'too many segments');
 // links from before paths existed
-assert.equal(go('/', anon, '#view=OWNER123/abc'), '/coach/abc');
+assert.equal(go('/', anon, '#view=OWNER123/abc'), '/coach/abc', 'a link from before paths existed names the practice alone; it is resolved once the person is known');
 assert.equal(go('/', team, '#team%3DOWNER123%2Fabc'), '/team/abc');
 assert.equal(go('/index.html', planner, '#p=abc&d=def'), '/editor/abc/def');
 assert.equal(routePath({ view: 'editor', pid: 'p', did: 'd' }), '/editor/p/d');
-assert.deepEqual(at('/coach/abc'), { view: 'coach', pid: 'abc', did: null });
+assert.deepEqual(at('/coach/abc'), { view: 'coach', teamId: null, pid: 'abc', did: null, ambiguous: true }, 'a lone id: team or practice, resolveRoute decides');
+assert.deepEqual(at('/coach/t1/abc'), { view: 'coach', teamId: 't1', pid: 'abc', did: null });
+assert.deepEqual(at('/team/t1'), { view: 'team', teamId: null, pid: 't1', did: null, ambiguous: true });
+assert.equal(routePath({ view: 'coach', teamId: 't1', pid: 'p' }), '/coach/t1/p'); assert.equal(routePath({ view: 'team', teamId: 't1' }), '/team/t1'); assert.equal(routePath({ view: 'team', pid: 'p' }), '/team/p');
 
 // stages, incl. practices shared before stages existed
 assert.equal(stageOf({}), 'draft');
@@ -41,8 +54,8 @@ assert.equal(stageOf({ sharedWith: ['a@x.io'], sharedTeam: ['b@x.io'] }), 'team'
 assert.equal(stageOf({ stage: 'draft', sharedTeam: ['b@x.io'] }), 'draft', 'an explicit stage wins');
 
 const roster = { teams: [
-  { name: 'Mites', coaches: [{ email: ' Head@X.io ' }, { email: '' }], players: [{ contacts: [{ email: 'mom@x.io' }, { email: 'head@x.io' }] }, { contacts: [] }] },
-  { name: 'Squirts', coaches: [{ email: 'sq@x.io' }], players: [{ contacts: [{ email: 'head@x.io' }] }] }] };
+  { id: 't1', name: 'Mites', coaches: [{ email: ' Head@X.io ' }, { email: '' }], players: [{ contacts: [{ email: 'mom@x.io' }, { email: 'head@x.io' }] }, { contacts: [] }] },
+  { id: 't2', name: 'Squirts', coaches: [{ email: 'sq@x.io' }], players: [{ contacts: [{ email: 'head@x.io' }] }] }] };
 const p1 = { id: 'p1', team: 'mites', date: '2026-09-21', stage: 'team', sharedTeam: ['Guest@x.io'], drills: [{ id: 'd1' }, { id: 'd2', hidden: true }] };
 assert.deepEqual(accessFor(roster, p1), { stage: 'team', open: false, coach: ['head@x.io'], team: ['mom@x.io', 'guest@x.io'] }, 'roster + extras, lower-cased, a coach-parent is a coach');
 assert.deepEqual(accessFor(roster, { team: 'Squirts', stage: 'coaches' }), { stage: 'coaches', open: false, coach: ['sq@x.io'], team: ['head@x.io'] }, 'per team: the Mites coach is a parent on the Squirts');
@@ -54,8 +67,8 @@ const inbox = inboxDocs(roster, [p1, { id: 'p2', team: 'Squirts', stage: 'coache
 assert.deepEqual(Object.keys(inbox.get('head@x.io').practices), ['p1'], 'a practice still with the coaches is not on a parent\'s list');
 assert.equal(inbox.get('head@x.io').persona, 'coach');
 assert.equal(inbox.get('head@x.io').practices.p1.role, 'coach');
-assert.deepEqual(inbox.get('mom@x.io'), { persona: 'team', practices: { p1: { role: 'team', stage: 'team', team: 'mites', date: '2026-09-21', time: '' } } });
-assert.deepEqual(inbox.get('sq@x.io'), { persona: 'coach', practices: { p2: { role: 'coach', stage: 'coaches', team: 'Squirts', date: '', time: '' } } });
+assert.deepEqual(inbox.get('mom@x.io'), { persona: 'team', practices: { p1: { role: 'team', stage: 'team', team: 'mites', teamId: 't1', date: '2026-09-21', time: '' } }, teams: { t1: { name: 'Mites', role: 'team' } } });
+assert.deepEqual(inbox.get('sq@x.io'), { persona: 'coach', practices: { p2: { role: 'coach', stage: 'coaches', team: 'Squirts', teamId: 't2', date: '', time: '' } }, teams: { t2: { name: 'Squirts', role: 'coach' } } });
 assert.ok(inbox.has('guest@x.io') && !inbox.has(''), 'extras are known people; blank emails are nobody');
 // soft delete: a trashed document is a draft to the outside world — off every list, and its published copy is withdrawn
 assert.equal(stageOf({ stage: 'team', deleted: 1700000000000 }), 'draft');
@@ -75,7 +88,7 @@ assert.ok(divider.points.every(pt => pt.x <= 100) && divider.points.some(pt => p
 assert.equal(game.drills[0].view.w, 106, 'half ice');
 assert.equal(newDrill(3).name, 'Drill 3'); assert.equal(newDrill(3, 'game').name, 'Coaching point 3');
 const gameInbox = inboxDocs(roster, [game]);
-assert.deepEqual(gameInbox.get('mom@x.io').practices[game.id], { role: 'team', stage: 'team', team: 'Mites', date: '2026-10-01', time: '', kind: 'game', opponent: 'Hawks' });
+assert.deepEqual(gameInbox.get('mom@x.io').practices[game.id], { role: 'team', stage: 'team', team: 'Mites', teamId: 't1', date: '2026-10-01', time: '', kind: 'game', opponent: 'Hawks' });
 const gCopy = publishedCopy(game, 'u1');
 assert.equal(gCopy.kind, 'game'); assert.equal(gCopy.opponent, 'Hawks');
 // the practice the calendar points at: the next one (today's counts all day), else the most recent

@@ -16,6 +16,7 @@
 
 <header id="topbar">
   <div class="brand">🏒 Practice Planner</div>
+  <select id="team-pick" title="Which team you are working on — the picker shows that team's practices and games"></select>
   <div id="plist-wrap">
     <button id="btn-practices" title="Your practices — switch, or create a new one"><span id="plist-current"></span> ▾</button>
     <div id="plist-pop" hidden>
@@ -79,6 +80,7 @@
     </div>
   </div>
   <button id="btn-team" title="Manage your team: coaches with emails, players with parent / grandparent contacts — the roster decides who can open released practices. Access requests show up here.">👥 Team</button>
+  <button id="btn-tasks" title="This team's weekly tasks: a calendar of weeks, each week's task list and how-tos, and every player's output" hidden>📅 Tasks</button>
   <button id="btn-feedback" title="Feedback the coaches left on this practice — only you can read it">💬</button>
   <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
   <button id="btn-del-practice" title="Delete — moves it to Deleted in the picker, where it can be restored" class="danger">Delete</button>
@@ -287,28 +289,20 @@
     <div id="team-body"></div>
   </div>
 </div>
-<div id="week-plan" hidden>
+<div id="tasks" hidden>
   <div class="lib-panel">
     <div class="lib-head">
       <b>📅 Weekly tasks</b>
-      <span id="week-plan-title" class="muted small"></span>
+      <span id="tasks-title" class="muted small"></span>
       <span class="spacer"></span>
-      <button id="week-plan-prev" title="Previous week">◀</button>
-      <button id="week-plan-next" title="Next week">▶</button>
-      <button id="week-plan-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
+      <button id="tasks-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
     </div>
-    <div id="week-plan-body" class="club-body"></div>
-  </div>
-</div>
-<div id="club-output" hidden>
-  <div class="lib-panel">
-    <div class="lib-head">
-      <b>📊 Weekly output</b>
-      <span id="club-output-title" class="muted small"></span>
-      <span class="spacer"></span>
-      <button id="club-output-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
+    <div id="tasks-body" class="club-body">
+      <div id="tasks-cal"></div>
+      <div id="tasks-week-head" class="club-head"></div>
+      <div id="tasks-week"></div>
+      <div id="tasks-output" hidden></div>
     </div>
-    <div id="club-output-body" class="club-body"></div>
   </div>
 </div>
 <div id="viewlog" hidden>

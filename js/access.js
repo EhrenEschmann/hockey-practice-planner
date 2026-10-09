@@ -63,10 +63,17 @@ export function inboxDocs(roster, practices) {
   for (const p of practices || []) {
     const a = accessFor(roster, p);
     if (a.stage === 'draft') continue;
-    const card = role => ({ role, stage: a.stage, team: p.team || '', date: p.date || '', time: p.time || '', ...(p.kind === 'game' ? { kind: 'game', opponent: p.opponent || '' } : {}) });
+    const teamId = p.teamId || rosterTeamFor(roster, p)?.id || '';
+    const card = role => ({ role, stage: a.stage, team: p.team || '', teamId, date: p.date || '', time: p.time || '', ...(p.kind === 'game' ? { kind: 'game', opponent: p.opponent || '' } : {}) });
     for (const e of a.coach) { const d = doc(e); d.persona = 'coach'; d.practices[p.id] = card('coach'); }
     if (a.stage === 'team') for (const e of a.team) doc(e).practices[p.id] = card('team');
     else for (const e of a.team) doc(e); // known to the app (not a stranger), nothing to open yet
+  }
+  // Each person's teams: a coach's as 'coach', a family's as 'team' — the viewer's lists are per team.
+  for (const t of roster?.teams || []) {
+    if (!t.id) continue;
+    for (const e of rosterCoachEmails(t)) (doc(e).teams ||= {})[t.id] = { name: t.name || '', role: 'coach' };
+    for (const e of rosterFamilyEmails(t)) { const d = doc(e); d.teams ||= {}; if (!d.teams[t.id]) d.teams[t.id] = { name: t.name || '', role: 'team' }; }
   }
   // Official club teams: each coach gets the whole team's weekly output; each family gets its own players' profiles.
   for (const t of roster?.teams || []) {
@@ -155,13 +162,15 @@ export function parseRoute({ pathname = '/', hash = '' } = {}) {
     return { view: 'root', pid: pid || null, did: did || null, legacy: !!pid };
   }
   if (a === 'editor' && seg.length <= 3) return { view: 'editor', pid: b || null, did: c || null };
-  if ((a === 'coach' || a === 'team') && seg.length <= 2) return { view: a, pid: b || null, did: null };
+  // /coach/{teamId}/{pid}; /coach/{teamId} is a team's list. A lone /coach/{x} is either (older links named the practice
+  // alone): `ambiguous` — resolveRoute tells a team id from a practice id by what the person is on.
+  if ((a === 'coach' || a === 'team') && seg.length <= 3) return c ? { view: a, teamId: b, pid: c, did: null } : { view: a, teamId: null, pid: b || null, did: null, ambiguous: !!b };
   if (a === 'request-access' && seg.length === 1) return { view: 'request', pid: null, did: null };
   return { view: 'unknown', pid: null, did: null };
 }
-export function routePath({ view, pid, did }) {
+export function routePath({ view, teamId = null, pid, did }) {
   if (view === 'editor') return `/editor${pid ? `/${pid}${did ? `/${did}` : ''}` : ''}`;
-  if (view === 'coach' || view === 'team') return `/${view}${pid ? `/${pid}` : ''}`;
+  if (view === 'coach' || view === 'team') return `/${view}${teamId ? `/${teamId}` : ''}${pid ? `/${pid}` : ''}`;
   if (view === 'request') return '/request-access';
   return '/';
 }
@@ -173,30 +182,41 @@ export function routePath({ view, pid, did }) {
  *   { screen: 'editor' | 'list' | 'practice' | 'unavailable' | 'request', as: 'coach' | 'team', pid }
  */
 export function resolveRoute(route, who) {
-  const { view, pid } = route;
   const persona = who?.persona || 'anonymous';
+  const { view } = route;
   if (view === 'unknown') return { go: '/' };
   if (route.legacy && view !== 'root') return { go: routePath(route) };
   if (persona === 'anonymous') return { screen: 'signin' };
+  // A lone id after /coach or /team: a team this person is on, else a practice (an older link). A practice whose team
+  // is known gets its full path; otherwise it is opened as it is and the app fills the team in once it has loaded.
+  let { teamId, pid } = route;
+  const teams = who?.teams || [];
+  if (route.ambiguous) {
+    if (teams.some(t => t.id === pid)) { teamId = pid; pid = null; }
+    else if (who?.practiceTeam?.[pid]) return { go: routePath({ view, teamId: who.practiceTeam[pid], pid }) };
+  }
   if (persona === 'guest') { // signed in anonymously: may watch open practices, has no list of their own
-    if (view === 'coach' && pid) return { go: `/team/${pid}` };
-    if (view === 'team' && pid) return { screen: 'practice', as: 'team', pid };
+    if (view === 'coach' && pid) return { go: routePath({ view: 'team', teamId, pid }) };
+    if (view === 'team' && pid) return { screen: 'practice', as: 'team', teamId, pid };
     return { screen: 'signin' };
   }
   // A signed-in account on no roster: a practice link is still tried, as the team sees it — an open practice lets
- // anyone signed in watch (probe: a refusal sends them on to request access); anything else → request access.
-  if (persona === 'unknown') return (view === 'coach' || view === 'team') && pid ? { screen: 'practice', as: 'team', pid, probe: true } : view === 'request' ? { screen: 'request' } : { go: '/request-access' };
+  // anyone signed in watch (probe: a refusal sends them on to request access); anything else → request access.
+  if (persona === 'unknown') return (view === 'coach' || view === 'team') && pid ? { screen: 'practice', as: 'team', teamId, pid, probe: true } : view === 'request' ? { screen: 'request' } : { go: '/request-access' };
+  // A list needs a team: one team → straight to it; several → choose; none → an empty list.
+  const listFor = as => teamId ? { screen: 'list', as, teamId } : teams.length === 1 ? { go: routePath({ view: as, teamId: teams[0].id }) } : teams.length ? { screen: 'teams', as } : { screen: 'list', as, teamId: null };
   if (persona === 'planner') {
     if (view === 'editor') return { screen: 'editor', pid, did: route.did };
-    if (view === 'coach' || view === 'team') return pid ? { screen: 'practice', as: view, pid } : { screen: 'list', as: view };
+    if (view === 'coach' || view === 'team') return pid ? { screen: 'practice', as: view, teamId, pid } : listFor(view);
     return { go: routePath({ view: 'editor', pid, did: route.did }) }; // "/", "/request-access"
   }
   // coach or team
   const home = `/${persona}`;
   if (view === 'root' || view === 'editor' || view === 'request') return { go: home };
-  if (!pid) return view === 'coach' && persona === 'team' ? { go: '/team' } : { screen: 'list', as: view };
+  if (view === 'coach' && persona === 'team') return { go: routePath({ view: 'team', teamId, pid }) };
+  if (!pid) return listFor(view);
   const role = who.roles?.[pid]; // this practice's role: a coach of one team can be a parent on another
-  if (!role) return { screen: 'practice', as: 'team', pid, probe: true }; // not on their list: still tried, since an open practice is for anyone signed in (a refusal explains)
-  if (view === 'coach' && role === 'team') return { go: `/team/${pid}` };
-  return { screen: 'practice', as: view, pid };
+  if (!role) return { screen: 'practice', as: 'team', teamId, pid, probe: true }; // not on their list: still tried, since an open practice is for anyone signed in (a refusal explains)
+  if (view === 'coach' && role === 'team') return { go: routePath({ view: 'team', teamId, pid }) };
+  return { screen: 'practice', as: view, teamId, pid };
 }

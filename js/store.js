@@ -38,8 +38,8 @@ export function newCoachingPoint(n = 1) {
   ] };
 }
 
-export function newPractice(team = '', kind = null, opponent = '') {
-  const base = { id: uid(), team, date: new Date().toISOString().slice(0, 10), drills: [newDrill(1, kind)] };
+export function newPractice(team = '', kind = null, opponent = '', teamId = null) {
+  const base = { id: uid(), team, ...(teamId ? { teamId } : {}), date: new Date().toISOString().slice(0, 10), drills: [newDrill(1, kind)] };
   return kind === 'game' ? { ...base, kind: 'game', opponent } : base;
 }
 
@@ -157,6 +157,7 @@ export class Store {
   /** The roster was edited: stamp it, persist locally and notify cloud sync (if any). */
   saveRoster() {
     this.roster.updatedAt = Date.now();
+    this.migrate(); // practices follow their roster team by id (a new or renamed team is matched up by name)
     this.persist();
     this.onRosterSave?.(this.roster);
   }
@@ -169,8 +170,11 @@ export class Store {
 
   /** Normalise every practice — local or freshly arrived from the cloud. */
   migrate() {
+    const teams = this.data.roster?.teams || [];
     for (const p of this.data.practices) {
       if (p.name) { if (!p.team) p.team = p.name; delete p.name; } // practices are now identified by team + date
+      // A practice belongs to a roster team by id (the name is its label); older ones are matched up by name.
+      if (!p.teamId || !teams.some(t => t.id === p.teamId)) { const t = teams.find(t => String(t.name || '').trim().toLowerCase() === String(p.team || '').trim().toLowerCase()); if (t) p.teamId = t.id; }
       for (const d of p.drills || []) migrateDrill(d);
       p.stage = stageOf(p); // practices shared by link before stages existed keep their audience (team list → released, coach list → with coaches)
     }

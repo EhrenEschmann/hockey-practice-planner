@@ -2016,7 +2016,7 @@ $('#settings').addEventListener('change', e => {
   else if (k === 'viewmode') { presentMode = v; try { localStorage.setItem('hpp.viewmode', v); } catch { /* fine */ } }
   renderSettings();
 });
-$('#btn-settings').addEventListener('click', e => { e.stopPropagation(); if ($('#settings').hidden) openSettings(); else closeSettings(); });
+$('#btn-settings').addEventListener('click', e => { e.stopPropagation(); closePopovers(); openSettings(); });
 $('#settings-close').addEventListener('click', closeSettings);
 $('#settings').addEventListener('click', e => { if (e.target === $('#settings')) closeSettings(); }); // a click on the backdrop closes it
 
@@ -3941,6 +3941,7 @@ const safeName = s => (s || 'practice').replace(/[^\w\-]+/g, '_');
 
 $('#btn-export-json').addEventListener('click', () => { closePopovers(); $('#btn-export').click(); });
 wirePopover('#btn-export-more', '#export-pop', '#btn-export-json');
+wirePopover('#btn-account', '#account-pop', '#btn-settings');
 $('#btn-export').addEventListener('click', () => {
   const p = store.practice;
   download(`${safeName(practiceLabel(p))}.hpp.json`, new Blob([JSON.stringify({ format: 'hockey-practice-planner', version: 1, practice: p }, null, 2)], { type: 'application/json' }));
@@ -5559,6 +5560,13 @@ function renderCloudStatus(sync, state, detail) {
   $('#cloud-status').classList.toggle('warn', state === 'error');
   $('#btn-signin').hidden = !!u;
   $('#btn-signout').hidden = !u;
+  // The account button: the person's initial when signed in, and a dot that shows the cloud state at a glance.
+  const signed = !!u && state !== 'signedout';
+  $('#account-avatar').textContent = signed ? (String(u.name || u.email || '?').trim()[0] || '?').toUpperCase() : '👤';
+  $('#btn-account').classList.toggle('signed', signed);
+  $('#btn-account').title = `${signed ? `${u.name || u.email} · ` : 'Not signed in · '}${CLOUD_LABELS[state] || ''}${state === 'error' && detail ? ` (${detail})` : ''} — account, cloud status, settings`;
+  const dot = $('#account-dot'); dot.hidden = !signed; dot.className = state;
+  $('#account-who').textContent = signed ? (u.email && u.name !== u.email ? `${u.name} · ${u.email}` : u.name || u.email) : '';
 }
 // Only these accounts get the practice-creation interface. Everyone else uses share links
 // (this is a UI gate; the real protection is Firestore's rules — nobody can write another

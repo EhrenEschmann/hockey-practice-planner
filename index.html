@@ -84,16 +84,9 @@
   <button id="btn-feedback" title="Feedback the coaches left on this practice — only you can read it">💬</button>
   <button id="btn-dup-practice" title="Duplicate practice">Duplicate</button>
   <button id="btn-del-practice" title="Delete — moves it to Deleted in the picker, where it can be restored" class="danger">Delete</button>
-  <button id="btn-settings" title="Settings: your Claude API key, editor and presentation preferences">⚙ Settings</button>
   <div class="spacer"></div>
   <button id="btn-undo" title="Undo (Ctrl+Z)"><span data-icon="undo"></span> Undo</button>
   <button id="btn-redo" title="Redo (Ctrl+Y)"><span data-icon="redo"></span> Redo</button>
-  <span class="sep"></span>
-  <span id="cloud" hidden>
-    <span id="cloud-status" class="muted small" title="Practices are auto-saved to your Firebase account"></span>
-    <button id="btn-signin" title="Sign in with Google to save practices to the cloud">Sign in</button>
-    <button id="btn-signout" title="Sign out" hidden>Sign out</button>
-  </span>
   <span class="sep"></span>
   <button id="btn-import" title="Import a practice JSON file">Import</button>
   <div id="export-wrap" class="split">
@@ -106,6 +99,18 @@
   <button id="btn-print" title="Print practice plan">Print</button>
   <button id="btn-present" title="Open this practice's presentation — a read-only scroll-through — in a new tab (the same page coaches get via 🔗 Coach link)">📺 Present</button>
   <input type="file" id="file-import" accept="application/json,.json" hidden>
+  <div id="account-wrap">
+    <button id="btn-account" title="Account: who is signed in, cloud status, settings"><span id="account-avatar">👤</span><i id="account-dot" hidden></i></button>
+    <div id="account-pop" hidden>
+      <div id="account-who"></div>
+      <span id="cloud" hidden>
+        <span id="cloud-status" class="muted small" title="Practices are auto-saved to your Firebase account"></span>
+        <button id="btn-signin" class="primary" title="Sign in with Google to save practices to the cloud">Sign in with Google</button>
+        <button id="btn-signout" title="Sign out" hidden>Sign out</button>
+      </span>
+      <button id="btn-settings" title="Settings: your Claude API key, editor and presentation preferences">⚙ Settings</button>
+    </div>
+  </div>
 </header>
 
 <div id="viewbar">

@@ -1848,6 +1848,7 @@ function renderPracticeProps() {
   $('#btn-new-practice').title = `Details of the ${docNoun(p)} that is open: team, ${game ? 'opponent, ' : ''}date, time, coaches, sharing`;
   $('#practice-pop-title').textContent = game ? 'Current game' : 'Current practice';
   $('#btn-del-practice').textContent = `🗑 Delete this ${docNoun(p)}`;
+  $('#btn-dup-practice').textContent = `⧉ Duplicate this ${docNoun(p)}`;
   $('#practice-opponent-wrap').hidden = !game;
   for (const [id, key] of PRACTICE_FIELDS) {
     const el = $(id);
@@ -3936,7 +3937,7 @@ $('#btn-dup-practice').addEventListener('click', () => {
   copy.id = uid(); copy.date = new Date().toISOString().slice(0, 10);
   const srcPid = store.practice.id, pairs = [];
   copy.drills.forEach((d, i) => { d.id = uid(); markAssetsPending(d); d.objects = cloneObjects(d.objects); pairs.push([store.practice.drills[i], d]); });
-  finishActive(); store.addPractice(copy); sel = null; stopAnim(); renderAll();
+  finishActive(); store.addPractice(copy); sel = null; stopAnim(); $('#practice-pop').hidden = true; renderAll();
   (async () => { for (const [s, d] of pairs) await copyDrillAssets(srcPid, s, copy.id, d); })(); // recordings and videos follow, one drill at a time
 });
 $('#btn-del-practice').addEventListener('click', () => {

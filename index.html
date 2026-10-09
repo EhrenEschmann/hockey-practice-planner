@@ -96,8 +96,13 @@
   </span>
   <span class="sep"></span>
   <button id="btn-import" title="Import a practice JSON file">Import</button>
-  <button id="btn-export" title="Export this practice as JSON">Export JSON</button>
-  <button id="btn-png" title="Export current drill as PNG">Export PNG</button>
+  <div id="export-wrap" class="split">
+    <button id="btn-export" class="split-main" title="Export this practice as JSON (the default — the arrow has more)">Export</button><button id="btn-export-more" class="split-arrow" title="Other exports">▾</button>
+    <div id="export-pop" hidden>
+      <button id="btn-export-json" title="The whole practice as a JSON file you can import again">⤓ Export JSON</button>
+      <button id="btn-png" title="The current drill's diagram as a PNG image">🖼 Export PNG</button>
+    </div>
+  </div>
   <button id="btn-print" title="Print practice plan">Print</button>
   <button id="btn-present" title="Open this practice's presentation — a read-only scroll-through — in a new tab (the same page coaches get via 🔗 Coach link)">📺 Present</button>
   <input type="file" id="file-import" accept="application/json,.json" hidden>

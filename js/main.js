@@ -3939,6 +3939,8 @@ function download(name, blob) {
 }
 const safeName = s => (s || 'practice').replace(/[^\w\-]+/g, '_');
 
+$('#btn-export-json').addEventListener('click', () => { closePopovers(); $('#btn-export').click(); });
+wirePopover('#btn-export-more', '#export-pop', '#btn-export-json');
 $('#btn-export').addEventListener('click', () => {
   const p = store.practice;
   download(`${safeName(practiceLabel(p))}.hpp.json`, new Blob([JSON.stringify({ format: 'hockey-practice-planner', version: 1, practice: p }, null, 2)], { type: 'application/json' }));
@@ -3959,6 +3961,7 @@ $('#file-import').addEventListener('change', async e => {
 });
 
 $('#btn-png').addEventListener('click', async () => {
+  closePopovers(); // picked from the Export menu
   const d = drill();
   const svgStr = standaloneSVG(d, rinkSVG(), SVG_STYLE);
   const scale = 3;

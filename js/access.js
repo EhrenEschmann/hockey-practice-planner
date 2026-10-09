@@ -107,7 +107,7 @@ export function clubDoc(t) {
   const clean = list => (list || []).filter(x => x && x.id && String(x.title || '').trim()).map(x => ({ id: x.id, title: String(x.title).trim(), unit: TASK_UNITS[x.unit] ? x.unit : 'reps', target: Math.max(0, Math.round(+x.target || 0)), times: Math.max(1, Math.round(+x.times || 1)), ...media(x) }));
   // Tasks are set week by week: weeks['YYYY-Www'] = [tasks]. A week with no list is simply absent.
   const weeks = {};
-  for (const [w, wk] of Object.entries(t.weeks || {})) { if (!/^\d{4}-W\d{2}$/.test(w)) continue; const list = clean(wk?.tasks); if (list.length) weeks[w] = list; }
+  for (const [w, wk] of Object.entries(t.weeks || {})) { if (!/^\d{4}-(\d{2}-\d{2}|W\d{2})$/.test(w)) continue; const list = clean(wk?.tasks); if (list.length) weeks[normalWeek(w)] = list; }
   return { id: t.id, name: t.name || '', weeks, coaches: coach, members, players, updatedAt: t.updatedAt || 0 };
 }
 /** The task list a club document holds for a week ([] when none is set). */
@@ -116,27 +116,50 @@ export const tasksForWeek = (doc, week) => doc?.weeks?.[week] || [];
 export function migrateClubTeam(t, thisWeek) {
   if (!t) return t;
   if (Array.isArray(t.tasks)) { t.weeks ||= {}; if (t.tasks.length && !t.weeks[thisWeek]?.tasks?.length) t.weeks[thisWeek] = { tasks: t.tasks }; delete t.tasks; }
+  for (const w of Object.keys(t.weeks || {})) { // Monday-week keys from before move onto their Sunday week
+    if (!/^\d{4}-W\d{2}$/.test(w)) continue;
+    const k = normalWeek(w);
+    if (!t.weeks[k]?.tasks?.length) t.weeks[k] = t.weeks[w];
+    delete t.weeks[w];
+  }
   return t;
 }
-/** The ISO week a date falls in, as 'YYYY-Www' (weeks start on Monday) — the key a week's stats are filed under. */
-export function isoWeek(d = new Date()) {
-  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = x.getUTCDay() || 7; // Mon=1 … Sun=7
-  x.setUTCDate(x.getUTCDate() + 4 - day); // the Thursday of this week decides the year
-  const y = x.getUTCFullYear();
-  const week = Math.ceil(((x - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7);
-  return `${y}-W${String(week).padStart(2, '0')}`;
+/**
+ * Weeks run Sunday to Saturday. A week's key is the date of its Sunday, 'YYYY-MM-DD' — the key task lists and stats
+ * are filed under. (Keys from before — ISO 'YYYY-Www', Monday weeks — are still read: see legacyWeek / weekStart.)
+ */
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export function weekKey(d = new Date()) {
+  const s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  s.setDate(s.getDate() - s.getDay()); // back to Sunday
+  return ymd(s);
 }
-/** The Monday a 'YYYY-Www' key starts on (local midnight). */
+export const isoWeek = weekKey; // older name
+/** The day a week key starts on (local midnight): its Sunday — or, for an old ISO key, the Sunday before that week's Monday. */
 export function weekStart(key) {
-  const m = String(key || '').match(/^(\d{4})-W(\d{2})$/); if (!m) return null;
+  const k = String(key || '');
+  let m = k.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = k.match(/^(\d{4})-W(\d{2})$/); if (!m) return null;
   const y = +m[1], w = +m[2];
   const jan4 = new Date(y, 0, 4), day = jan4.getDay() || 7; // ISO week 1 holds 4 January
   const monday = new Date(y, 0, 4 - (day - 1) + (w - 1) * 7);
+  monday.setDate(monday.getDate() - 1); // the Sunday-to-Saturday week that holds most of that ISO week
   return monday;
 }
+/** The current-form key for any key (an old ISO key maps onto the Sunday week holding its Monday–Saturday). */
+export const normalWeek = key => { const s = weekStart(key); return s ? weekKey(s) : key; };
+/** The old ISO key that a Sunday-week's numbers may still be filed under (its Monday's ISO week). */
+export function legacyWeek(key) {
+  const s = weekStart(key); if (!s) return null;
+  const x = new Date(Date.UTC(s.getFullYear(), s.getMonth(), s.getDate() + 1)); // the Monday
+  const day = x.getUTCDay() || 7;
+  x.setUTCDate(x.getUTCDate() + 4 - day);
+  const y = x.getUTCFullYear();
+  return `${y}-W${String(Math.ceil(((x - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7)).padStart(2, '0')}`;
+}
 /** The week key `n` weeks away from `key`. */
-export function shiftWeek(key, n) { const s = weekStart(key); if (!s) return key; s.setDate(s.getDate() + 7 * n); return isoWeek(s); }
+export function shiftWeek(key, n) { const s = weekStart(key); if (!s) return key; s.setDate(s.getDate() + 7 * n); return weekKey(s); }
 /** The stats document id for one player's week. */
 export const statId = (playerId, week) => `${playerId}_${week}`;
 

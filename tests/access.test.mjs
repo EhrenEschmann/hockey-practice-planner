@@ -100,20 +100,20 @@ assert.equal(calendarFocus([], '2026-10-01'), null);
 console.log('access.js: all assertions passed');
 
 // ---- official club teams: the club document, the inbox's club field, and week keys
-import { clubDoc, isoWeek, weekStart, shiftWeek, statId, tasksForWeek, migrateClubTeam } from '../js/access.js';
-const clubTeam = { id: 't1', name: 'Mites', club: true, coaches: [{ email: 'Head@x.io' }], weeks: { '2026-W41': { tasks: [{ id: 'k1', title: ' Shots on goal ', unit: 'shots', target: 25, times: 3 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60 }, { id: 'k3', title: '', unit: 'min', target: 5 }, { id: 'k4', title: 'Balance', unit: 'nope', target: -3, times: 0 }] }, '2026-W42': { tasks: [] }, 'junk': { tasks: [{ id: 'z', title: 'x' }] } },
+import { clubDoc, weekKey, weekStart, shiftWeek, statId, tasksForWeek, migrateClubTeam, legacyWeek, normalWeek } from '../js/access.js';
+const clubTeam = { id: 't1', name: 'Mites', club: true, coaches: [{ email: 'Head@x.io' }], weeks: { '2026-10-04': { tasks: [{ id: 'k1', title: ' Shots on goal ', unit: 'shots', target: 25, times: 3 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60 }, { id: 'k3', title: '', unit: 'min', target: 5 }, { id: 'k4', title: 'Balance', unit: 'nope', target: -3, times: 0 }] }, '2026-10-11': { tasks: [] }, 'junk': { tasks: [{ id: 'z', title: 'x' }] } },
   players: [{ id: 'pl1', name: 'Sam', contacts: [{ email: 'mom@x.io' }, { email: 'DAD@x.io' }] }, { id: 'pl2', name: 'Alex', contacts: [{ email: 'head@x.io' }] }] };
 const cd = clubDoc(clubTeam);
-assert.deepEqual(cd.weeks['2026-W41'], [{ id: 'k1', title: 'Shots on goal', unit: 'shots', target: 25, times: 3 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60, times: 1 }, { id: 'k4', title: 'Balance', unit: 'reps', target: 0, times: 1 }], 'a week\'s tasks: trimmed, untitled dropped, unit, target and times sanitised');
-assert.deepEqual(Object.keys(cd.weeks), ['2026-W41'], 'an empty week and a malformed key are left out');
-assert.deepEqual(tasksForWeek(cd, '2026-W42'), []); assert.equal(tasksForWeek(cd, '2026-W41').length, 3);
-const legacy = migrateClubTeam({ id: 't9', club: true, tasks: [{ id: 'k', title: 'Old' }] }, '2026-W41');
-assert.deepEqual(legacy.weeks['2026-W41'].tasks, [{ id: 'k', title: 'Old' }], 'a recurring list from before becomes this week\'s'); assert.equal('tasks' in legacy, false);
+assert.deepEqual(cd.weeks['2026-10-04'], [{ id: 'k1', title: 'Shots on goal', unit: 'shots', target: 25, times: 3 }, { id: 'k2', title: 'Stickhandling', unit: 'min', target: 60, times: 1 }, { id: 'k4', title: 'Balance', unit: 'reps', target: 0, times: 1 }], 'a week\'s tasks: trimmed, untitled dropped, unit, target and times sanitised');
+assert.deepEqual(Object.keys(cd.weeks), ['2026-10-04'], 'an empty week and a malformed key are left out');
+assert.deepEqual(tasksForWeek(cd, '2026-10-11'), []); assert.equal(tasksForWeek(cd, '2026-10-04').length, 3);
+const legacy = migrateClubTeam({ id: 't9', club: true, tasks: [{ id: 'k', title: 'Old' }] }, '2026-10-04');
+assert.deepEqual(legacy.weeks['2026-10-04'].tasks, [{ id: 'k', title: 'Old' }], 'a recurring list from before becomes this week\'s'); assert.equal('tasks' in legacy, false);
 assert.deepEqual(cd.coaches, ['head@x.io']); assert.deepEqual(cd.members.sort(), ['dad@x.io', 'head@x.io', 'mom@x.io']);
 assert.deepEqual(cd.players, { pl1: { name: 'Sam', contacts: ['mom@x.io', 'dad@x.io'] }, pl2: { name: 'Alex', contacts: ['head@x.io'] } });
 assert.equal(clubDoc({ ...clubTeam, club: false }), null, 'only a team flagged as a club gets a document');
-const withMedia = clubDoc({ ...clubTeam, weeks: { '2026-W43': { tasks: [{ id: 'k9', title: 'Toe drag', unit: 'reps', target: 10, audio: { at: 5, mime: 'audio/webm', secs: 12.5, size: 9000, cloud: true, blob: 'never' }, video: { at: 6, mime: 'video/mp4', secs: 20, size: 1e6, width: 640, height: 360, chunks: 2, cloud: true }, videoUrl: ' https://youtu.be/abc123xyz ' }] } } });
-withMedia.tasks = withMedia.weeks['2026-W43'];
+const withMedia = clubDoc({ ...clubTeam, weeks: { '2026-10-18': { tasks: [{ id: 'k9', title: 'Toe drag', unit: 'reps', target: 10, audio: { at: 5, mime: 'audio/webm', secs: 12.5, size: 9000, cloud: true, blob: 'never' }, video: { at: 6, mime: 'video/mp4', secs: 20, size: 1e6, width: 640, height: 360, chunks: 2, cloud: true }, videoUrl: ' https://youtu.be/abc123xyz ' }] } } });
+withMedia.tasks = withMedia.weeks['2026-10-18'];
 assert.deepEqual(withMedia.tasks[0].audio, { at: 5, mime: 'audio/webm', secs: 12.5, size: 9000 }, 'audio metadata only, no local fields');
 assert.deepEqual(withMedia.tasks[0].video, { at: 6, mime: 'video/mp4', secs: 20, size: 1e6, width: 640, height: 360, chunks: 2 });
 assert.equal(withMedia.tasks[0].videoUrl, 'https://youtu.be/abc123xyz');
@@ -121,8 +121,14 @@ const clubInbox = inboxDocs({ teams: [clubTeam] }, []);
 assert.deepEqual(clubInbox.get('head@x.io').club, { t1: { name: 'Mites', role: 'coach', players: [{ id: 'pl1', name: 'Sam' }, { id: 'pl2', name: 'Alex' }] } }, 'a coach (even as a parent) gets every player');
 assert.deepEqual(clubInbox.get('mom@x.io').club, { t1: { name: 'Mites', role: 'family', players: [{ id: 'pl1', name: 'Sam' }] } }, 'a family gets its own players');
 assert.equal(inboxDocs({ teams: [{ ...clubTeam, club: false }] }, []).get('mom@x.io').club, undefined, 'no club field without the flag');
-assert.equal(isoWeek(new Date(2026, 9, 6)), '2026-W41'); assert.equal(isoWeek(new Date(2026, 0, 1)), '2026-W01'); assert.equal(isoWeek(new Date(2027, 0, 3)), '2026-W53');
-assert.equal(weekStart('2026-W41').toDateString(), new Date(2026, 9, 5).toDateString(), 'a week starts on its Monday');
-assert.equal(shiftWeek('2026-W41', -1), '2026-W40'); assert.equal(shiftWeek('2026-W53', 1), '2027-W01');
-assert.equal(statId('pl1', '2026-W41'), 'pl1_2026-W41');
+// weeks run Sunday to Saturday and are keyed by their Sunday
+assert.equal(weekKey(new Date(2026, 9, 6)), '2026-10-04', 'Tuesday 6 Oct is in the week of Sunday 4 Oct'); assert.equal(weekKey(new Date(2026, 9, 4)), '2026-10-04'); assert.equal(weekKey(new Date(2026, 9, 10)), '2026-10-04', 'Saturday closes the week'); assert.equal(weekKey(new Date(2026, 9, 11)), '2026-10-11');
+assert.equal(weekStart('2026-10-04').getDay(), 0, 'a week starts on its Sunday');
+assert.equal(shiftWeek('2026-10-04', -1), '2026-09-27'); assert.equal(shiftWeek('2026-12-27', 1), '2027-01-03');
+assert.equal(statId('pl1', '2026-10-04'), 'pl1_2026-10-04');
+// keys from the Monday-week days still resolve
+assert.equal(normalWeek('2026-W41'), '2026-10-04', 'ISO week 41 (Mon 5 Oct) lives on the Sunday 4 Oct week'); assert.equal(legacyWeek('2026-10-04'), '2026-W41');
+assert.equal(weekStart('2026-W41').toDateString(), new Date(2026, 9, 4).toDateString());
+const moved = migrateClubTeam({ id: 't8', club: true, weeks: { '2026-W41': { tasks: [{ id: 'q', title: 'Old key' }] } } }, '2026-10-04');
+assert.deepEqual(Object.keys(moved.weeks), ['2026-10-04']); assert.equal(moved.weeks['2026-10-04'].tasks[0].title, 'Old key');
 console.log('access.js club: all assertions passed');

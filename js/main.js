@@ -4,7 +4,7 @@ import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, AR
 import { makeSim, facingOf, goalieSquareTo, goalieHome, isPlayer, underPad, jumpHeight, skaterPoints, stickRotation, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED, CONTACT_DIST } from './sim.js';
 import { Store, uid, newDrill, newPractice, practiceLabel, usDate, parseUsDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
-import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus, clubDoc, TASK_UNITS, isoWeek, weekStart, shiftWeek, tasksForWeek, migrateClubTeam } from './access.js';
+import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus, clubDoc, TASK_UNITS, weekKey, weekStart, shiftWeek, tasksForWeek, migrateClubTeam, legacyWeek, normalWeek } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon, hydrateIcons } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
@@ -1987,7 +1987,7 @@ function currentMgrTeam() {
 
 function openTeamMgr() {
   finishActive();
-  if ((store.roster.teams || []).some(t => t.club && Array.isArray(t.tasks))) { for (const t of store.roster.teams) if (t.club) migrateClubTeam(t, isoWeek()); store.saveRoster(); } // a recurring list from before becomes this week's, and is saved as such
+  migrateClubs();
   if (!store.roster.teams.length) {
     store.roster.teams.push({ id: uid(), name: store.practice.team || 'My team', coaches: [], players: [] });
     store.saveRoster();
@@ -2222,7 +2222,7 @@ async function encodeTaskVideo(t, k, file) {
 
 // ----- weeks: the calendar in the team manager, and the design pane for one week's task list -----
 const CAL_WEEKS = 16; // weeks shown per calendar page
-let calFrom = shiftWeek(isoWeek(), -3); // the first week on the calendar page
+let calFrom = shiftWeek(weekKey(), -3); // the first week on the calendar page
 let weekPlanOpen = null; // { teamId, week } while a week's design pane is open
 /** The task array being edited: the open week's (created on demand), else nothing. */
 function weekTasks(t) {
@@ -2232,7 +2232,7 @@ function weekTasks(t) {
 }
 const weekRange = w => { const s = weekStart(w); const e = new Date(s); e.setDate(e.getDate() + 6); const f = d => `${d.getMonth() + 1}/${d.getDate()}`; return `${f(s)}–${f(e)}`; };
 function weekCalendarHTML(t, selected = null) {
-  const now = isoWeek();
+  const now = weekKey();
   const cells = [];
   for (let i = 0, w = calFrom; i < CAL_WEEKS; i++, w = shiftWeek(w, 1)) {
     const list = (t.weeks?.[w]?.tasks || []).filter(k => String(k.title || '').trim());
@@ -2245,12 +2245,20 @@ function weekCalendarHTML(t, selected = null) {
     <div class="cal-grid">${cells.join('')}</div>`;
 }
 // ----- 📅 Tasks: one top-level panel for the current team — the calendar, and under it the selected week's list or output
+/** Club teams from earlier versions: a recurring list becomes this week's, and Monday-week keys move onto their Sunday weeks — saved once. */
+function migrateClubs() {
+  const stale = t => t.club && (Array.isArray(t.tasks) || Object.keys(t.weeks || {}).some(w => /^\d{4}-W\d{2}$/.test(w)));
+  if (!(store.roster.teams || []).some(stale)) return;
+  for (const t of store.roster.teams) if (t.club) migrateClubTeam(t, weekKey());
+  store.saveRoster();
+}
 let tasksTab = 'tasks'; // 'tasks' | 'output' for the selected week
 function openTasks() {
+  migrateClubs();
   const t = currentTeam(); if (!t) { alert('Pick a team first (the team selector on the top bar).'); return; }
   if (!t.club) { if (!confirm(`${t.name || 'This team'} isn't marked as an official club team yet. Mark it now?`)) return; t.club = true; t.weeks ||= {}; store.saveRoster(); }
   closeTeamMgr(); closePopovers();
-  weekPlanOpen = weekPlanOpen?.teamId === t.id ? weekPlanOpen : { teamId: t.id, week: isoWeek() };
+  weekPlanOpen = weekPlanOpen?.teamId === t.id ? weekPlanOpen : { teamId: t.id, week: weekKey() };
   taskMediaOpen = null;
   $('#tasks').hidden = false;
   renderTasks();
@@ -2271,7 +2279,7 @@ const taskRowHTML = (t, k) => `
 function renderTasks() {
   if ($('#tasks').hidden || !weekPlanOpen) return;
   const t = (store.roster.teams || []).find(x => x.id === weekPlanOpen.teamId); if (!t) { closeTasks(); return; }
-  const { week } = weekPlanOpen, now = isoWeek();
+  const { week } = weekPlanOpen, now = weekKey();
   $('#tasks-title').textContent = t.name || 'Team';
   $('#tasks-cal').innerHTML = weekCalendarHTML(t, week);
   $('#tasks-week-head').innerHTML = `<h3>${escHtml(weekRange(week))}<span class="muted small"> · ${week === now ? 'this week' : week < now ? 'past' : 'ahead'}</span></h3>
@@ -4942,8 +4950,8 @@ function clubsFor() {
   if (who.persona === 'planner') return (store.roster.teams || []).filter(t => t.club).map(t => ({ id: t.id, name: t.name || '', role: 'coach', players: (t.players || []).map(pl => ({ id: pl.id, name: pl.name || '' })) }));
   return Object.entries(viewerInbox?.club || {}).map(([id, c]) => ({ id, ...c }));
 }
-const clubState = { teamId: null, doc: null, week: isoWeek(), stats: new Map(), player: null, mount: null, busy: '' };
-const weekLabel = w => { const s = weekStart(w); if (!s) return w; const e = new Date(s); e.setDate(e.getDate() + 6); const f = d => `${d.getMonth() + 1}/${d.getDate()}`; return `${w === isoWeek() ? 'This week · ' : ''}${f(s)}–${f(e)}`; };
+const clubState = { teamId: null, doc: null, week: weekKey(), stats: new Map(), player: null, mount: null, busy: '' };
+const weekLabel = w => { const s = weekStart(w); if (!s) return w; const e = new Date(s); e.setDate(e.getDate() + 6); const f = d => `${d.getMonth() + 1}/${d.getDate()}`; return `${w === weekKey() ? 'This week · ' : ''}${f(s)}–${f(e)}`; };
 const myEmail = () => String(cloudSync?.user?.email || '').toLowerCase();
 /** The club document: the planner's own roster is the truth; everyone else reads club/{teamId}. */
 async function loadClubDoc(teamId) {
@@ -4951,7 +4959,7 @@ async function loadClubDoc(teamId) {
   if (!cloudBackend?.loadClub) return null;
   try { return await cloudBackend.loadClub(teamId); } catch { return null; }
 }
-async function openClubOutput(teamId, { mount, sheet = false, week = isoWeek(), navless = false }) {
+async function openClubOutput(teamId, { mount, sheet = false, week = weekKey(), navless = false }) {
   clubState.teamId = teamId; clubState.player = null; clubState.week = week; clubState.stats = new Map(); clubState.busy = 'Loading…'; clubState.navless = navless;
   clubState.mount = mount;
   if (sheet) $('#present-club').hidden = false;
@@ -4961,20 +4969,31 @@ async function openClubOutput(teamId, { mount, sheet = false, week = isoWeek(), 
   await loadClubWeek();
 }
 async function openProfile(teamId, playerId) {
-  clubState.teamId = teamId; clubState.player = playerId; clubState.week = isoWeek(); clubState.stats = new Map(); clubState.busy = 'Loading…';
+  clubState.teamId = teamId; clubState.player = playerId; clubState.week = weekKey(); clubState.stats = new Map(); clubState.busy = 'Loading…';
   clubState.mount = $('#present-club-body'); $('#present-club').hidden = false;
   renderClub();
   clubState.doc = await loadClubDoc(teamId);
   if (!clubState.doc) { clubState.busy = '✗ Could not load this club team.'; renderClub(); return; }
   if (!cloudBackend?.loadPlayerStats || !cloudSync?.user) { clubState.busy = '✗ Sign in to see and log the numbers.'; renderClub(); return; }
-  try { for (const s of await cloudBackend.loadPlayerStats(teamId, playerId)) clubState.stats.set(`${s.playerId}_${s.week}`, s); clubState.busy = ''; }
+  try {
+    const all = await cloudBackend.loadPlayerStats(teamId, playerId);
+    for (const s of all) if (/W/.test(s.week)) clubState.stats.set(`${s.playerId}_${normalWeek(s.week)}`, { ...s, week: normalWeek(s.week) }); // old Monday-week keys first…
+    for (const s of all) if (!/W/.test(s.week)) clubState.stats.set(`${s.playerId}_${s.week}`, s); // …then the current form, which wins
+    clubState.busy = '';
+  }
   catch (e) { clubState.busy = `✗ Could not load the numbers: ${e?.message || e}`; }
   renderClub();
 }
 async function loadClubWeek() {
   clubState.busy = 'Loading…'; renderClub();
   if (!cloudBackend?.loadWeekStats || !cloudSync?.user) { clubState.busy = '✗ Sign in to see the numbers — they live in the cloud.'; renderClub(); return; }
-  try { for (const s of await cloudBackend.loadWeekStats(clubState.teamId, clubState.week)) clubState.stats.set(`${s.playerId}_${s.week}`, s); clubState.busy = ''; }
+  try {
+    // Numbers logged in the Monday-week days sit under the old key for the same week: read both, the new key winning.
+    const [now, old] = await Promise.all([cloudBackend.loadWeekStats(clubState.teamId, clubState.week), cloudBackend.loadWeekStats(clubState.teamId, legacyWeek(clubState.week)).catch(() => [])]);
+    for (const s of old) clubState.stats.set(`${s.playerId}_${clubState.week}`, { ...s, week: clubState.week });
+    for (const s of now) clubState.stats.set(`${s.playerId}_${s.week}`, s);
+    clubState.busy = '';
+  }
   catch (e) { clubState.busy = `✗ Could not load the numbers: ${e?.message || e}`; }
   renderClub();
 }
@@ -5005,7 +5024,7 @@ function renderClub({ keepFocus = false } = {}) {
   const m = clubState.mount; if (!m) return;
   if (keepFocus && m.contains(document.activeElement)) return; // typing: the numbers are already in state; repaint when the field blurs
   const d = clubState.doc, week = clubState.week;
-  const nav = clubState.navless ? '' : `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= isoWeek() ? 'disabled' : ''}>▶</button></div>`;
+  const nav = clubState.navless ? '' : `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= weekKey() ? 'disabled' : ''}>▶</button></div>`;
   const note = `<div class="club-note muted small${/✗/.test(clubState.busy) ? ' warn' : ''}">${escHtml(clubState.busy)}</div>`;
   if (!d) { m.innerHTML = `<div class="club-head"><h3>Club</h3></div>${note}`; return; }
   const tasks = tasksForWeek(d, week); // each week has its own list; an unset week is empty

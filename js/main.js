@@ -4972,7 +4972,7 @@ function showList(r) {
   // The tab bar: Tasks only on an official club team.
   $('#present-tabs').innerHTML = LIST_TAB_DEFS.filter(([k]) => k !== 'tasks' || club).map(([k, label, ic]) => `<a class="pr-tab${k === tab ? ' active' : ''}" href="${routePath({ view: as, teamId: r.teamId, tab: k })}" data-nav>${icon(ic)}<span>${label}</span></a>`).join('');
   const key = `${as}/${r.teamId}/${tab}`;
-  if (tab === 'tasks') { if (listKey === key && $('#tasks-tab')) return; listKey = key; renderTasksTab(club); $('#present-scroll').scrollTop = 0; return; }
+  if (tab === 'tasks') { if (listKey === key && $('#tasks-tab')) return; listKey = key; renderTasksTab(club, as); $('#present-scroll').scrollTop = 0; return; }
   listKey = key;
   const empty = loading ? '<p class="muted">Loading…</p>' : rec?.error && !rec.items.length ? `<p class="warn">Could not load this team's practices: ${escHtml(rec.error.message || rec.error)}</p>` : null;
   const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
@@ -5003,11 +5003,15 @@ function showList(r) {
   $('#present-body').innerHTML = `<div class="pl-list">${html}</div>`;
   $('#present-scroll').scrollTop = 0;
 }
-/** The Tasks tab: a family logs their player's week right here; a coach gets the team's weekly output. */
-function renderTasksTab(club) {
+/**
+ * The Tasks tab: a family logs their player's week right here; a coach gets the team's weekly output. A coach who is
+ * also a parent gets their own skater on the team view (/team) and the whole team on the coach view (/coach).
+ */
+function renderTasksTab(club, as) {
   const body = $('#present-body');
   if (!club) { body.innerHTML = '<div class="pl-list" id="tasks-tab"><p class="muted">Weekly tasks aren’t set up for this team.</p></div>'; return; }
-  const family = club.role !== 'coach', players = club.players || [];
+  const players = club.players || [];
+  const family = club.role !== 'coach' || (as === 'team' && players.length > 0);
   const chips = family && players.length > 1 ? `<div class="tab-players">${players.map((pl, i) => `<button class="chip${i === 0 ? ' active' : ''}" data-tab-player="${escHtml(pl.id)}">${escHtml(pl.name || 'Player')}</button>`).join('')}</div>` : '';
   body.innerHTML = `<div class="pl-list" id="tasks-tab">${chips}<div id="tasks-mount" class="club-body"></div></div>`;
   const mount = $('#tasks-mount');

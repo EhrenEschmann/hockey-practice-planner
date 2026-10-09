@@ -109,7 +109,7 @@ assert.deepEqual(withMedia.tasks[0].audio, { at: 5, mime: 'audio/webm', secs: 12
 assert.deepEqual(withMedia.tasks[0].video, { at: 6, mime: 'video/mp4', secs: 20, size: 1e6, width: 640, height: 360, chunks: 2 });
 assert.equal(withMedia.tasks[0].videoUrl, 'https://youtu.be/abc123xyz');
 const clubPeople = peopleDocs({ teams: [clubTeam] });
-assert.deepEqual(clubPeople.get('head@x.io').teams.t1, { name: 'Mites', role: 'coach', club: true }, 'a coach (even as a parent) is a coach of the club team');
+assert.deepEqual(clubPeople.get('head@x.io').teams.t1, { name: 'Mites', role: 'coach', club: true, players: [{ id: 'pl2', name: 'Alex' }] }, 'a coach-parent is a coach of the club team, with their own player listed');
 assert.deepEqual(clubPeople.get('mom@x.io').teams.t1, { name: 'Mites', role: 'family', players: [{ id: 'pl1', name: 'Sam' }], club: true }, 'a family gets its own players');
 assert.equal(peopleDocs({ teams: [{ ...clubTeam, club: false }] }).get('mom@x.io').teams.t1.club, undefined, 'no club flag without it');
 // weeks run Sunday to Saturday and are keyed by their Sunday

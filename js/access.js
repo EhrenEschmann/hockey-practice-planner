@@ -64,8 +64,9 @@ export function peopleDocs(roster) {
     if (!t.id) continue;
     const coaches = rosterCoachEmails(t);
     for (const e of coaches) { const d = doc(e); d.persona = 'coach'; d.teams[t.id] = { name: t.name || '', role: 'coach', ...(t.club ? { club: true } : {}) }; }
+    // A coach who is also a parent stays a coach on the team, but their own players ride along too: the team view
+    // shows them their own skater's tasks, the coach view the whole team.
     for (const pl of t.players || []) for (const e of emails((pl.contacts || []).map(k => k.email))) {
-      if (coaches.includes(e)) continue; // a coach-parent is a coach on that team
       const d = doc(e), entry = d.teams[t.id] ||= { name: t.name || '', role: 'family', players: [], ...(t.club ? { club: true } : {}) };
       if (!pl.id) continue;
       entry.players ||= [];

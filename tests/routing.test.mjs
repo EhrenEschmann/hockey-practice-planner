@@ -73,20 +73,22 @@ try {
   await planner.open('/');
   let s = await planner.state();
   ok('planner on "/" lands in /editor/<practice>/<drill>', /^\/editor\/p1\/d\d$/.test(s.path) && s.editor, s);
-  await planner.until(`fetch('http://127.0.0.1:${CLOUD}/', { method: 'POST', body: JSON.stringify({ user: ${JSON.stringify(U.planner)}, op: 'get', path: 'inbox/parent@example.com' }) }).then(r => r.json()).then(r => !!r.data)`, 'publishing after sign-in');
-  ok('released practices are published, the draft is not', cloud.db.has('published/p1') && cloud.db.has('published/p2') && !cloud.db.has('published/p3'), [...cloud.db.keys()]);
-  const pub = cloud.db.get('published/p1');
-  ok('the published copy has no access lists, no hidden drill, and names its owner', !('sharedWith' in pub) && !('stage' in pub) && pub.drills.length === 2 && pub.owner === 'own', pub);
-  ok('access lists come from the roster (+ extras), lower-cased, coach wins over team', JSON.stringify(cloud.db.get('access/p1')) === JSON.stringify({ stage: 'team', open: false, coach: ['coach.a@example.com', 'coachb@example.com', 'guest@example.com'], team: ['parent@example.com'] }), cloud.db.get('access/p1'));
-  ok('each person gets a list document with their persona', cloud.db.get('inbox/coach.a@example.com')?.persona === 'coach' && Object.keys(cloud.db.get('inbox/coach.a@example.com').practices).length === 3
-    && cloud.db.get('inbox/parent@example.com')?.persona === 'team' && Object.keys(cloud.db.get('inbox/parent@example.com').practices).sort().join() === 'p0,p1', cloud.db.get('inbox/parent@example.com'));
+  await planner.until(`fetch('http://127.0.0.1:${CLOUD}/', { method: 'POST', body: JSON.stringify({ user: ${JSON.stringify(U.planner)}, op: 'get', path: 'people/parent@example.com' }) }).then(r => r.json()).then(r => !!r.data)`, 'publishing after sign-in');
+  const H = pid => cloud.db.get(`teams/t1/practices/${pid}`);
+  ok('every practice (the draft too) is filed under its team as a header, a body and an index entry', ['p0', 'p1', 'p2', 'p3'].every(pid => H(pid) && cloud.db.has(`teams/t1/practices/${pid}/plan/body`) && cloud.db.get(`practiceIndex/${pid}`)?.teamId === 't1'), [...cloud.db.keys()]);
+  const h1 = H('p1');
+  ok('the header carries the stage, the sharing lists, its owner and a drill summary but no drills', h1.stage === 'team' && h1.sharedWith.join() === 'guest@example.com' && h1.owner === 'own' && h1.drillCount === 3 && !('drills' in h1), h1);
+  ok('the team, its members and players come from the roster, lower-cased', cloud.db.get('teams/t1')?.name === 'Mites' && cloud.db.get('teams/t1/members/coach.a@example.com')?.role === 'coach' && cloud.db.get('teams/t1/members/coachb@example.com')?.role === 'coach'
+    && cloud.db.get('teams/t1/members/parent@example.com')?.role === 'family' && cloud.db.get('teams/t1/players/pl1')?.contacts.join() === 'parent@example.com', [...cloud.db.keys()].filter(k => k.startsWith('teams/t1/') && !k.includes('practices')));
+  ok('each person gets their own document naming their teams and role', cloud.db.get('people/coach.a@example.com')?.persona === 'coach' && cloud.db.get('people/coach.a@example.com').teams.t1.role === 'coach'
+    && cloud.db.get('people/parent@example.com')?.persona === 'team' && cloud.db.get('people/parent@example.com').teams.t1.players[0].id === 'pl1', cloud.db.get('people/parent@example.com'));
 
   console.log('anonymous');
   const anon = await browser(null, { signInAs: U.parent });
   await anon.open('/'); s = await anon.state();
   ok('signed out on "/" → sign-in screen, no editor', s.signIn && !s.editor && !s.editorBuilt, s);
   await anon.open('/coach/t1/p1'); s = await anon.state();
-  ok('signed out on a practice link → sign-in, nothing fetched', s.signIn && !s.cards.length && !reads(null, 'published/p1').length, s);
+  ok('signed out on a practice link → sign-in, nothing fetched', s.signIn && !s.cards.length && !reads(null, 'teams/t1/practices/p1').length, s);
   await anon.click('#present-signin'); await anon.until(`location.pathname === '/team/t1/p1'`, 'after sign-in the parent continues to the practice'); await anon.settle();
   s = await anon.state(); ok('after signing in (as a parent) they continue to the link they opened — as /team/p1', s.path === '/team/t1/p1' && s.cards.length === 3, s);
 
@@ -104,7 +106,7 @@ try {
   ok('coach view: drills (hidden one left out), notes, a feedback button per drill + overall', s.cards.join() === '1. Warmup,2. Scrimmage,* Dismissal' && s.fb === 3 && await coachA.ev(`document.querySelector('#present-body pre').textContent === 'notes for Warmup'`), s);
   await coachA.click('.pr-fb[data-fb="d1"]'); await coachA.ev(`document.querySelector('#fb-text').value = 'Too long for mites'`); await coachA.click('#fb-send');
   await coachA.until(`document.querySelector('.pr-fb[data-fb="d1"]').textContent.includes('✓')`, 'feedback sent');
-  ok('coach feedback is stored under their own id', cloud.db.get('published/p1/feedback/ca_d1')?.text === 'Too long for mites', [...cloud.db.keys()]);
+  ok('coach feedback is stored under their own id', cloud.db.get('teams/t1/practices/p1/feedback/ca_d1')?.text === 'Too long for mites', [...cloud.db.keys()]);
   await coachA.open('/team/t1/p1'); s = await coachA.state();
   ok('a coach may open the team link: same page, no feedback', s.path === '/team/t1/p1' && s.cards.length === 3 && s.fb === 0, s);
 
@@ -152,7 +154,7 @@ try {
 
   console.log('audit log: views, plays and reactions reach the planner');
   let since = Date.now();
-  const viewsOf = email => [...cloud.db.entries()].filter(([k, v]) => k.startsWith('users/own/practices/p1/views/') && v.email === email && v.at >= since).map(([, v]) => v);
+  const viewsOf = email => [...cloud.db.entries()].filter(([k, v]) => k.startsWith('teams/t1/practices/p1/views/') && v.email === email && v.at >= since).map(([, v]) => v);
   await coachA.open('/coach/t1/p1');
   await coachA.ev(`localStorage.setItem('hpp.viewmode', 'list')`); await coachA.open('/coach/t1/p1'); await sleep(2600); // list mode: cards on screen log a view after 2 s
   await coachA.ev(`document.querySelector('#present-body .pr-drill[data-did="d3"]').scrollIntoView()`); await sleep(2600); // …and the one scrolled to
@@ -182,7 +184,7 @@ try {
   ok('feedback panel shows who said what, by drill', await planner.ev(`document.querySelector('#feedback-body').textContent.includes('Too long for mites') && document.querySelector('#feedback-body').textContent.includes('Coach A') && document.querySelector('.fb-group h3').textContent.includes('1. Warmup')`));
   await planner.click('#feedback-body [data-fact="resolve"]');
   await planner.until(`!document.querySelector('#btn-feedback').textContent.includes('1')`, 'resolve clears the badge');
-  ok('resolving is saved', cloud.db.get('published/p1/feedback/ca_d1')?.resolved === true);
+  ok('resolving is saved', cloud.db.get('teams/t1/practices/p1/feedback/ca_d1')?.resolved === true);
   await planner.open('/coach/t1/p3'); s = await planner.state();
   ok('planner previews a draft as coaches will see it', s.path === '/coach/t1/p3' && s.cards[0] === '1. Draft drill' && /coach view/.test(s.title) && s.fb === 0, s);
   await planner.open('/team'); s = await planner.state();
@@ -214,15 +216,15 @@ try {
 
   console.log('revocation and pulling back');
   await planner.click('#team-body [data-cid="c2"] [data-act="delcoach"]');
-  await planner.until(`fetch('http://127.0.0.1:${CLOUD}/', { method: 'POST', body: JSON.stringify({ user: ${JSON.stringify(U.planner)}, op: 'get', path: 'access/p1' }) }).then(r => r.json()).then(r => !r.data.coach.includes('coachb@example.com'))`, 'roster change reaches the access list');
+  await planner.until(`fetch('http://127.0.0.1:${CLOUD}/', { method: 'POST', body: JSON.stringify({ user: ${JSON.stringify(U.planner)}, op: 'get', path: 'teams/t1/members/coachb@example.com' }) }).then(r => r.json()).then(r => !r.data)`, 'roster change reaches the team\'s members');
   await coachB.until(`location.pathname === '/request-access'`, 'coach B loses the open practice live', 8000);
-  ok('a coach removed from the roster loses the practice (live) and the offline copy', await coachB.ev(`!localStorage.getItem('hpp.viewcache.p1') && !document.querySelectorAll('#present-body .pr-drill').length`) && !cloud.db.has('inbox/coachb@example.com'));
+  ok('a coach removed from the roster loses the practice (live) and the offline copy', await coachB.ev(`!localStorage.getItem('hpp.viewcache.p1') && !document.querySelectorAll('#present-body .pr-drill').length`) && !cloud.db.has('people/coachb@example.com'));
   await coachB.open('/coach/t1/p1'); s = await coachB.state();
   ok('…and is now a stranger: request access, nothing fetched', s.path === '/request-access' && s.request, s);
   await planner.click('#team-close'); await planner.click('#btn-new-practice'); await planner.click('#btn-stage-back');
   await parent.open('/team/t1/p1'); // parent had it; now pulled back to "coaches"
   await parent.until(`/isn't available/.test(document.querySelector('#present-msg').textContent)`, 'pulled back from the team', 8000);
-  ok('pulling a practice back from the team removes the families\' access', cloud.db.get('access/p1').stage === 'coaches' && !('p1' in cloud.db.get('inbox/parent@example.com').practices));
+  ok('pulling a practice back from the team removes the families\' access', H('p1').stage === 'coaches');
   await coachA.open('/coach/t1/p1'); s = await coachA.state(); ok('coaches keep theirs', s.cards.length === 3, s);
 
   console.log('sign out');

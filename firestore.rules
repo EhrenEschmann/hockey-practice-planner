@@ -1,121 +1,138 @@
 rules_version = '2';
-// Authorization for docs/requirements-routing-auth.md. The app's redirects are a convenience; these rules are the guarantee.
+// Authorization for the team-centric layout (docs/data-model.md). The app's redirects are a convenience; these rules are the guarantee.
 //
-//   users/{uid}/practices/{pid}     the planner's working document — planner only
-//   published/{pid}                 the copy coaches and the team read (exists while the practice is released)
-//   published/{pid}/feedback/{fid}  a coach's feedback — the author and the planner only
-//   access/{pid}                    { stage, coach: [emails], team: [emails] } — planner only; looked up by these rules
-//   inbox/{email}                   that person's persona + list of practices — themselves and the planner only
-//   requests/{uid}                  an access request — the requester and the planner only
-//   club/{teamId}                   an official club team: weekly tasks + { coaches, members, players: { id: { contacts } } } — planner writes, members read
-//   club/{teamId}/stats/{pid_week}  a player's numbers for one week — written by that player's family (or a coach), read by coaches and that family
-//   club/{teamId}/media/{mid}       a task's how-to audio / video — planner writes, members read
+//   teams/{teamId}                              { id, name, club, admins: [emails] }        admins write; members read
+//   teams/{teamId}/members/{email}              { role: 'coach' | 'family', name, playerIds } the lookup every rule below makes
+//   teams/{teamId}/players/{playerId}           { name, contacts: [emails] }
+//   teams/{teamId}/practices/{pid}              the HEADER: { kind, date, time, stage, open, sharedWith, sharedTeam, drillNames … }
+//   teams/{teamId}/practices/{pid}/plan/body    the drills (heavy) — same readers as the header
+//   …/practices/{pid}/clips|videos/{id}         recorded intros / voice-overs, video chunks — same readers
+//   …/practices/{pid}/views/{id}                audit log: viewers append in their own name; admins read
+//   …/practices/{pid}/feedback/{uid_drill}      a coach's note: the author and admins
+//   teams/{teamId}/tasks/{week}                 the week's task list (Sunday-keyed)
+//   teams/{teamId}/stats/{playerId_week}        a player's numbers: their family or a coach writes; coaches read all, a family its own
+//   teams/{teamId}/media/{id}                   a task's how-to audio / video chunks
+//   practiceIndex/{pid}                         { teamId } — lets an older link that named only the practice find its team
+//   people/{email}                              { persona, teams: { [teamId]: { name, role, players } } } — that person's teams; them and the planner only
+//   users/{uid}/meta/{doc}                      the planner's own working documents (the roster)
+//   users/{uid}/private/{doc}                   the planner's secrets (the encrypted Claude key)
+//   requests/{uid}, attempts/{uid}              access requests and sign-ins that got nowhere
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
       return request.auth != null && 'email' in request.auth.token && request.auth.token.email_verified == true;
     }
     function me() { return request.auth.token.email.lower(); }
-    // Only the planner(s) can create or change practices — keep this list in step with OWNER_EMAILS in js/main.js.
+    // The planner(s) can do anything — keep this list in step with OWNER_EMAILS in js/main.js. A team's admins can do anything in that team.
     function isPlanner() { return signedIn() && me() in ['ehren.eschmann@gmail.com']; }
+    function teamPath(t) { return /databases/$(database)/documents/teams/$(t); }
+    function memberPath(t) { return /databases/$(database)/documents/teams/$(t)/members/$(me()); }
+    function isAdmin(t) { return isPlanner() || (signedIn() && exists(teamPath(t)) && me() in get(teamPath(t)).data.get('admins', [])); }
+    function isMember(t) { return signedIn() && exists(memberPath(t)); }
+    function isCoach(t) { return isMember(t) && get(memberPath(t)).data.role == 'coach'; }
+    // May this person see a practice with this header? Coaches from its 'coaches' stage, everyone on the team once
+    // 'team'; anyone signed in (a guest too) when it is marked open; and the extra emails named on the practice itself.
+    function viewable(t, h) {
+      return (h.stage == 'team' && isMember(t))
+        || (h.stage == 'coaches' && isCoach(t))
+        || (h.stage != 'draft' && h.get('open', false) == true && request.auth != null)
+        || (signedIn() && h.stage != 'draft' && me() in h.get('sharedWith', []))
+        || (signedIn() && h.stage == 'team' && me() in h.get('sharedTeam', []));
+    }
+    function headerPath(t, pid) { return /databases/$(database)/documents/teams/$(t)/practices/$(pid); }
+    function canViewPractice(t, pid) { return isAdmin(t) || (exists(headerPath(t, pid)) && viewable(t, get(headerPath(t, pid)).data)); }
+    function coachOfPractice(t, pid) { return isCoach(t) && exists(headerPath(t, pid)) && get(headerPath(t, pid)).data.stage != 'draft'; }
 
-    function accessPath(pid) { return /databases/$(database)/documents/access/$(pid); }
-    function isCoachOf(pid) {
-      return signedIn() && exists(accessPath(pid)) && get(accessPath(pid)).data.stage in ['coaches', 'team'] && me() in get(accessPath(pid)).data.coach;
-    }
-    function isTeamOf(pid) {
-      return signedIn() && exists(accessPath(pid)) && get(accessPath(pid)).data.stage == 'team' && me() in get(accessPath(pid)).data.team;
-    }
-    // An "open" practice: anyone signed in — a Google account or an anonymous guest — may watch it
-    // once it has left draft. (Anonymous sign-in must be enabled in the Firebase console for guests.)
-    function isOpenPractice(pid) {
-      return request.auth != null && exists(accessPath(pid))
-        && get(accessPath(pid)).data.get('open', false) == true
-        && get(accessPath(pid)).data.stage != 'draft';
-    }
-    function canView(pid) { return isPlanner() || isCoachOf(pid) || isTeamOf(pid) || isOpenPractice(pid); }
-
-    // ---- the planner's own account: nobody else reads anything here but clips / videos of a practice released to them
-    match /users/{uid}/meta/{docId} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if isPlanner() && request.auth.uid == uid;
-    }
-    // Private documents (e.g. the encrypted Anthropic API key record): the planner's own account, nobody else — not even readable by viewers.
-    match /users/{uid}/private/{docId} {
-      allow read, write: if isPlanner() && request.auth.uid == uid;
-    }
-    match /users/{uid}/practices/{practiceId} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if isPlanner() && request.auth.uid == uid;
-      // Audit log: whoever may view the practice appends a record of what they viewed or played, in their own
-      // name only; just the planner can read (or clear) the log.
-      match /views/{viewId} {
-        allow create: if canView(practiceId) && request.resource.data.uid == request.auth.uid;
-        allow read, delete: if isPlanner() && request.auth.uid == uid;
+    // ---- teams
+    match /teams/{teamId} {
+      allow read: if isAdmin(teamId) || isMember(teamId);
+      allow write: if isAdmin(teamId);
+      match /members/{email} {
+        allow read: if isAdmin(teamId) || (signedIn() && me() == email) || isCoach(teamId);
+        allow write: if isAdmin(teamId);
       }
-      // An uploaded drill video (in chunks) and a drill's recorded intro clip: planner writes; readable by whoever may view the practice.
-      match /videos/{chunkId} {
-        allow write: if isPlanner() && request.auth.uid == uid;
-        allow read: if canView(practiceId);
+      match /players/{playerId} {
+        allow read: if isAdmin(teamId) || isMember(teamId);
+        allow write: if isAdmin(teamId);
       }
-      match /clips/{drillId} {
-        allow write: if isPlanner() && request.auth.uid == uid;
-        allow read: if canView(practiceId);
-      }
-    }
-
-    // ---- what coaches and the team read
-    match /published/{pid} {
-      allow read: if canView(pid);
-      allow write: if isPlanner();
-      // One document per coach per drill: `${uid}_${drillId}` (or `${uid}_overall`). Coaches never see each other's.
-      match /feedback/{fid} {
-        function mine() {
-          return request.resource.data.uid == request.auth.uid && request.resource.data.email == me()
-            && fid.matches('^' + request.auth.uid + '_[A-Za-z0-9]+$')
-            && request.resource.data.text is string && request.resource.data.text.size() <= 4000;
+      // Headers: a list query must carry the stage filter the reader is entitled to, so the rules can prove it.
+      match /practices/{pid} {
+        allow read: if isAdmin(teamId) || viewable(teamId, resource.data);
+        allow write: if isAdmin(teamId);
+        match /plan/{doc} {
+          allow read: if canViewPractice(teamId, pid);
+          allow write: if isAdmin(teamId);
         }
-        allow create: if isCoachOf(pid) && mine() && !('resolved' in request.resource.data);
-        allow update: if isPlanner() || (isCoachOf(pid) && resource.data.uid == request.auth.uid && mine()
-          && request.resource.data.get('resolved', false) == false); // a rewritten note is unresolved again
-        allow delete: if isPlanner() || (isCoachOf(pid) && resource.data.uid == request.auth.uid);
-        allow read: if isPlanner() || (isCoachOf(pid) && resource.data.uid == request.auth.uid);
+        match /clips/{clipId} {
+          allow read: if canViewPractice(teamId, pid);
+          allow write: if isAdmin(teamId);
+        }
+        match /videos/{chunkId} {
+          allow read: if canViewPractice(teamId, pid);
+          allow write: if isAdmin(teamId);
+        }
+        match /views/{viewId} {
+          allow create: if canViewPractice(teamId, pid) && request.resource.data.uid == request.auth.uid;
+          allow read, delete: if isAdmin(teamId);
+        }
+        // One document per coach per drill: `${uid}_${drillId}` (or `${uid}_overall`). Coaches never see each other's.
+        match /feedback/{fid} {
+          function mine() {
+            return request.resource.data.uid == request.auth.uid && request.resource.data.email == me()
+              && fid.matches('^' + request.auth.uid + '_[A-Za-z0-9]+$')
+              && request.resource.data.text is string && request.resource.data.text.size() <= 4000;
+          }
+          allow create: if coachOfPractice(teamId, pid) && mine() && !('resolved' in request.resource.data);
+          allow update: if isAdmin(teamId) || (coachOfPractice(teamId, pid) && resource.data.uid == request.auth.uid && mine()
+            && request.resource.data.get('resolved', false) == false); // a rewritten note is unresolved again
+          allow delete: if isAdmin(teamId) || (coachOfPractice(teamId, pid) && resource.data.uid == request.auth.uid);
+          allow read: if isAdmin(teamId) || (coachOfPractice(teamId, pid) && resource.data.uid == request.auth.uid);
+        }
       }
-    }
-    // The planner's feedback overview reads every practice's feedback in one query.
-    match /{path=**}/feedback/{fid} {
-      allow read: if isPlanner();
-    }
-
-    match /access/{pid} {
-      allow read, write: if isPlanner();
-    }
-    match /inbox/{email} {
-      allow read: if isPlanner() || (signedIn() && me() == email);
-      allow write: if isPlanner();
-    }
-
-    // ---- official club teams: tasks for the week, and each player's numbers
-    match /club/{teamId} {
-      function club() { return get(/databases/$(database)/documents/club/$(teamId)).data; }
-      function clubCoach() { return signedIn() && me() in club().coaches; }
-      function familyOf(pid) { return signedIn() && pid in club().players && me() in club().players[pid].contacts; }
-      allow write: if isPlanner();
-      allow read: if isPlanner() || (signedIn() && me() in resource.data.members);
+      // ---- official club teams: the week's tasks, each player's numbers, and a task's how-to media
+      match /tasks/{week} {
+        allow read: if isAdmin(teamId) || isMember(teamId);
+        allow write: if isAdmin(teamId);
+      }
       match /stats/{sid} {
+        function playerPath(pid) { return /databases/$(database)/documents/teams/$(teamId)/players/$(pid); }
+        function familyOf(pid) { return signedIn() && exists(playerPath(pid)) && me() in get(playerPath(pid)).data.get('contacts', []); }
         function wellFormed() {
           return request.resource.data.playerId is string && request.resource.data.week is string
             && sid == request.resource.data.playerId + '_' + request.resource.data.week
             && request.resource.data.values is map && request.resource.data.by == me();
         }
-        allow read: if isPlanner() || clubCoach() || familyOf(resource.data.playerId);
-        allow create, update: if wellFormed() && (isPlanner() || clubCoach() || familyOf(request.resource.data.playerId));
-        allow delete: if isPlanner();
+        allow read: if isAdmin(teamId) || isCoach(teamId) || familyOf(resource.data.playerId);
+        allow create, update: if wellFormed() && (isAdmin(teamId) || isCoach(teamId) || familyOf(request.resource.data.playerId));
+        allow delete: if isAdmin(teamId);
       }
       match /media/{mid} {
-        allow write: if isPlanner();
-        allow read: if isPlanner() || (signedIn() && me() in club().members);
+        allow read: if isAdmin(teamId) || isMember(teamId);
+        allow write: if isAdmin(teamId);
       }
+    }
+    // The planner reads every coach's feedback across teams in one go.
+    match /{path=**}/feedback/{fid} {
+      allow read: if isPlanner();
+    }
+
+    // ---- lookups
+    match /practiceIndex/{pid} {
+      allow read: if request.auth != null; // only { teamId }: lets an older link find its team; the practice itself is still gated
+      allow write: if isPlanner();
+    }
+    match /people/{email} {
+      allow read: if isPlanner() || (signedIn() && me() == email);
+      allow write: if isPlanner();
+    }
+
+    // ---- the planner's own account
+    match /users/{uid}/meta/{docId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if isPlanner() && request.auth.uid == uid;
+    }
+    match /users/{uid}/private/{docId} {
+      allow read, write: if isPlanner() && request.auth.uid == uid;
     }
 
     // ---- sign-ins that got nowhere: someone on no roster opened the app — one document per account, in their own

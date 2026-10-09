@@ -1416,7 +1416,7 @@ async function fetchClip(owner, pid, d, kind = 'intro') {
   try { rec = await idbGetClip(key); } catch { rec = null; }
   if (!rec && cloudBackend?.loadClip && cloudSync?.user) {
     try {
-      const c = await cloudBackend.loadClip(owner, pid, did);
+      const c = await cloudBackend.loadClip(teamFor(pid), pid, did);
       if (c?.data) { rec = { mime: c.mime, blob: base64ToBlob(c.data, c.mime), secs: c.secs }; idbPutClip(key, rec).catch(() => {}); }
     } catch { rec = null; }
   }
@@ -2352,6 +2352,8 @@ $('#team-add').addEventListener('click', () => {
 });
 $('#team-del').addEventListener('click', () => {
   const t = currentMgrTeam(); if (!t) return;
+  const kept = store.data.practices.filter(p => inTeam(p, t)).length;
+  if (kept) { alert(`${t.name || 'This team'} still has ${kept} practice${kept === 1 ? '' : 's'} (including deleted ones). Move them to another team or delete them for good first.`); return; }
   if (!confirm(`Delete team "${t.name || 'unnamed'}" and its roster? This cannot be undone.`)) return;
   store.roster.teams = store.roster.teams.filter(x => x.id !== t.id);
   teamSelId = null;
@@ -2441,7 +2443,7 @@ $('#feedback-body').addEventListener('click', async e => {
     return;
   }
   const f = feedbackAll.find(x => x.pid === store.practice.id && x.fid === b.closest('[data-fid]').dataset.fid); if (!f) return;
-  try { await cloudBackend.resolveFeedback(f.pid, f.fid, !f.resolved); } catch (err) { alert(`Couldn't update: ${err?.message || err}`); }
+  try { await cloudBackend.resolveFeedback(f.teamId || teamFor(f.pid), f.pid, f.fid, !f.resolved); } catch (err) { alert(`Couldn't update: ${err?.message || err}`); }
 });
 
 let notesOpenFor = null;  // drill id whose notes editor is expanded in the list
@@ -2464,7 +2466,7 @@ async function copyDrillAssets(srcPid, src, dstPid, dst) {
     let rec = null;
     try { rec = await idbGetClip(keyFor(owner, srcPid, src, kind)); } catch { rec = null; }
     if (!rec?.blob && cloudBackend?.loadClip && cloudSync?.user) {
-      try { const c = await cloudBackend.loadClip(owner, srcPid, clipDocId(src.id, kind)); if (c?.data) rec = { mime: c.mime, blob: base64ToBlob(c.data, c.mime), secs: c.secs }; } catch { rec = null; }
+      try { const c = await cloudBackend.loadClip(teamFor(srcPid), srcPid, clipDocId(src.id, kind)); if (c?.data) rec = { mime: c.mime, blob: base64ToBlob(c.data, c.mime), secs: c.secs }; } catch { rec = null; }
     }
     if (!rec?.blob) { settle(kind, missing); continue; }
     try { await idbPutClip(keyFor(owner, dstPid, dst, kind), rec); } catch { /* the cloud copy still serves this device */ }
@@ -2474,7 +2476,7 @@ async function copyDrillAssets(srcPid, src, dstPid, dst) {
     let rec = null;
     try { rec = await idbGetClip(videoKey(owner, srcPid, src)); } catch { rec = null; }
     if (!rec?.blob && cloudBackend?.loadVideo && cloudSync?.user) {
-      try { const chunks = await cloudBackend.loadVideo(owner, srcPid, src.id, src.upload.at, src.upload.chunks); rec = { mime: src.upload.mime, blob: chunksToBlob(chunks, src.upload.mime), secs: src.upload.secs }; } catch { rec = null; }
+      try { const chunks = await cloudBackend.loadVideo(teamFor(srcPid), srcPid, src.id, src.upload.at, src.upload.chunks); rec = { mime: src.upload.mime, blob: chunksToBlob(chunks, src.upload.mime), secs: src.upload.secs }; } catch { rec = null; }
     }
     if (!rec?.blob) { settle('upload', missing); return; }
     try { await idbPutClip(videoKey(owner, dstPid, dst), rec); } catch { /* fine */ }
@@ -2486,7 +2488,7 @@ async function copyDrillAssets(srcPid, src, dstPid, dst) {
 async function uploadClip(pid, did, { mime, blob, secs }) {
   if (!cloudBackend?.saveClip) return { ok: false, error: 'local-only (no cloud configured)' };
   if (!cloudSync?.user) return { ok: false, error: 'not signed in' };
-  try { await cloudBackend.saveClip(ownerFor(), pid, did, { mime, data: await blobToBase64(blob), secs, at: Date.now() }); return { ok: true }; }
+  try { await cloudBackend.saveClip(teamFor(pid), pid, did, { mime, data: await blobToBase64(blob), secs, at: Date.now() }); return { ok: true }; }
   catch (e) { return { ok: false, error: e?.message || String(e) }; }
 }
 /** After sign-in: any clip recorded while offline or refused by the rules is uploaded from this device's copy. */
@@ -2576,7 +2578,7 @@ async function fetchUpload(owner, pid, d, onChunk = () => {}) {
   try { rec = await idbGetClip(key); } catch { rec = null; }
   if (!rec && cloudBackend?.loadVideo && cloudSync?.user) {
     try {
-      const chunks = await cloudBackend.loadVideo(owner, pid, d.id, d.upload.at, d.upload.chunks, onChunk);
+      const chunks = await cloudBackend.loadVideo(teamFor(pid), pid, d.id, d.upload.at, d.upload.chunks, onChunk);
       rec = { mime: d.upload.mime, blob: chunksToBlob(chunks, d.upload.mime), secs: d.upload.secs };
       idbPutClip(key, rec).catch(() => {});
     } catch { rec = null; }
@@ -2590,7 +2592,7 @@ async function fetchUpload(owner, pid, d, onChunk = () => {}) {
 async function uploadVideo(pid, d, blob, meta, at) {
   if (!cloudBackend?.saveVideo) return { ok: false, error: 'local-only (no cloud configured)' };
   if (!cloudSync?.user) return { ok: false, error: 'not signed in' };
-  try { await cloudBackend.saveVideo(ownerFor(), pid, d.id, at, await blobToChunks(blob), meta); return { ok: true }; }
+  try { await cloudBackend.saveVideo(teamFor(pid), pid, d.id, at, await blobToChunks(blob), meta); return { ok: true }; }
   catch (e) { return { ok: false, error: e?.message || String(e) }; }
 }
 async function videoAction(act, li) {
@@ -2675,7 +2677,7 @@ async function videoAction(act, li) {
       progress(`Uploading ${(out.blob.size / 1048576).toFixed(1)} MB…`);
       const up = await uploadVideo(pid, d, out.blob, meta, at);
       const old = d.upload;
-      if (old?.cloud && cloudBackend?.removeVideo && cloudSync?.user) cloudBackend.removeVideo(ownerFor(), pid, d.id, old.at, old.chunks).catch(() => {});
+      if (old?.cloud && cloudBackend?.removeVideo && cloudSync?.user) cloudBackend.removeVideo(teamFor(pid), pid, d.id, old.at, old.chunks).catch(() => {});
       if (old) { const k = videoKey(ownerFor(), pid, d); forgetClip(k); idbDelClip(k).catch(() => {}); }
       commit(() => { d.upload = { at, ...meta, chunks: Math.ceil(out.blob.size / 700_000), cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) }; });
       if (vp.url) URL.revokeObjectURL(vp.url);
@@ -2702,7 +2704,7 @@ async function videoAction(act, li) {
   }
   if (act === 'del' && d.upload) {
     const old = d.upload;
-    if (old.cloud && cloudBackend?.removeVideo && cloudSync?.user) cloudBackend.removeVideo(ownerFor(), pid, d.id, old.at, old.chunks).catch(() => {});
+    if (old.cloud && cloudBackend?.removeVideo && cloudSync?.user) cloudBackend.removeVideo(teamFor(pid), pid, d.id, old.at, old.chunks).catch(() => {});
     const k = videoKey(ownerFor(), pid, d); forgetClip(k); idbDelClip(k).catch(() => {});
     commit(() => { delete d.upload; });
     renderPlan();
@@ -2763,7 +2765,7 @@ async function introAction(iact, li) {
   } else if (iact === 'del') {
     forgetClip(key);
     idbDelClip(key).catch(() => {});
-    if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(ownerFor(), pid, d.id).catch(() => {});
+    if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(teamFor(pid), pid, d.id).catch(() => {});
     commit(() => { delete d.intro; });
     renderPlan();
   } else if (iact === 'script') { // ✨ a script to read while recording, pitched at the players' age and sized for the length
@@ -2833,7 +2835,7 @@ async function introAction(iact, li) {
 function deleteNarration(d) {
   const pid = store.practice.id, key = keyFor(ownerFor(), pid, d, 'narration');
   forgetClip(key); idbDelClip(key).catch(() => {});
-  if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(ownerFor(), pid, clipDocId(d.id, 'narration')).catch(() => {});
+  if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(teamFor(pid), pid, clipDocId(d.id, 'narration')).catch(() => {});
   delete d.narration;
 }
 // ---------- ✨ Claude: the API key (encrypted in the cloud, unlocked per device) and "describe a coaching point" ----------
@@ -4110,7 +4112,9 @@ let presenting = false;
 let presentAudience = 'coach'; // which link is open: /coach or /team — the same page; a coach on /coach can also leave feedback
 let feedbackOn = false;        // this viewer may leave feedback on the practice on screen
 let showingPractice = false;   // a practice (not a list or a message) fills the viewer
-let presentOwner = 'local';    // whose account the shown practice (and its intro clips) belongs to
+let presentOwner = 'local';    // whose account the shown practice (and its intro clips) belongs to — the key its copies are cached under
+/** The team a practice is filed under in the cloud: the editor's own copy, else the one on screen. */
+const teamFor = pid => store.data.practices.find(p => p.id === pid)?.teamId || (presentPractice?.id === pid ? presentPractice.teamId : null) || screen?.teamId || null;
 let presentUnsub = null, presentKey = null;
 let cloudSync = null, cloudBackend = null; // set once Firebase boots (below)
 let cloudBoot = 'loading', cloudBootError = ''; // 'loading' → 'ready' | 'failed' (SDK/config didn't load) | 'none' (no config: local-only)
@@ -4624,9 +4628,9 @@ function logReaction(p, emoji) {
     audience: who.persona === 'planner' ? 'planner' : presentAudience, device: matchMedia('(pointer: coarse)').matches ? 'phone' : 'desktop' });
   return true;
 }
-async function sendView(owner, pid, entry) {
-  try { await cloudBackend.logView(owner, pid, entry); }
-  catch { try { const q = JSON.parse(localStorage.getItem(viewQueueKey) || '[]'); q.push({ owner, pid, entry }); localStorage.setItem(viewQueueKey, JSON.stringify(q.slice(-200))); } catch { /* full: dropped */ } }
+async function sendView(owner, pid, entry, teamId = teamFor(pid)) {
+  try { await cloudBackend.logView(teamId, pid, entry); }
+  catch { try { const q = JSON.parse(localStorage.getItem(viewQueueKey) || '[]'); q.push({ owner, pid, entry, teamId }); localStorage.setItem(viewQueueKey, JSON.stringify(q.slice(-200))); } catch { /* full: dropped */ } }
 }
 /** Retry records queued while offline — called once a signed-in session is up. */
 async function flushViewQueue() {
@@ -4634,7 +4638,7 @@ async function flushViewQueue() {
   try { q = JSON.parse(localStorage.getItem(viewQueueKey) || '[]'); } catch { q = []; }
   if (!q.length || !cloudBackend?.logView || !cloudSync?.user) return;
   localStorage.removeItem(viewQueueKey);
-  for (const item of q) if (item.entry?.uid === cloudSync.user.uid) await sendView(item.owner, item.pid, item.entry);
+  for (const item of q) if (item.entry?.uid === cloudSync.user.uid) await sendView(item.owner, item.pid, item.entry, item.teamId);
 }
 /** The card on screen counts as viewed after it has been there 2 s (focus mode: the current card). */
 function noteCurrentView(p) {
@@ -4680,10 +4684,8 @@ function currentWho() {
   if (u.isAnonymous) return { persona: 'guest', roles: {} }; // may watch open practices; has no inbox
   if (viewerInbox === undefined) return { persona: inboxStale ? 'offline' : 'checking' };
   if (!viewerInbox) return { persona: 'unknown' };
-  const roles = Object.fromEntries(Object.entries(viewerInbox.practices || {}).map(([pid, c]) => [pid, c.role === 'coach' ? 'coach' : 'team']));
   const teams = Object.entries(viewerInbox.teams || {}).map(([id, t]) => ({ id, ...t }));
-  const practiceTeam = Object.fromEntries(Object.entries(viewerInbox.practices || {}).map(([pid, c]) => [pid, c.teamId || null]));
-  return { persona: viewerInbox.persona === 'coach' ? 'coach' : 'team', roles, teams, practiceTeam };
+  return { persona: viewerInbox.persona === 'coach' ? 'coach' : 'team', teams };
 }
 
 /** Follow the signed-in viewer's list document live: being approved, or a practice being released, shows up without a reload. */
@@ -4693,10 +4695,11 @@ function watchInbox() {
   if (email === inboxFor) return;
   inboxUnsub?.(); inboxUnsub = null; clearTimeout(inboxTimer);
   inboxFor = email; viewerInbox = undefined; inboxStale = false;
-  if (!email || !cloudBackend?.subscribeInbox) return;
+  if (!email || !cloudBackend?.subscribePerson) return;
+  for (const rec of teamLists.values()) rec.unsub?.(); teamLists.clear(); // another person: their teams' lists start over
   try { viewerInbox = JSON.parse(localStorage.getItem(inboxKey(email)) || 'null') || undefined; } catch { viewerInbox = undefined; } // last known list: the rink has no signal
   inboxTimer = setTimeout(() => { if (viewerInbox === undefined) { inboxStale = true; refreshScreen(); } }, 8000);
-  inboxUnsub = cloudBackend.subscribeInbox(email, (doc, err) => {
+  inboxUnsub = cloudBackend.subscribePerson(email, (doc, err) => {
     clearTimeout(inboxTimer);
     if (inboxFor !== email) return;
     if (err) { if (viewerInbox === undefined) inboxStale = true; refreshScreen(); return; }
@@ -4814,14 +4817,22 @@ function showPractice(r) {
     }
     if (!cloudBackend) { leavePractice(); presentMsg("This practice isn't on this device.", { list: `/${r.as}` }); return; }
   }
-  const mayComment = r.as === 'coach' && who.roles?.[pid] === 'coach';
-  const key = `live/${r.as}/${pid}/${mayComment}`;
+  if (!r.teamId) { // an older link that named only the practice: its team is in the index — then back here with the full address
+    const key0 = `lookup/${pid}`; if (presentKey === key0) return; presentUnsub?.(); presentUnsub = null; presentKey = key0;
+    if (!showCachedPractice(pid, 'finding its team…')) { leavePractice(); presentKey = key0; presentMsg('Loading…'); }
+    cloudBackend.lookupTeam(pid).then(t => { if (presentKey !== key0) return; presentKey = null; if (t) navigate(routePath({ view: r.as, teamId: t, pid }), { replace: true }); else { leavePractice(); presentMsg('This practice no longer exists.', { list: `/${r.as}` }); } })
+      .catch(e => { if (presentKey === key0) { presentKey = null; leavePractice(); presentMsg(`Could not find that practice: ${e?.message || e}`, { reload: true }); } });
+    return;
+  }
+  watchTeamList(r.teamId); // the switcher bar lists this team
+  const mayComment = r.as === 'coach' && (who.teams || []).find(t => t.id === r.teamId)?.role === 'coach';
+  const key = `live/${r.as}/${r.teamId}/${pid}/${mayComment}`;
   if (presentKey === key) return; // already watching this practice
   const hadCopy = showCachedPractice(pid, 'checking for updates…');
   presentUnsub?.(); presentUnsub = null;
   presentKey = key; feedbackOn = mayComment;
   if (!hadCopy) { leavePractice(); presentKey = key; feedbackOn = mayComment; presentMsg('Loading…'); }
-  presentUnsub = cloudBackend.subscribePublished(pid, (p, err) => {
+  presentUnsub = cloudBackend.subscribePractice(r.teamId, pid, (raw, err) => {
     if (presentKey !== key) return;
     if (err) {
       // Not (or no longer) on the list: the copy kept for offline use goes too, rather than outliving the access.
@@ -4831,12 +4842,13 @@ function showPractice(r) {
         if (who.persona === 'guest') presentMsg("This practice isn't open to guests. Sign in with the Google account your coach has on the team list.", { signIn: true });
         else if (who.persona === 'unknown') { try { sessionStorage.setItem('hpp.wanted', location.pathname); } catch { /* fine */ } navigate('/request-access', { replace: true }); } // on no roster and not an open practice: ask for access (and come back here once approved)
         else if (r.probe) presentMsg("This practice isn't available to you. It will show up in your list once your coach sends it out.", { list: `/${who.persona}` });
-        else presentMsg("This practice isn't available to you any more.", { list: `/${r.as}` });
+        else presentMsg("This practice isn't available to you. It will show up in your list once your coach sends it out.", { list: routePath({ view: r.as, teamId: r.teamId }) }); // on the team, but this one is a draft, or not yet released to their role
       } else if (!showingPractice) presentMsg(`Could not load the practice: ${err.message || err}`, { reload: true });
       else presentNote('Offline — showing the copy on this device.');
       return;
     }
-    if (!p) { try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ } leavePractice(); presentKey = key; return presentMsg('This practice no longer exists.', { list: `/${r.as}` }); }
+    if (!raw) { try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ } leavePractice(); presentKey = key; return presentMsg('This practice no longer exists.', { list: `/${r.as}` }); }
+    const p = publishedCopy(raw, raw.owner || 'local'); // as the audience gets it: hidden drills and the sharing bookkeeping left out
     (p.drills || []).forEach(migrateDrill);
     try { localStorage.setItem(viewCacheKey(pid), JSON.stringify({ p, at: Date.now() })); } catch { /* full/blocked storage: live view still works */ }
     presentOwner = p.owner || 'local'; feedbackOn = mayComment;
@@ -4845,13 +4857,31 @@ function showPractice(r) {
 }
 
 const plannerTeams = () => (store.roster.teams || []).filter(t => t.id).map(t => ({ id: t.id, name: t.name || '', role: 'coach' }));
+// A viewer's lists come straight from each team's practice headers, live: the query carries the stages their role may
+// read (coaches: out to coaches or released; families: released), so it is small and the rules can prove it.
+const teamLists = new Map(); // teamId → { items, ready, error, unsub }
+function watchTeamList(teamId) {
+  const mine = (who.teams || []).find(t => t.id === teamId);
+  if (!teamId || !mine || !cloudBackend?.subscribeTeamPractices || !cloudSync?.user || who.persona === 'planner') return; // only someone on the team may list it
+  const role = mine.role === 'coach' ? 'coach' : 'team';
+  const had = teamLists.get(teamId);
+  if (had?.role === role) return;
+  had?.unsub?.(); // their role on the team changed: the list is asked for again with the stages that role may read
+  const rec = { role, items: [], ready: false, error: null, unsub: null };
+  teamLists.set(teamId, rec);
+  rec.unsub = cloudBackend.subscribeTeamPractices(teamId, role === 'coach' ? ['coaches', 'team'] : ['team'], (heads, err) => {
+    if (err) { rec.ready = true; rec.error = err; refreshScreen(); return; }
+    rec.items = (heads || []).map(h => ({ pid: h.id, role, stage: h.stage, team: h.team || '', teamId, date: h.date || '', time: h.time || '', ...(h.kind === 'game' ? { kind: 'game', opponent: h.opponent || '' } : {}) }));
+    rec.ready = true; rec.error = null; refreshScreen();
+  });
+}
 /** The practices this person can open on /coach or /team: { pid, role, team, teamId, date, time }. The planner previewing one practice (`all`) can step through drafts too. */
 function practiceItems(as) {
   if (who.persona === 'planner') {
     return store.live.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
       .map(p => ({ pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }));
   }
-  return Object.entries(viewerInbox?.practices || {}).map(([pid, c]) => ({ pid, ...c }));
+  return [...teamLists.values()].flatMap(r => r.items);
 }
 const itemPath = (as, x) => routePath({ view: as === 'coach' && x.role === 'coach' ? 'coach' : 'team', teamId: x.teamId || null, pid: x.pid }); // a coach's parent-only practices open as the team sees them
 const teamName = id => (who.teams || []).find(t => t.id === id)?.name || '';
@@ -4873,6 +4903,7 @@ function paintWhen() {
     // one under a different team name is still a way back. The banner points at the calendar's pick (today's, else
     // the next, else the most recent) whenever that is not the one on screen.
     const tid = p.teamId || screen?.teamId || null; // the practice's team: the bar switches within it
+    if (tid) watchTeamList(tid);
     const items = practiceItems(presentAudience).filter(x => (x.stage === 'team' || (x.stage === 'coaches' && presentAudience === 'coach')) && (!tid || x.teamId === tid)).sort(byCalendar);
     const listed = items.some(x => x.pid === p.id);
     const today = todayISO();
@@ -4886,7 +4917,7 @@ function paintWhen() {
     // The banner waits until this person's list is actually known (the inbox has arrived) and the practice on screen is
     // on it: on a first open the practice can land before the list does, and a banner computed from a half-loaded list
     // would wrongly flag the right practice as the wrong one.
-    const listKnown = who.persona === 'planner' || viewerInbox !== undefined;
+    const listKnown = who.persona === 'planner' || (viewerInbox !== undefined && (!tid || !teamLists.has(tid) || teamLists.get(tid).ready));
     const focus = listKnown && listed ? calendarFocus(items, today) : null;
     whenTarget = focus && focus.pid !== p.id ? itemPath(presentAudience, focus) : null;
     warn.hidden = !whenTarget;
@@ -4914,7 +4945,9 @@ function showTeams(r) {
 function showList(r) {
   ensureLatestViewer();
   const as = r.as;
+  if (r.teamId) watchTeamList(r.teamId); else for (const t of who.teams || []) watchTeamList(t.id);
   const items = practiceItems(as).filter(x => !r.teamId || x.teamId === r.teamId); // one team's list
+  const rec = r.teamId ? teamLists.get(r.teamId) : null, loading = who.persona !== 'planner' && rec && !rec.ready;
   const today = todayISO();
   const upcoming = items.filter(x => (x.date || '') >= today).sort(byCalendar), past = items.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
   const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
@@ -4929,7 +4962,7 @@ function showList(r) {
     ? `<button class="pl-item pl-club" data-club-output="${escHtml(c.id)}"><b>📊 ${escHtml(c.name || 'Club team')} — weekly output</b><span>every player's numbers for the week</span></button>`
     : c.players.map(pl => `<button class="pl-item pl-club" data-club-player="${escHtml(c.id)}:${escHtml(pl.id)}"><b>🏒 ${escHtml(pl.name || 'Player')}</b><span>${escHtml(c.name || 'Club team')} · this week's tasks and progress</span></button>`).join('')).join('');
   $('#present-body').innerHTML = `<div class="pl-list">
-    ${items.length ? '' : '<p class="muted">Nothing here yet — practices show up once your coach sends them out.</p>'}
+    ${items.length ? '' : loading ? '<p class="muted">Loading…</p>' : rec?.error ? `<p class="warn">Could not load this team's practices: ${escHtml(rec.error.message || rec.error)}</p>` : '<p class="muted">Nothing here yet — practices show up once your coach sends them out.</p>'}
     ${clubRows ? `<h2>Club</h2>${clubRows}` : ''}
     ${upcoming.length ? `<h2>Upcoming</h2>${upcoming.map(row).join('')}` : ''}
     ${past.length ? `<h2>Earlier</h2>${past.map(row).join('')}` : ''}
@@ -4949,16 +4982,29 @@ $('#present-body').addEventListener('click', e => {
 /** The club teams this person has a part in: for the planner every club team as a coach; for others from their list document. */
 function clubsFor() {
   if (who.persona === 'planner') return (store.roster.teams || []).filter(t => t.club).map(t => ({ id: t.id, name: t.name || '', role: 'coach', players: (t.players || []).map(pl => ({ id: pl.id, name: pl.name || '' })) }));
-  return Object.entries(viewerInbox?.club || {}).map(([id, c]) => ({ id, ...c }));
+  return Object.entries(viewerInbox?.teams || {}).filter(([, t]) => t.club).map(([id, t]) => ({ id, name: t.name || '', role: t.role === 'coach' ? 'coach' : 'family', players: t.players || [] }));
 }
+const clubRole = teamId => who.persona === 'planner' ? 'coach' : ((who.teams || []).find(t => t.id === teamId)?.role === 'coach' ? 'coach' : 'family');
 const clubState = { teamId: null, doc: null, week: weekKey(), stats: new Map(), player: null, mount: null, busy: '' };
 const weekLabel = w => { const s = weekStart(w); if (!s) return w; const e = new Date(s); e.setDate(e.getDate() + 6); const f = d => `${d.getMonth() + 1}/${d.getDate()}`; return `${w === weekKey() ? 'This week · ' : ''}${f(s)}–${f(e)}`; };
 const myEmail = () => String(cloudSync?.user?.email || '').toLowerCase();
 /** The club document: the planner's own roster is the truth; everyone else reads club/{teamId}. */
 async function loadClubDoc(teamId) {
   if (who.persona === 'planner') { const t = (store.roster.teams || []).find(x => x.id === teamId); return clubDoc(t); }
-  if (!cloudBackend?.loadClub) return null;
-  try { return await cloudBackend.loadClub(teamId); } catch { return null; }
+  if (!cloudBackend?.loadTeam) return null;
+  try { // the team and its players; each week's task list is fetched as that week comes on screen (loadWeekTasks)
+    const [team, players] = await Promise.all([cloudBackend.loadTeam(teamId), cloudBackend.loadPlayers(teamId)]);
+    if (!team) return null;
+    return { id: teamId, name: team.name || '', club: !!team.club, players, weeks: {} };
+  } catch { return null; }
+}
+const loadingWeeks = new Set();
+/** A viewer's task list for one week, fetched once and kept on the club document. */
+function loadWeekTasks(week) {
+  const d = clubState.doc; if (!d || who.persona === 'planner' || week in (d.weeks || {}) || loadingWeeks.has(`${clubState.teamId}/${week}`)) return;
+  loadingWeeks.add(`${clubState.teamId}/${week}`);
+  cloudBackend.loadTasks(clubState.teamId, week).then(doc => { d.weeks[week] = doc?.tasks || []; }).catch(() => { d.weeks[week] = []; })
+    .finally(() => { loadingWeeks.delete(`${clubState.teamId}/${week}`); if (clubState.doc === d) renderClub(); });
 }
 async function openClubOutput(teamId, { mount, sheet = false, week = weekKey(), navless = false }) {
   clubState.teamId = teamId; clubState.player = null; clubState.week = week; clubState.stats = new Map(); clubState.busy = 'Loading…'; clubState.navless = navless;
@@ -5028,6 +5074,7 @@ function renderClub({ keepFocus = false } = {}) {
   const nav = clubState.navless ? '' : `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= weekKey() ? 'disabled' : ''}>▶</button></div>`;
   const note = `<div class="club-note muted small${/✗/.test(clubState.busy) ? ' warn' : ''}">${escHtml(clubState.busy)}</div>`;
   if (!d) { m.innerHTML = `<div class="club-head"><h3>Club</h3></div>${note}`; return; }
+  if (who.persona !== 'planner' && !(week in (d.weeks || {}))) loadWeekTasks(week);
   const tasks = tasksForWeek(d, week); // each week has its own list; an unset week is empty
   if (clubState.player) { // one player's profile: this week's tasks to fill in, then the recent weeks
     const pl = d.players?.[clubState.player] || { name: 'Player' };
@@ -5039,6 +5086,7 @@ function renderClub({ keepFocus = false } = {}) {
       return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${k.target || k.times > 1 ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}${howto ? `<div class="club-howto">${howto}</div>` : ''}</div><div class="club-ins">${boxes}</div></div><div class="club-media-box" data-task-box="${k.id}"></div>`;
     }).join('');
     const weeks = [...new Set([week, ...[...clubState.stats.values()].map(x => x.week)])].sort().reverse().slice(0, 8);
+    if (who.persona !== 'planner') for (const w of weeks) if (!(w in (d.weeks || {}))) loadWeekTasks(w);
     const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3>${weeks.filter(w => w !== week).map(w => { const st = statFor(clubState.player, w), wt = tasksForWeek(d, w); return `<div class="club-hist-week"><b>${escHtml(weekLabel(w).replace('This week · ', ''))}</b> ${wt.length ? wt.map(k => `<span>${escHtml(k.title)}: ${k.times > 1 ? `${st.done?.[k.id] ?? '·'}/${k.times}× · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `/${k.target * (k.times || 1)}` : ''}</span>`).join(' ') : '<span class="muted">no tasks</span>'}</div>`; }).join('')}</div>` : '';
     m.innerHTML = `<div class="club-head"><h3>🏒 ${escHtml(pl.name || 'Player')} <span class="muted small">· ${escHtml(d.name)}</span></h3>${nav}<button data-club="close" title="Close">✕</button></div>
       ${tasks.length ? rows : '<p class="muted">No tasks set for this week.</p>'}${note}
@@ -5047,7 +5095,7 @@ function renderClub({ keepFocus = false } = {}) {
   }
   // the whole team: players down, tasks across; coaches and the planner may type in a number for anyone
   const players = Object.entries(d.players || {}).map(([id, p]) => ({ id, name: p.name || 'Player' })).sort((a, b) => a.name.localeCompare(b.name));
-  const mayLog = who.persona === 'planner' || (d.coaches || []).includes(myEmail());
+  const mayLog = clubRole(clubState.teamId) === 'coach';
   const cell = (pl, k) => {
     const s = statFor(pl.id, week), v = s.values?.[k.id], n = s.done?.[k.id], met = progressOf(k, s) >= 1;
     const box = (kind, val, ph) => mayLog ? `<input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="${kind}" data-player="${pl.id}" value="${val ?? ''}" placeholder="${ph}">` : `<b>${val ?? '·'}</b>`;
@@ -5139,7 +5187,7 @@ async function loadMyFeedback(p) {
   if (!feedbackOn || !cloudSync?.user) return;
   if (myFeedbackFor !== p.id) {
     myFeedbackFor = p.id; myFeedback = new Map();
-    try { for (const f of await cloudBackend.loadMyFeedback(p.id, cloudSync.user.uid)) myFeedback.set(f.drillId || 'overall', f); } catch { /* offline: buttons just start blank */ }
+    try { for (const f of await cloudBackend.loadMyFeedback(teamFor(p.id), p.id, cloudSync.user.uid)) myFeedback.set(f.drillId || 'overall', f); } catch { /* offline: buttons just start blank */ }
     if (presentPractice?.id !== p.id) return;
   }
   for (const b of $$('#present-body .pr-fb')) {
@@ -5170,12 +5218,12 @@ $('#fb-send').addEventListener('click', async () => {
   const d = p.drills.find(x => x.id === fbKey);
   const entry = { uid: u.uid, email: String(u.email || '').toLowerCase(), name: u.name || '', drillId: d ? d.id : '', drillName: d ? d.name : 'Overall', text: text.slice(0, 4000), at: Date.now() };
   $('#fb-note').textContent = 'Sending…';
-  try { await cloudBackend.saveFeedback(p.id, fbId(fbKey), entry); myFeedback.set(fbKey, entry); closeFeedback(); loadMyFeedback(p); }
+  try { await cloudBackend.saveFeedback(teamFor(p.id), p.id, fbId(fbKey), entry); myFeedback.set(fbKey, entry); closeFeedback(); loadMyFeedback(p); }
   catch (e) { $('#fb-note').textContent = `Couldn't send: ${e?.message || e}`; }
 });
 $('#fb-del').addEventListener('click', async () => {
   const p = presentPractice; if (!p || !fbKey) return;
-  try { await cloudBackend.removeFeedback(p.id, fbId(fbKey)); myFeedback.delete(fbKey); closeFeedback(); loadMyFeedback(p); }
+  try { await cloudBackend.removeFeedback(teamFor(p.id), p.id, fbId(fbKey)); myFeedback.delete(fbKey); closeFeedback(); loadMyFeedback(p); }
   catch (e) { $('#fb-note').textContent = `Couldn't delete: ${e?.message || e}`; }
 });
 
@@ -5522,7 +5570,7 @@ async function openViewLog() {
   $('#viewlog-title').textContent = practiceLabel(p);
   $('#viewlog-body').innerHTML = '<p class="vl-empty">Loading…</p>';
   let rows;
-  try { rows = await cloudBackend.loadViews(store.data.ownerUid, p.id); }
+  try { rows = await cloudBackend.loadViews(teamFor(p.id), p.id); }
   catch (e) { $('#viewlog-body').innerHTML = `<p class="vl-empty">Couldn't load the log: ${escHtml(e?.message || e)} — are the latest firestore.rules deployed?</p>`; return; }
   renderViewLog(p, rows);
 }
@@ -5565,7 +5613,7 @@ $('#viewlog-close').addEventListener('click', () => { $('#viewlog').hidden = tru
 $('#viewlog').addEventListener('click', e => { if (e.target === e.currentTarget) $('#viewlog').hidden = true; });
 $('#viewlog-clear').addEventListener('click', async () => {
   if (!confirm('Delete every record in this practice\'s views log?')) return;
-  try { await cloudBackend.clearViews(store.data.ownerUid, store.practice.id); openViewLog(); }
+  try { await cloudBackend.clearViews(teamFor(store.practice.id), store.practice.id); openViewLog(); }
   catch (e) { alert(`Couldn't clear the log: ${e?.message || e}`); }
 });
 $('#btn-share-link').addEventListener('click', e => copyShareLink(e.currentTarget, 'coach'));

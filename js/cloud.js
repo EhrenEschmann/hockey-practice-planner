@@ -1,10 +1,11 @@
-// Cloud sync: practices are auto-saved to Firebase (Firestore) under the signed-in user, and changes made
-// on another device arrive live. Without a js/firebase-config.js the app simply stays local (localStorage).
+// Cloud sync: the planner's practices, roster and club data are auto-saved to Firebase (Firestore) and changes made on
+// another device arrive live. Without a js/firebase-config.js the app simply stays local (localStorage).
 //
-// Data layout in Firestore:  users/{uid}/practices/{practiceId}  — one document per practice (the same
-// JSON the app keeps locally, plus `updatedAt` in ms). Newest `updatedAt` wins when local and cloud differ.
+// Data layout (docs/data-model.md): everything lives under its team — teams/{teamId}/practices/{pid} is a light
+// header and …/plan/body the drills; members, players, tasks, stats and media sit beside them; people/{email} tells a
+// viewer which teams are theirs. Newest `updatedAt` wins when local and cloud differ.
 
-import { accessFor, publishedCopy, inboxDocs, clubDoc, statId } from './access.js';
+import { peopleDocs, memberDocs, playerDocs, teamDoc, clubDoc, practiceHeader, practiceBody, practiceFromParts, statId } from './access.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 export const SAVE_DELAY = 800; // ms of quiet after an edit before it is written
@@ -29,10 +30,7 @@ export async function loadConfig() {
   return null;
 }
 
-/**
- * Firestore + Google sign-in implementation of the backend used by createSync():
- *   onUser(cb), signIn(), signOut(), load(uid), save(uid, practice), remove(uid, id), subscribe(uid, cb)
- */
+/** Firestore + Google sign-in implementation of the backend used by createSync() and the viewer (js/main.js). */
 export async function firebaseBackend(config) {
   const [{ initializeApp }, auth, fs] = await Promise.all([
     import(`${SDK}firebase-app.js`), import(`${SDK}firebase-auth.js`), import(`${SDK}firebase-firestore.js`),
@@ -48,7 +46,13 @@ export async function firebaseBackend(config) {
   let authErr = null, onAuthErr = null;
   auth.getRedirectResult(a).catch(e => { authErr = e; onAuthErr?.(e); });
   const db = fs.getFirestore(app);
-  const col = uid => fs.collection(db, 'users', uid, 'practices');
+  const T = t => fs.doc(db, 'teams', t);
+  const P = (t, pid) => fs.doc(db, 'teams', t, 'practices', pid);
+  const B = (t, pid) => fs.doc(db, 'teams', t, 'practices', pid, 'plan', 'body');
+  const sub = (t, pid, name) => fs.collection(db, 'teams', t, 'practices', pid, name);
+  const SUBS = ['clips', 'videos', 'views', 'feedback'];
+  const listSub = async (t, pid, name) => (await fs.getDocs(sub(t, pid, name))).docs.map(d => ({ id: d.id, data: d.data() }));
+  const merged = async (t, h) => practiceFromParts(h, (await fs.getDoc(B(t, h.id))).data() || null);
   return {
     onUser(cb) { return auth.onAuthStateChanged(a, u => cb(u ? { uid: u.uid, email: u.email || '', name: u.displayName || u.email || (u.isAnonymous ? 'Guest' : 'Signed in'), isAnonymous: !!u.isAnonymous } : null)); },
     onAuthError(cb) { onAuthErr = cb; if (authErr) cb(authErr); },
@@ -66,112 +70,134 @@ export async function firebaseBackend(config) {
       }
     },
     async signOut() { await auth.signOut(a); },
-    async load(uid) { return (await fs.getDocs(col(uid))).docs.map(d => d.data()); },
-    async save(uid, p) { await fs.setDoc(fs.doc(col(uid), p.id), p); },
-    async remove(uid, id) { await fs.deleteDoc(fs.doc(col(uid), id)); },
-    subscribe(uid, cb) {
-      return fs.onSnapshot(col(uid), snap => {
+    // ---- the planner's practices: header + body under their team
+    async loadPractices(teamIds) {
+      const out = [];
+      for (const t of teamIds) {
+        const heads = (await fs.getDocs(fs.collection(db, 'teams', t, 'practices'))).docs.map(d => d.data());
+        out.push(...await Promise.all(heads.map(h => merged(t, h))));
+      }
+      return out;
+    },
+    /** Header (always), body (when asked) and the index entry, in one batch. */
+    async savePractice(p, { body = true } = {}) {
+      const t = p.teamId; if (!t) throw new Error('a practice needs a team before it can be saved to the cloud');
+      const batch = fs.writeBatch(db);
+      batch.set(P(t, p.id), practiceHeader(p));
+      if (body) batch.set(B(t, p.id), practiceBody(p));
+      batch.set(fs.doc(db, 'practiceIndex', p.id), { teamId: t });
+      await batch.commit();
+    },
+    async removePractice(t, pid) {
+      for (const name of SUBS) for (const d of await listSub(t, pid, name)) await fs.deleteDoc(d.ref || fs.doc(sub(t, pid, name), d.id)).catch(() => {});
+      await fs.deleteDoc(B(t, pid)).catch(() => {});
+      await fs.deleteDoc(P(t, pid));
+      await fs.deleteDoc(fs.doc(db, 'practiceIndex', pid)).catch(() => {});
+    },
+    /** A practice re-homed to another team: its clips, videos, views and feedback go with it. */
+    async movePractice(from, to, p) {
+      for (const name of SUBS) for (const d of await listSub(from, p.id, name)) await fs.setDoc(fs.doc(sub(to, p.id, name), d.id), d.data);
+      await this.savePractice({ ...p, teamId: to });
+      for (const name of SUBS) for (const d of await listSub(from, p.id, name)) await fs.deleteDoc(fs.doc(sub(from, p.id, name), d.id)).catch(() => {});
+      await fs.deleteDoc(B(from, p.id)).catch(() => {});
+      await fs.deleteDoc(P(from, p.id)).catch(() => {});
+    },
+    /** Live header changes for one team's practices; the body is fetched for each change. */
+    subscribePractices(t, cb) {
+      return fs.onSnapshot(fs.collection(db, 'teams', t, 'practices'), snap => {
         if (snap.metadata.hasPendingWrites) return; // our own edits echoing back
-        for (const ch of snap.docChanges()) cb(ch.type, ch.doc.id, ch.doc.data());
+        for (const ch of snap.docChanges()) {
+          if (ch.type === 'removed') cb('removed', ch.doc.id, null);
+          else merged(t, ch.doc.data()).then(p => cb(ch.type, ch.doc.id, p)).catch(e => cb('error', null, e));
+        }
       }, err => cb('error', null, err));
     },
-    // ---- routing & authorization (js/access.js has the layout; firestore.rules the guarantees) ----
-    // Planner: the copy coaches and the team read, and the access lists the rules look people up in.
-    async savePublished(pid, copy) { await fs.setDoc(fs.doc(db, 'published', pid), copy); },
-    async removePublished(pid) { await fs.deleteDoc(fs.doc(db, 'published', pid)); },
-    async saveAccess(pid, access) { await fs.setDoc(fs.doc(db, 'access', pid), access); },
-    async removeAccess(pid) { await fs.deleteDoc(fs.doc(db, 'access', pid)); },
-    async loadInboxes() { return (await fs.getDocs(fs.collection(db, 'inbox'))).docs.map(d => ({ email: d.id, ...d.data() })); },
-    async saveInbox(email, doc) { await fs.setDoc(fs.doc(db, 'inbox', email), doc); },
-    // Official club teams: club/{teamId} (tasks + lookups, planner-written) and club/{teamId}/stats/{playerId_week} (a family's or coach's numbers).
-    async saveClub(teamId, doc) { await fs.setDoc(fs.doc(db, 'club', teamId), doc); },
-    async removeClub(teamId) { await fs.deleteDoc(fs.doc(db, 'club', teamId)); },
-    async loadClub(teamId) { const s = await fs.getDoc(fs.doc(db, 'club', teamId)); return s.exists() ? s.data() : null; },
-    async saveStat(teamId, data) { await fs.setDoc(fs.doc(db, 'club', teamId, 'stats', statId(data.playerId, data.week)), data); },
-    async loadWeekStats(teamId, week) { return (await fs.getDocs(fs.query(fs.collection(db, 'club', teamId, 'stats'), fs.where('week', '==', week)))).docs.map(d => d.data()); },
-    // A task's how-to media: club/{teamId}/media/{taskId}_audio (one base64 document) or {taskId}_video_{at}_{i} (chunks).
-    async saveClubMedia(teamId, id, data) { await fs.setDoc(fs.doc(db, 'club', teamId, 'media', id), data); },
-    async loadClubMedia(teamId, id) { const s = await fs.getDoc(fs.doc(db, 'club', teamId, 'media', id)); return s.exists() ? s.data() : null; },
-    async removeClubMedia(teamId, id) { await fs.deleteDoc(fs.doc(db, 'club', teamId, 'media', id)); },
-    async loadPlayerStats(teamId, playerId) { return (await fs.getDocs(fs.query(fs.collection(db, 'club', teamId, 'stats'), fs.where('playerId', '==', playerId)))).docs.map(d => d.data()); },
-    async removeInbox(email) { await fs.deleteDoc(fs.doc(db, 'inbox', email)); },
-    // Viewer: who am I here (null = on no roster), and one released practice, live.
-    subscribeInbox(email, cb) {
-      return fs.onSnapshot(fs.doc(db, 'inbox', email), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err));
+    // ---- teams: the documents everyone reads, derived from the planner's roster
+    async saveTeam(t, doc) { await fs.setDoc(T(t), doc); },
+    async removeTeam(t) {
+      for (const name of ['members', 'players']) for (const d of (await fs.getDocs(fs.collection(db, 'teams', t, name))).docs) await fs.deleteDoc(d.ref).catch(() => {});
+      await fs.deleteDoc(T(t));
     },
-    subscribePublished(pid, cb) {
-      return fs.onSnapshot(fs.doc(db, 'published', pid), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err));
+    async loadTeam(t) { const s = await fs.getDoc(T(t)); return s.exists() ? s.data() : null; },
+    async saveMember(t, email, doc) { await fs.setDoc(fs.doc(db, 'teams', t, 'members', email), doc); },
+    async removeMember(t, email) { await fs.deleteDoc(fs.doc(db, 'teams', t, 'members', email)); },
+    async savePlayer(t, id, doc) { await fs.setDoc(fs.doc(db, 'teams', t, 'players', id), doc); },
+    async removePlayer(t, id) { await fs.deleteDoc(fs.doc(db, 'teams', t, 'players', id)); },
+    async loadPlayers(t) { return Object.fromEntries((await fs.getDocs(fs.collection(db, 'teams', t, 'players'))).docs.map(d => [d.id, d.data()])); },
+    async listPeople() { return (await fs.getDocs(fs.collection(db, 'people'))).docs.map(d => ({ email: d.id, ...d.data() })); },
+    async savePerson(email, doc) { await fs.setDoc(fs.doc(db, 'people', email), doc); },
+    async removePerson(email) { await fs.deleteDoc(fs.doc(db, 'people', email)); },
+    subscribePerson(email, cb) { return fs.onSnapshot(fs.doc(db, 'people', email), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err)); },
+    /** An older link that named only the practice: which team is it under? */
+    async lookupTeam(pid) { const s = await fs.getDoc(fs.doc(db, 'practiceIndex', pid)); return s.exists() ? s.data().teamId : null; },
+    // ---- viewers: one team's released headers, live; one practice (header + body), live
+    subscribeTeamPractices(t, stages, cb) {
+      return fs.onSnapshot(fs.query(fs.collection(db, 'teams', t, 'practices'), fs.where('stage', 'in', stages)), snap => cb(snap.docs.map(d => d.data()), null), err => cb(null, err));
     },
-    // Feedback: published/{pid}/feedback/{uid}_{drillId|overall} — a coach reads only their own; the planner reads all.
-    async saveFeedback(pid, fid, entry) { await fs.setDoc(fs.doc(db, 'published', pid, 'feedback', fid), entry); },
-    async removeFeedback(pid, fid) { await fs.deleteDoc(fs.doc(db, 'published', pid, 'feedback', fid)); },
-    async loadMyFeedback(pid, uid) {
-      const q = fs.query(fs.collection(db, 'published', pid, 'feedback'), fs.where('uid', '==', uid));
-      return (await fs.getDocs(q)).docs.map(d => ({ fid: d.id, ...d.data() }));
+    subscribePractice(t, pid, cb) {
+      let h = undefined, b = undefined;
+      const emit = () => { if (h === undefined || b === undefined) return; cb(h ? practiceFromParts(h, b) : null, null); };
+      const u1 = fs.onSnapshot(P(t, pid), s => { h = s.exists() ? s.data() : null; emit(); }, err => cb(null, err));
+      const u2 = fs.onSnapshot(B(t, pid), s => { b = s.exists() ? s.data() : null; emit(); }, err => cb(null, err));
+      return () => { u1(); u2(); };
     },
+    // ---- an official club team: the week's task list, each player's numbers, and a task's how-to media
+    async saveTasks(t, week, doc) { await fs.setDoc(fs.doc(db, 'teams', t, 'tasks', week), doc); },
+    async removeTasks(t, week) { await fs.deleteDoc(fs.doc(db, 'teams', t, 'tasks', week)); },
+    async loadTasks(t, week) { const s = await fs.getDoc(fs.doc(db, 'teams', t, 'tasks', week)); return s.exists() ? s.data() : null; },
+    async saveStat(t, data) { await fs.setDoc(fs.doc(db, 'teams', t, 'stats', statId(data.playerId, data.week)), data); },
+    async loadWeekStats(t, week) { return (await fs.getDocs(fs.query(fs.collection(db, 'teams', t, 'stats'), fs.where('week', '==', week)))).docs.map(d => d.data()); },
+    async loadPlayerStats(t, playerId) { return (await fs.getDocs(fs.query(fs.collection(db, 'teams', t, 'stats'), fs.where('playerId', '==', playerId)))).docs.map(d => d.data()); },
+    async saveClubMedia(t, id, data) { await fs.setDoc(fs.doc(db, 'teams', t, 'media', id), data); },
+    async loadClubMedia(t, id) { const s = await fs.getDoc(fs.doc(db, 'teams', t, 'media', id)); return s.exists() ? s.data() : null; },
+    async removeClubMedia(t, id) { await fs.deleteDoc(fs.doc(db, 'teams', t, 'media', id)); },
+    // ---- feedback: teams/{t}/practices/{pid}/feedback/{uid}_{drillId|overall} — a coach reads only their own; the planner reads all
+    async saveFeedback(t, pid, fid, entry) { await fs.setDoc(fs.doc(sub(t, pid, 'feedback'), fid), entry); },
+    async removeFeedback(t, pid, fid) { await fs.deleteDoc(fs.doc(sub(t, pid, 'feedback'), fid)); },
+    async loadMyFeedback(t, pid, uid) { return (await fs.getDocs(fs.query(sub(t, pid, 'feedback'), fs.where('uid', '==', uid)))).docs.map(d => ({ fid: d.id, ...d.data() })); },
     subscribeAllFeedback(cb) {
       return fs.onSnapshot(fs.collectionGroup(db, 'feedback'),
-        snap => cb(snap.docs.map(d => ({ fid: d.id, pid: d.ref.parent.parent.id, ...d.data() })), null), err => cb(null, err));
+        snap => cb(snap.docs.map(d => ({ fid: d.id, pid: d.ref.parent.parent.id, teamId: d.ref.parent.parent.parent.parent.id, ...d.data() })), null), err => cb(null, err));
     },
-    async resolveFeedback(pid, fid, resolved) { await fs.updateDoc(fs.doc(db, 'published', pid, 'feedback', fid), { resolved }); },
-    // Sign-ins that got nowhere: attempts/{uid} — { uid, email, name, path, at, count }: the last try and how many, written by the account itself.
+    async resolveFeedback(t, pid, fid, resolved) { await fs.updateDoc(fs.doc(sub(t, pid, 'feedback'), fid), { resolved }); },
+    // ---- sign-ins that got nowhere, and access requests (unchanged)
     async logAttempt(uid, a) { await fs.setDoc(fs.doc(db, 'attempts', uid), { ...a, count: fs.increment(1) }, { merge: true }); },
     subscribeAttempts(cb) { return fs.onSnapshot(fs.collection(db, 'attempts'), snap => cb(snap.docs.map(d => d.data()), null), err => cb(null, err)); },
     async removeAttempt(uid) { await fs.deleteDoc(fs.doc(db, 'attempts', uid)); },
-    // Access requests: requests/{uid} — filed by someone on no roster, answered by the planner.
     async loadRequest(uid) { const s = await fs.getDoc(fs.doc(db, 'requests', uid)); return s.exists() ? s.data() : null; },
     async saveRequest(uid, req) { await fs.setDoc(fs.doc(db, 'requests', uid), req); },
     async denyRequest(uid) { await fs.updateDoc(fs.doc(db, 'requests', uid), { status: 'denied', deniedAt: Date.now() }); },
     async removeRequest(uid) { await fs.deleteDoc(fs.doc(db, 'requests', uid)); },
-    subscribeRequests(cb) {
-      return fs.onSnapshot(fs.collection(db, 'requests'), snap => cb(snap.docs.map(d => d.data()), null), err => cb(null, err));
-    },
-    // The planner's private documents (users/{uid}/private/{name}): only the account itself reads or writes them.
-    // Today: 'anthropic' — the encrypted API key record from js/ai.js (ciphertext, salt, iv; never the key itself).
+    subscribeRequests(cb) { return fs.onSnapshot(fs.collection(db, 'requests'), snap => cb(snap.docs.map(d => d.data()), null), err => cb(null, err)); },
+    // ---- the planner's private documents (users/{uid}/private/{name}), e.g. 'anthropic': the encrypted API key record
     async savePrivate(uid, name, data) { await fs.setDoc(fs.doc(db, 'users', uid, 'private', name), data); },
     async loadPrivate(uid, name) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'private', name)); return s.exists() ? s.data() : null; },
     async removePrivate(uid, name) { await fs.deleteDoc(fs.doc(db, 'users', uid, 'private', name)); },
-    // Intro clips: users/{uid}/practices/{pid}/clips/{drillId} — { mime, data (base64), secs, at }.
-    // One small document per clip, so a practice's own document stays light; read rules mirror the practice's.
-    async saveClip(uid, pid, did, clip) { await fs.setDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did), clip); },
-    async loadClip(uid, pid, did) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did)); return s.exists() ? s.data() : null; },
-    async removeClip(uid, pid, did) { await fs.deleteDoc(fs.doc(db, 'users', uid, 'practices', pid, 'clips', did)); },
-    // Audit log: users/{uid}/practices/{pid}/views/{autoId} — one record per drill view / play by a viewer.
-    async logView(uid, pid, entry) { await fs.addDoc(fs.collection(db, 'users', uid, 'practices', pid, 'views'), entry); },
-    async loadViews(uid, pid, max = 3000) {
-      const q = fs.query(fs.collection(db, 'users', uid, 'practices', pid, 'views'), fs.orderBy('at', 'desc'), fs.limit(max));
-      return (await fs.getDocs(q)).docs.map(d => ({ id: d.id, ...d.data() }));
+    // ---- a practice's recordings and video, under its team
+    async saveClip(t, pid, did, clip) { await fs.setDoc(fs.doc(sub(t, pid, 'clips'), did), clip); },
+    async loadClip(t, pid, did) { const s = await fs.getDoc(fs.doc(sub(t, pid, 'clips'), did)); return s.exists() ? s.data() : null; },
+    async removeClip(t, pid, did) { await fs.deleteDoc(fs.doc(sub(t, pid, 'clips'), did)); },
+    async logView(t, pid, entry) { await fs.addDoc(sub(t, pid, 'views'), entry); },
+    async loadViews(t, pid, max = 3000) { return (await fs.getDocs(fs.query(sub(t, pid, 'views'), fs.orderBy('at', 'desc'), fs.limit(max)))).docs.map(d => ({ id: d.id, ...d.data() })); },
+    async clearViews(t, pid) { const snap = await fs.getDocs(sub(t, pid, 'views')); await Promise.all(snap.docs.map(d => fs.deleteDoc(d.ref))); },
+    async saveVideo(t, pid, did, at, chunks, meta) {
+      for (let i = 0; i < chunks.length; i++) await fs.setDoc(fs.doc(sub(t, pid, 'videos'), `${did}_${at}_${i}`), { i, n: chunks.length, data: chunks[i], ...meta, at });
     },
-    async clearViews(uid, pid) {
-      const snap = await fs.getDocs(fs.collection(db, 'users', uid, 'practices', pid, 'views'));
-      await Promise.all(snap.docs.map(d => fs.deleteDoc(d.ref)));
-    },
-    // Uploaded drill videos: users/{uid}/practices/{pid}/videos/{drillId}_{at}_{i} — base64 chunks (≤ ~930 KB each)
-    // of one re-encoded clip, read back in order. Firestore's free tier hosts them without a storage bucket.
-    async saveVideo(uid, pid, did, at, chunks, meta) {
-      for (let i = 0; i < chunks.length; i++) {
-        await fs.setDoc(fs.doc(db, 'users', uid, 'practices', pid, 'videos', `${did}_${at}_${i}`), { i, n: chunks.length, data: chunks[i], ...meta, at });
-      }
-    },
-    async loadVideo(uid, pid, did, at, n, onChunk = () => {}) {
+    async loadVideo(t, pid, did, at, n, onChunk = () => {}) {
       const out = [];
       for (let i = 0; i < n; i++) {
-        const s = await fs.getDoc(fs.doc(db, 'users', uid, 'practices', pid, 'videos', `${did}_${at}_${i}`));
+        const s = await fs.getDoc(fs.doc(sub(t, pid, 'videos'), `${did}_${at}_${i}`));
         if (!s.exists()) throw new Error(`video chunk ${i + 1} of ${n} is missing`);
         out.push(s.data().data); onChunk(i + 1, n);
       }
       return out;
     },
-    async removeVideo(uid, pid, did, at, n) {
-      for (let i = 0; i < n; i++) await fs.deleteDoc(fs.doc(db, 'users', uid, 'practices', pid, 'videos', `${did}_${at}_${i}`)).catch(() => {});
-    },
-    // The team roster: one document per user at users/{uid}/meta/roster.
+    async removeVideo(t, pid, did, at, n) { for (let i = 0; i < n; i++) await fs.deleteDoc(fs.doc(sub(t, pid, 'videos'), `${did}_${at}_${i}`)).catch(() => {}); },
+    // ---- the planner's roster: the working document the team documents are derived from
     async loadRoster(uid) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'meta', 'roster')); return s.exists() ? s.data() : null; },
     async saveRoster(uid, r) { await fs.setDoc(fs.doc(db, 'users', uid, 'meta', 'roster'), r); },
     subscribeRoster(uid, cb) {
-      return fs.onSnapshot(fs.doc(db, 'users', uid, 'meta', 'roster'), s => {
-        if (!s.metadata.hasPendingWrites && s.exists()) cb(s.data());
-      }, () => { /* roster sync is best-effort; practice sync reports errors */ });
+      return fs.onSnapshot(fs.doc(db, 'users', uid, 'meta', 'roster'), s => { if (!s.metadata.hasPendingWrites && s.exists()) cb(s.data()); }, () => { /* best-effort */ });
     },
   };
 }
@@ -187,160 +213,117 @@ export function friendlyAuthError(e) {
 }
 
 /**
- * Keeps a Store in sync with a backend for the signed-in user:
- *  - on sign-in, merges cloud practices with local ones (newest wins, missing ones copied both ways)
- *  - auto-saves a practice SAVE_DELAY ms after it last changed (store.save → onSave hook)
- *  - deletes propagate; changes from other devices are applied live
+ * Keeps a Store in sync with a backend for the signed-in planner:
+ *  - on sign-in, merges the cloud's practices (every team on the roster) with local ones — newest wins, missing ones copied both ways
+ *  - auto-saves a practice SAVE_DELAY ms after it last changed: its header every time, its body only when the drills changed
+ *  - the roster is saved as the planner's working document and unfolded into the team documents everyone reads
+ *  - deletes propagate; changes from other devices are applied live, per team
  * `onStatus(state, detail)` reports: signedout | viewer | syncing | saving | saved | error.
- * `canSync(user)` false → that account is signed in (`sync.user`) but nothing is synced for it ('viewer').
- * `onRemote(ids)` fires after cloud changes were applied to those practices.
  */
 export function createSync({ store, backend, onStatus = () => {}, onRemote = () => {}, onRoster = () => {}, canSync = () => true }) {
-  let uid = null, user = null, unsub = null, unsubRoster = null, applying = false;
+  let uid = null, user = null, unsubs = new Map(), unsubRoster = null, applying = false;
   const timers = new Map();
   let rosterTimer = null;
   const clean = p => JSON.parse(JSON.stringify(p)); // drops undefined (Firestore rejects it) and detaches
   const local = id => store.data.practices.find(p => p.id === id);
   const newer = (a, b) => (a?.updatedAt || 0) > (b?.updatedAt || 0);
+  const status = (state, detail) => onStatus(state, detail);
+  const fp = o => { const t = JSON.stringify(o); let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return `${t.length}:${h}`; };
+  // What this device last sent, so only changes are written: header / body fingerprints and location per practice,
+  // the team documents, and each person's document. Lost? Everything is simply re-sent next time.
+  const PUB_KEY = 'hpp.pubstate.v2';
+  let pub = { owner: null, h: {}, b: {}, loc: {}, t: {}, i: {} };
+  const loadPub = () => { try { const v = JSON.parse(localStorage.getItem(PUB_KEY) || 'null'); pub = v?.owner === uid ? { h: {}, b: {}, loc: {}, t: {}, i: {}, ...v } : { owner: uid, h: {}, b: {}, loc: {}, t: {}, i: {} }; } catch { pub = { owner: uid, h: {}, b: {}, loc: {}, t: {}, i: {} }; } };
+  const savePub = () => { try { localStorage.setItem(PUB_KEY, JSON.stringify(pub)); } catch { /* blocked */ } };
+  /** The team a practice is filed under: its own id when that team exists, else matched by name, else the first team. */
+  function homeTeam(p) {
+    const teams = store.roster.teams || [];
+    if (p.teamId && teams.some(t => t.id === p.teamId)) return p.teamId;
+    const byName = teams.find(t => String(t.name || '').trim().toLowerCase() === String(p.team || '').trim().toLowerCase());
+    return byName?.id || p.teamId || teams[0]?.id || null;
+  }
 
-  function status(state, detail) { onStatus(state, detail); }
-
-  // ----- writes -----
+  // ----- writes: practices -----
   function schedule(p) {
     if (!uid || applying || !p) return;
     clearTimeout(timers.get(p.id));
     status('saving');
     timers.set(p.id, setTimeout(() => flushOne(p.id), SAVE_DELAY));
   }
+  async function pushPractice(p) {
+    const t = homeTeam(p);
+    if (!t) { status('error', 'add a team under 👥 Team — practices are kept by team'); return; }
+    if (p.teamId !== t) { p.teamId = t; store.persist(); }
+    const c = clean({ ...p, owner: uid }); // the owner's uid rides on the header: viewers key their cached copies by it
+    const hf = fp(practiceHeader(c)), bf = fp(practiceBody(c));
+    if (pub.loc[p.id] && pub.loc[p.id] !== t) { await backend.movePractice(pub.loc[p.id], t, c); } // re-homed: everything moves with it
+    else if (pub.h[p.id] !== hf || pub.b[p.id] !== bf) await backend.savePractice(c, { body: pub.b[p.id] !== bf });
+    pub.h[p.id] = hf; pub.b[p.id] = bf; pub.loc[p.id] = t; savePub();
+    watchTeam(t);
+  }
   async function flushOne(id) {
     timers.delete(id);
     const p = local(id);
     if (!p || !uid) return;
-    try { await backend.save(uid, clean(p)); await publishOne(p); await syncInboxes(); if (!timers.size) status('saved'); }
+    try { await pushPractice(p); if (!timers.size) status('saved'); }
+    catch (e) { status('error', e?.message || String(e)); }
+  }
+  async function remove(id) {
+    if (!uid || applying) return;
+    clearTimeout(timers.get(id)); timers.delete(id);
+    const t = pub.loc[id]; if (!t) return;
+    try { await backend.removePractice(t, id); delete pub.h[id]; delete pub.b[id]; delete pub.loc[id]; savePub(); status('saved'); }
     catch (e) { status('error', e?.message || String(e)); }
   }
 
-  // ----- publishing: what coaches and the team can open follows every save (js/access.js) -----
-  // Only changes are written: a fingerprint of everything last sent is kept on this device.
-  const PUB_KEY = 'hpp.pubstate';
-  const fp = o => { const t = JSON.stringify(o); let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return `${t.length}:${h}`; };
-  let pub = { owner: null, p: {}, a: {}, i: {} };
-  function loadPub() {
-    try { const v = JSON.parse(localStorage.getItem(PUB_KEY) || 'null'); if (v?.owner === uid) { pub = { p: {}, a: {}, i: {}, ...v }; return; } } catch { /* start clean */ }
-    pub = { owner: uid, p: {}, a: {}, i: {} };
-  }
-  const savePub = () => { try { localStorage.setItem(PUB_KEY, JSON.stringify(pub)); } catch { /* blocked: everything is simply re-sent next time */ } };
-  async function publishOne(p) {
-    if (!uid || !backend.savePublished) return;
-    const a = accessFor(store.roster, p);
-    if (a.stage === 'draft' && !pub.a[p.id] && !pub.p[p.id]) return; // never released: nothing in the cloud to keep in step
-    if (pub.a[p.id] !== fp(a)) { await backend.saveAccess(p.id, a); pub.a[p.id] = fp(a); } // the list first: pulling back must cut access before anything else
-    if (a.stage === 'draft') { if (pub.p[p.id]) { await backend.removePublished(p.id); delete pub.p[p.id]; } }
-    else {
-      const copy = clean(publishedCopy(p, uid));
-      if (pub.p[p.id] !== fp(copy)) { await backend.savePublished(p.id, copy); pub.p[p.id] = fp(copy); }
-    }
-    savePub();
-  }
-  async function unpublish(id) {
-    if (!uid || !backend.savePublished || (!pub.a[id] && !pub.p[id])) return;
-    await backend.removeAccess(id); await backend.removePublished(id);
-    delete pub.a[id]; delete pub.p[id]; savePub();
-  }
-  /** Each official club team's document (tasks + who may log for whom) follows the roster; a team no longer flagged loses it. */
-  async function syncClubs() {
-    if (!uid || !backend.saveClub) return;
-    pub.c ||= {};
-    const want = new Map((store.roster.teams || []).map(t => [t.id, clubDoc(t)]).filter(([, d]) => d));
-    for (const [id, doc] of want) { const f = fp(doc); if (pub.c[id] !== f) { await backend.saveClub(id, clean(doc)); pub.c[id] = f; } }
-    for (const id of Object.keys(pub.c)) if (!want.has(id)) { await backend.removeClub(id); delete pub.c[id]; }
-    savePub();
-  }
-  /** Each person's list document: persona from the roster, practices from what is released to them. */
-  async function syncInboxes() {
-    if (!uid || !backend.saveInbox) return;
-    const want = inboxDocs(store.roster, store.data.practices);
-    for (const [email, doc] of want) {
-      if (email.includes('/') || pub.i[email] === fp(doc)) continue;
-      await backend.saveInbox(email, clean(doc)); pub.i[email] = fp(doc);
-    }
-    for (const email of Object.keys(pub.i)) if (!want.has(email)) { await backend.removeInbox(email); delete pub.i[email]; }
-    savePub();
-  }
-  /** After sign-in: bring the published side in step with this (freshly merged) store — also the one-time migration of practices shared by link. */
-  async function republish() {
-    if (!backend.savePublished) return true;
-    loadPub();
-    try {
-      // The cloud is the truth about which list documents exist (another device may have written them).
-      pub.i = Object.fromEntries((await backend.loadInboxes()).map(({ email, ...doc }) => [email, fp(doc)]));
-      for (const p of store.data.practices) await publishOne(p);
-      for (const id of Object.keys({ ...pub.a, ...pub.p })) if (!local(id)) await unpublish(id);
-      await syncClubs();
-      await syncInboxes();
-      return true;
-    } catch (e) { status('error', `sharing: ${e?.message || e} — are the latest firestore.rules deployed?`); return false; }
-  }
-  async function flush() { for (const id of [...timers.keys()]) { clearTimeout(timers.get(id)); await flushOne(id); } await flushRoster(); }
-
-  // ----- roster (one meta document, same debounce + newest-wins treatment) -----
+  // ----- writes: the roster, unfolded into the team documents everyone reads -----
   function scheduleRoster() {
     if (!uid || applying || !backend.saveRoster) return;
     clearTimeout(rosterTimer);
     status('saving');
     rosterTimer = setTimeout(flushRoster, SAVE_DELAY);
   }
+  async function syncTeams() {
+    if (!uid || !backend.saveTeam) return;
+    const teams = (store.roster.teams || []).filter(t => t.id);
+    const seen = new Set();
+    for (const t of teams) {
+      seen.add(t.id);
+      const rec = (pub.t[t.id] ||= { doc: null, m: {}, p: {} });
+      const doc = clean(teamDoc(t)); const df = fp(doc);
+      if (rec.doc !== df) { await backend.saveTeam(t.id, doc); rec.doc = df; }
+      const members = memberDocs(t), players = playerDocs(t);
+      for (const [email, m] of members) { const f = fp(m); if (rec.m[email] !== f) { await backend.saveMember(t.id, email, clean(m)); rec.m[email] = f; } }
+      for (const email of Object.keys(rec.m)) if (!members.has(email)) { await backend.removeMember(t.id, email); delete rec.m[email]; }
+      for (const [id, pl] of players) { const f = fp(pl); if (rec.p[id] !== f) { await backend.savePlayer(t.id, id, clean(pl)); rec.p[id] = f; } }
+      for (const id of Object.keys(rec.p)) if (!players.has(id)) { await backend.removePlayer(t.id, id); delete rec.p[id]; }
+      // An official club team's week lists, one document per week.
+      const weeks = clubDoc(t)?.weeks || {}; rec.w ||= {};
+      for (const [w, list] of Object.entries(weeks)) { const f = fp(list); if (rec.w[w] !== f) { await backend.saveTasks(t.id, w, clean({ week: w, tasks: list })); rec.w[w] = f; } }
+      for (const w of Object.keys(rec.w)) if (!weeks[w]) { await backend.removeTasks(t.id, w); delete rec.w[w]; }
+      watchTeam(t.id);
+    }
+    for (const id of Object.keys(pub.t)) if (!seen.has(id)) { await backend.removeTeam(id); delete pub.t[id]; } // a team taken off the roster (its practices stay where they are)
+    // Each person's own document: their teams and roles.
+    const want = peopleDocs(store.roster);
+    for (const [email, doc] of want) { if (email.includes('/')) continue; const f = fp(doc); if (pub.i[email] !== f) { await backend.savePerson(email, clean(doc)); pub.i[email] = f; } }
+    for (const email of Object.keys(pub.i)) if (!want.has(email)) { await backend.removePerson(email); delete pub.i[email]; }
+    savePub();
+  }
   async function flushRoster() {
     if (!rosterTimer) return;
     clearTimeout(rosterTimer); rosterTimer = null;
     if (!uid) return;
-    try {
-      await backend.saveRoster(uid, clean(store.roster));
-      for (const p of store.data.practices) await publishOne(p); // the roster is who has access: every released practice follows it
-      await syncClubs();
-      await syncInboxes();
-      if (!timers.size) status('saved');
-    } catch (e) { status('error', e?.message || String(e)); }
+    try { await backend.saveRoster(uid, clean(store.roster)); await syncTeams(); if (!timers.size) status('saved'); }
+    catch (e) { status('error', e?.message || String(e)); }
   }
-  async function remove(id) {
-    if (!uid || applying) return;
-    clearTimeout(timers.get(id)); timers.delete(id);
-    try { await backend.remove(uid, id); await unpublish(id); await syncInboxes(); status('saved'); } catch (e) { status('error', e?.message || String(e)); }
-  }
+  async function flush() { for (const id of [...timers.keys()]) { clearTimeout(timers.get(id)); await flushOne(id); } await flushRoster(); }
 
-  // ----- initial merge -----
-  async function pull() {
-    status('syncing');
-    const remote = await backend.load(uid);
-    const changed = [];
-    applying = true;
-    try {
-      for (const r of remote) {
-        const i = store.data.practices.findIndex(p => p.id === r.id);
-        if (i < 0) { store.data.practices.push(r); changed.push(r.id); }
-        else if (newer(r, store.data.practices[i])) { store.data.practices[i] = r; changed.push(r.id); }
-      }
-      if (changed.length) { store.migrate(); store.persist(); }
-    } finally { applying = false; }
-    for (const p of store.data.practices) {
-      const r = remote.find(x => x.id === p.id);
-      if (!r || newer(p, r)) await backend.save(uid, clean(p));
-    }
-    // Roster: newest copy wins, missing side copied over. Roster trouble (e.g. rules not yet
-    // deployed for users/{uid}/meta) must never block practice syncing — report it and move on.
-    if (backend.loadRoster) {
-      try {
-        const rr = await backend.loadRoster(uid);
-        if (rr && (rr.updatedAt || 0) > (store.roster.updatedAt || 0)) { store.data.roster = rr; store.persist(); onRoster(); }
-        else if ((store.roster.updatedAt || 0) > (rr?.updatedAt || 0)) await backend.saveRoster(uid, clean(store.roster));
-      } catch (e) { status('error', `team roster: ${e?.message || e} — are the latest firestore.rules deployed?`); }
-    }
-    const shared = await republish();
-    onRemote(changed, { full: true });
-    if (shared !== false) status(timers.size ? 'saving' : 'saved');
+  // ----- live updates from elsewhere, per team -----
+  function watchTeam(t) {
+    if (!uid || unsubs.has(t) || !backend.subscribePractices) return;
+    unsubs.set(t, backend.subscribePractices(t, onChange));
   }
-
-  // ----- live updates from elsewhere -----
   function onChange(type, id, data) {
     if (type === 'error') { status('error', data?.message || String(data)); return; }
     if (timers.has(id)) return; // we have unsaved local edits to this one; ours will win when written
@@ -349,23 +332,61 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
       if (type === 'removed') {
         if (!local(id)) return;
         store.data.practices = store.data.practices.filter(p => p.id !== id);
-        if (!store.data.practices.length) store.data.practices.push(store.blankPractice());
-        if (store.data.currentId === id) store.switchPractice(store.data.practices[0].id);
+        if (!store.live.length) store.data.practices.push(store.blankPractice());
+        if (store.data.currentId === id) store.switchPractice(store.live[0].id);
         store.persist();
       } else {
         const i = store.data.practices.findIndex(p => p.id === id);
         if (i >= 0 && !newer(data, store.data.practices[i])) return;
         if (i < 0) store.data.practices.push(data); else store.data.practices[i] = data;
+        const c = clean(data); pub.h[id] = fp(practiceHeader(c)); pub.b[id] = fp(practiceBody(c)); pub.loc[id] = data.teamId; savePub(); // in step: nothing to re-send
         store.migrate(); store.persist();
       }
     } finally { applying = false; }
     onRemote([id]);
   }
 
+  // ----- initial merge -----
+  async function pull() {
+    status('syncing');
+    loadPub();
+    // The roster first: it names the teams whose practices we load. Newest copy wins, missing side copied over.
+    if (backend.loadRoster) {
+      try {
+        const rr = await backend.loadRoster(uid);
+        if (rr && (rr.updatedAt || 0) > (store.roster.updatedAt || 0)) { store.data.roster = rr; store.migrate(); store.persist(); onRoster(); }
+        else if ((store.roster.updatedAt || 0) > (rr?.updatedAt || 0)) await backend.saveRoster(uid, clean(store.roster));
+      } catch (e) { status('error', `team roster: ${e?.message || e} — are the latest firestore.rules deployed?`); }
+    }
+    const teamIds = [...new Set([...(store.roster.teams || []).map(t => t.id), ...store.data.practices.map(p => p.teamId)].filter(Boolean))];
+    const remote = await backend.loadPractices(teamIds);
+    const changed = [];
+    applying = true;
+    try {
+      for (const r of remote) {
+        const i = store.data.practices.findIndex(p => p.id === r.id);
+        if (i < 0) { store.data.practices.push(r); changed.push(r.id); }
+        else if (newer(r, store.data.practices[i])) { store.data.practices[i] = r; changed.push(r.id); }
+        else if (r.teamId && store.data.practices[i].teamId !== r.teamId) { store.data.practices[i].teamId = r.teamId; changed.push(r.id); } // same copy, filed under a team in the cloud: keep it there
+        const c = clean(r); pub.h[r.id] = fp(practiceHeader(c)); pub.b[r.id] = fp(practiceBody(c)); pub.loc[r.id] = r.teamId;
+      }
+      if (changed.length) { store.migrate(); store.persist(); }
+    } finally { applying = false; }
+    try {
+      for (const p of store.data.practices) { const r = remote.find(x => x.id === p.id); if (!r || newer(p, r)) await pushPractice(p); }
+      pub.i = Object.fromEntries((await backend.listPeople()).map(({ email, ...doc }) => [email, fp(doc)])); // the cloud is the truth about which person documents exist
+      await syncTeams();
+      for (const t of teamIds) watchTeam(t);
+      savePub();
+      onRemote(changed, { full: true });
+      status(timers.size ? 'saving' : 'saved');
+    } catch (e) { status('error', `sharing: ${e?.message || e} — are the latest firestore.rules deployed?`); }
+  }
+
   // ----- auth -----
   backend.onAuthError?.(e => status('error', friendlyAuthError(e)));
   backend.onUser(async u => {
-    unsub?.(); unsub = null;
+    for (const un of unsubs.values()) un(); unsubs = new Map();
     unsubRoster?.(); unsubRoster = null;
     user = u; uid = u && canSync(u) ? u.uid : null;
     if (!u) { status('signedout'); return; }
@@ -375,10 +396,10 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
       if (store.data.ownerUid && store.data.ownerUid !== uid) store.reset();
       store.data.ownerUid = uid; store.persist();
       await pull();
-      unsub = backend.subscribe(uid, onChange);
       unsubRoster = backend.subscribeRoster?.(uid, r => {
         if (rosterTimer || !r || (r.updatedAt || 0) <= (store.roster.updatedAt || 0)) return;
-        store.data.roster = r; store.persist(); onRoster();
+        store.data.roster = r; store.migrate(); store.persist(); onRoster();
+        for (const t of store.roster.teams || []) if (t.id) watchTeam(t.id);
       });
     } catch (e) { status('error', e?.message || String(e)); }
   });

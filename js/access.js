@@ -1,16 +1,16 @@
 // Routing & authorization logic (docs/requirements-routing-auth.md) — pure functions, no DOM and no Firebase,
 // shared by the editor (what to publish, and to whom) and the viewer (where a person may be).
 //
-// Cloud layout this feeds (rules in firestore.rules):
-//   users/{uid}/practices/{pid}     the planner's working document — planner only
-//   published/{pid}                 the copy coaches and the team read (written while stage ≠ draft)
-//   published/{pid}/feedback/{fid}  a coach's feedback: one document per coach per drill (fid = `${uid}_${drillId|overall}`)
-//   access/{pid}                    { stage, coach: [emails], team: [emails] } — planner only; the rules look people up here
-//   inbox/{email}                   { persona, practices: { [pid]: { role, team, date, time } }, club } — that person's list
-//   requests/{uid}                  an access request from someone who is on no roster
-//   club/{teamId}                   an official club team's weekly tasks + who may log for which player (clubDoc below)
-//   club/{teamId}/stats/{pid_week}  one player's numbers for one week — their family (or a coach) writes, coaches read
-//   club/{teamId}/media/{mid}       a task's how-to: `{taskId}_audio` (base64 clip) or `{taskId}_video_{at}_{i}` (chunks) — planner writes, members read
+// Cloud layout this feeds (docs/data-model.md; the guarantees are in firestore.rules): everything lives under its team.
+//   teams/{teamId}                            teamDoc(): { id, name, club, admins }
+//   teams/{teamId}/members/{email}            memberDocs(): { role: 'coach' | 'family', name, playerIds }
+//   teams/{teamId}/players/{playerId}         playerDocs(): { name, contacts }
+//   teams/{teamId}/practices/{pid}            practiceHeader(): the light part every list reads; `stage` gates who may read it
+//   teams/{teamId}/practices/{pid}/plan/body  practiceBody(): the drills
+//   …/practices/{pid}/clips|videos|views|feedback
+//   teams/{teamId}/tasks/{week}, stats/{pid_week}, media/{id}   an official club team's week lists, numbers and how-tos
+//   people/{email}                            peopleDocs(): that person's teams and roles — read once at start
+//   practiceIndex/{pid}                       { teamId } for older links that named the practice alone
 
 export const STAGES = ['draft', 'coaches', 'team'];
 export const STAGE_LABELS = { draft: 'Draft — only you', coaches: 'Out to coaches for feedback', team: 'Released to the team' };
@@ -53,41 +53,59 @@ export function publishedCopy(p, owner) {
 }
 
 /** Every person's list document, keyed by email: their persona (from the roster) and the practices released to them. */
-export function inboxDocs(roster, practices) {
+/**
+ * Each person's own document (people/{email}): their persona and the teams they are on, with their role there and,
+ * for a family, which players are theirs. The viewer reads it once at start; every list after that is per team.
+ */
+export function peopleDocs(roster) {
   const out = new Map();
-  const doc = e => { if (!out.has(e)) out.set(e, { persona: 'team', practices: {} }); return out.get(e); };
-  for (const t of roster?.teams || []) {
-    for (const e of rosterFamilyEmails(t)) doc(e);
-    for (const e of rosterCoachEmails(t)) doc(e).persona = 'coach';
-  }
-  for (const p of practices || []) {
-    const a = accessFor(roster, p);
-    if (a.stage === 'draft') continue;
-    const teamId = p.teamId || rosterTeamFor(roster, p)?.id || '';
-    const card = role => ({ role, stage: a.stage, team: p.team || '', teamId, date: p.date || '', time: p.time || '', ...(p.kind === 'game' ? { kind: 'game', opponent: p.opponent || '' } : {}) });
-    for (const e of a.coach) { const d = doc(e); d.persona = 'coach'; d.practices[p.id] = card('coach'); }
-    if (a.stage === 'team') for (const e of a.team) doc(e).practices[p.id] = card('team');
-    else for (const e of a.team) doc(e); // known to the app (not a stranger), nothing to open yet
-  }
-  // Each person's teams: a coach's as 'coach', a family's as 'team' — the viewer's lists are per team.
+  const doc = e => { if (!out.has(e)) out.set(e, { persona: 'team', teams: {} }); return out.get(e); };
   for (const t of roster?.teams || []) {
     if (!t.id) continue;
-    for (const e of rosterCoachEmails(t)) (doc(e).teams ||= {})[t.id] = { name: t.name || '', role: 'coach' };
-    for (const e of rosterFamilyEmails(t)) { const d = doc(e); d.teams ||= {}; if (!d.teams[t.id]) d.teams[t.id] = { name: t.name || '', role: 'team' }; }
-  }
-  // Official club teams: each coach gets the whole team's weekly output; each family gets its own players' profiles.
-  for (const t of roster?.teams || []) {
-    if (!t.club) continue;
-    const players = (t.players || []).map(pl => ({ id: pl.id, name: pl.name || '' }));
-    for (const e of rosterCoachEmails(t)) { const d = doc(e); (d.club ||= {})[t.id] = { name: t.name || '', role: 'coach', players }; }
+    const coaches = rosterCoachEmails(t);
+    for (const e of coaches) { const d = doc(e); d.persona = 'coach'; d.teams[t.id] = { name: t.name || '', role: 'coach', ...(t.club ? { club: true } : {}) }; }
     for (const pl of t.players || []) for (const e of emails((pl.contacts || []).map(k => k.email))) {
-      if (rosterCoachEmails(t).includes(e)) continue; // a coach-parent already has everyone
-      const d = doc(e), c = (d.club ||= {})[t.id] ||= { name: t.name || '', role: 'family', players: [] };
-      if (!c.players.some(x => x.id === pl.id)) c.players.push({ id: pl.id, name: pl.name || '' });
+      if (coaches.includes(e)) continue; // a coach-parent is a coach on that team
+      const d = doc(e), entry = d.teams[t.id] ||= { name: t.name || '', role: 'family', players: [], ...(t.club ? { club: true } : {}) };
+      if (!pl.id) continue;
+      entry.players ||= [];
+      if (!entry.players.some(x => x.id === pl.id)) entry.players.push({ id: pl.id, name: pl.name || '' });
     }
   }
   return out;
 }
+/** The member documents a team needs (teams/{t}/members/{email}): coaches as 'coach', family contacts as 'family' with their players. */
+export function memberDocs(t) {
+  const out = new Map();
+  for (const e of rosterCoachEmails(t)) out.set(e, { role: 'coach', name: (t.coaches || []).find(c => norm(c.email) === e)?.name || '', playerIds: [] });
+  for (const pl of t.players || []) for (const k of pl.contacts || []) {
+    const e = norm(k.email); if (!e || !pl.id) continue;
+    if (out.has(e)) { if (!out.get(e).playerIds.includes(pl.id)) out.get(e).playerIds.push(pl.id); continue; }
+    out.set(e, { role: 'family', name: k.name || '', playerIds: [pl.id] });
+  }
+  return out;
+}
+/** The player documents (teams/{t}/players/{id}): name and the family emails that may log for them. */
+export const playerDocs = t => new Map((t.players || []).filter(pl => pl.id).map(pl => [pl.id, { name: pl.name || '', contacts: emails((pl.contacts || []).map(k => k.email)) }]));
+/** The team document (teams/{t}). `admins` are extra editors by email; the planner is always one. */
+export const teamDoc = t => ({ id: t.id, name: t.name || '', club: !!t.club, admins: emails(t.admins || []), updatedAt: t.updatedAt || 0 });
+
+// ---- a practice in the cloud: a light HEADER (lists, calendars, the rules) and a heavy BODY (the drills)
+const HEADER_FIELDS = ['id', 'teamId', 'kind', 'team', 'opponent', 'date', 'time', 'coaches', 'open', 'sharedWith', 'sharedTeam', 'sentCoachesAt', 'sentTeamAt', 'deleted', 'updatedAt', 'owner', 'showPaths'];
+export function practiceHeader(p) {
+  const h = {};
+  for (const k of HEADER_FIELDS) if (p[k] !== undefined && p[k] !== null) h[k] = p[k];
+  const drills = (p.drills || []).filter(d => !d.hidden);
+  h.stage = stageOf(p); // the effective stage: a deleted practice reads as a draft
+  h.drillNames = drills.map(d => d.name || '').slice(0, 60);
+  h.drillCount = drills.length;
+  h.minutes = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  h.hasVideo = drills.some(d => d.upload || d.video);
+  return h;
+}
+export const practiceBody = p => ({ id: p.id, teamId: p.teamId || null, drills: p.drills || [], updatedAt: p.updatedAt || 0 });
+/** Header + body back into the practice object the editor and viewer work with. */
+export const practiceFromParts = (h, body) => { const p = { ...h, drills: body?.drills || [] }; delete p.drillNames; delete p.drillCount; delete p.minutes; delete p.hasVideo; return p; };
 
 // ---- official club teams: weekly tasks and who may log for whom
 export const TASK_UNITS = { reps: 'reps', min: 'minutes', times: 'times', shots: 'shots' };
@@ -238,8 +256,8 @@ export function resolveRoute(route, who) {
   if (view === 'root' || view === 'editor' || view === 'request') return { go: home };
   if (view === 'coach' && persona === 'team') return { go: routePath({ view: 'team', teamId, pid }) };
   if (!pid) return listFor(view);
-  const role = who.roles?.[pid]; // this practice's role: a coach of one team can be a parent on another
-  if (!role) return { screen: 'practice', as: 'team', teamId, pid, probe: true }; // not on their list: still tried, since an open practice is for anyone signed in (a refusal explains)
-  if (view === 'coach' && role === 'team') return { go: routePath({ view: 'team', teamId, pid }) };
+  const role = teams.find(t => t.id === teamId)?.role; // their role on that team: 'coach' or 'family' (a coach of one team can be a parent on another)
+  if (!role) return { screen: 'practice', as: 'team', teamId, pid, probe: true }; // not their team (or an older link with no team): still tried — an open practice is for anyone signed in, and a refusal explains
+  if (view === 'coach' && role !== 'coach') return { go: routePath({ view: 'team', teamId, pid }) };
   return { screen: 'practice', as: view, teamId, pid };
 }

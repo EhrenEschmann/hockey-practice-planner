@@ -1693,11 +1693,14 @@ $('#offscreen').addEventListener('click', fitAll);
 $('#btn-zoom-in').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1 / 1.25); });
 $('#btn-zoom-out').addEventListener('click', () => { const v = drill().view; zoomAt({ x: v.x + v.w / 2, y: v.y + v.h / 2 }, 1.25); });
 $('#snap-toggle').addEventListener('change', e => snap = e.target.checked);
-$$('#toolbar [data-side]').forEach(b => b.addEventListener('click', () => {
-  newSide = b.dataset.side;
-  $$('#toolbar [data-side]').forEach(x => x.classList.toggle('active', x === b));
-  setTool('skater'); // picking a side implies you're about to place skaters
-}));
+// The O / D badge on the Skater tool: tap to switch the side new skaters get (picking a side implies you're about to place skaters).
+{
+  const badge = $('#toolbar [data-side-toggle]');
+  const paintSide = () => { badge.textContent = newSide; badge.classList.toggle('O', newSide === 'O'); badge.classList.toggle('D', newSide === 'D'); badge.setAttribute('aria-label', `New skaters: ${SIDES[newSide].name.toLowerCase()} — tap to switch`); };
+  paintSide();
+  badge.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); }); // not a drag from the palette
+  badge.addEventListener('click', e => { e.stopPropagation(); newSide = newSide === 'O' ? 'D' : 'O'; paintSide(); setTool('skater'); });
+}
 $$('#toolbar .tool').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.dragged) { delete b.dataset.dragged; return; } // the click that follows a drag-and-drop
   setTool(b.dataset.tool);

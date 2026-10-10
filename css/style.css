@@ -498,6 +498,23 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
 .tab-players .chip{border-radius:999px;padding:6px 14px}
 .tab-players .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
 #tasks-mount .club-head button[data-club=close]{display:none} /* inline on the Tasks tab: nothing to close */
+/* The coach's dashboard */
+.dash-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:14px 0 4px}
+@media (min-width:640px){.dash-grid{grid-template-columns:repeat(4,1fr)}}
+.dash-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.dash-card b{font-size:24px;line-height:1.1}
+.dash-card span{color:var(--muted);font-size:13px}
+.dash-row{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.dash-row:last-child{border-bottom:none}
+.dash-row b{font-size:15px}
+.dash-row .m{color:var(--muted);font-size:13px}
+.dash-row .pct{font-weight:700;font-variant-numeric:tabular-nums;min-width:40px;text-align:right}
+.dash-bar{grid-column:1/-1;height:6px;border-radius:999px;background:var(--panel-2);overflow:hidden}
+.dash-bar i{display:block;height:100%;background:#22c55e;border-radius:999px}
+.dash-bar i.part{background:#f4c542}
+.dash-bar i.none{background:transparent}
+.dash-link{display:inline-block;margin:8px 0 4px;color:var(--accent-2);text-decoration:none;font-weight:600}
+.dash-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:4px 14px}
 #present-home{background:transparent;border-color:transparent;padding:2px 4px;font-size:18px;flex:none}
 #present-request{display:flex;flex-direction:column;gap:8px;text-align:left;margin:4px 0 10px}
 #present-request[hidden],#present-tolist[hidden]{display:none}

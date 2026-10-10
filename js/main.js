@@ -4972,11 +4972,11 @@ function showTeams(r) {
   $('#present-scroll').scrollTop = 0;
 }
 /** A team's home, as an app: Practice (the one the calendar points at, then the rest), Tasks (a club team's week) and Games (notes). */
-const LIST_TAB_DEFS = [['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games']];
+const LIST_TAB_DEFS = [['dashboard', 'Dashboard', 'dashboard'], ['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games']]; // Dashboard: coaches only
 let listKey = null; // which home is on screen, so a repaint doesn't wipe the Tasks tab while someone types
 function showList(r) {
   ensureLatestViewer();
-  const as = r.as, tab = r.tab || 'practice';
+  const as = r.as, tab = r.tab || (as === 'coach' ? 'dashboard' : 'practice');
   if (r.teamId) watchTeamList(r.teamId); else for (const t of who.teams || []) watchTeamList(t.id);
   const all = practiceItems(as).filter(x => !r.teamId || x.teamId === r.teamId); // one team's list
   const rec = r.teamId ? teamLists.get(r.teamId) : null, loading = who.persona !== 'planner' && rec && !rec.ready && !rec.items.length;
@@ -4987,7 +4987,7 @@ function showList(r) {
   $('#present-home').title = (who.teams || []).length > 1 ? 'Your teams' : 'All your practices';
   const club = r.teamId ? clubsFor().find(c => c.id === r.teamId) : null;
   // The tab bar: Tasks only on an official club team.
-  $('#present-tabs').innerHTML = LIST_TAB_DEFS.filter(([k]) => k !== 'tasks' || club).map(([k, label, ic]) => `<a class="pr-tab${k === tab ? ' active' : ''}" href="${routePath({ view: as, teamId: r.teamId, tab: k })}" data-nav>${icon(ic)}<span>${label}</span></a>`).join('');
+  $('#present-tabs').innerHTML = LIST_TAB_DEFS.filter(([k]) => (k !== 'tasks' || club) && (k !== 'dashboard' || as === 'coach')).map(([k, label, ic]) => `<a class="pr-tab${k === tab ? ' active' : ''}" href="${routePath({ view: as, teamId: r.teamId, tab: k })}" data-nav>${icon(ic)}<span>${label}</span></a>`).join('');
   const key = `${as}/${r.teamId}/${tab}`;
   if (tab === 'tasks') { if (listKey === key && $('#tasks-tab')) return; listKey = key; renderTasksTab(club, as); $('#present-scroll').scrollTop = 0; return; }
   listKey = key;
@@ -4996,7 +4996,8 @@ function showList(r) {
       <b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}</span>
       ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
   let html;
-  if (tab === 'games') {
+  if (tab === 'dashboard') html = dashboardHTML(r, all, club, today);
+  else if (tab === 'games') {
     // Game notes: each game with its coaching points listed; open it for the diagrams, video and the coach's voice.
     const games = all.filter(x => x.kind === 'game').sort(byCalendar).reverse();
     const grow = x => `<a class="pl-item pl-game" href="${itemPath(as, x)}" data-nav><b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}${x.date === today ? ' · today' : ''}</span>
@@ -5019,6 +5020,75 @@ function showList(r) {
   }
   $('#present-body').innerHTML = `<div class="pl-list">${html}</div>`;
   $('#present-scroll').scrollTop = 0;
+}
+// ---------- the coach's dashboard: the season at a glance, and how the week's tasks are going across the team ----------
+const dashCache = new Map(); // teamId → { week, ready, error, tasks, players, stats }
+/** The week's task list, the roster and every player's numbers for one team — fetched once per week, then the dashboard repaints. */
+function loadDashboard(teamId, week) {
+  const had = dashCache.get(teamId);
+  if (had && had.week === week) return had;
+  const rec = { week, ready: false, error: null, tasks: [], players: {}, stats: new Map() };
+  dashCache.set(teamId, rec);
+  (async () => {
+    try {
+      const doc = await loadClubDoc(teamId);
+      if (!doc) throw new Error('could not load the club team');
+      rec.players = doc.players || {};
+      rec.tasks = who.persona === 'planner' ? tasksForWeek(doc, week) : ((await cloudBackend.loadTasks(teamId, week))?.tasks || []);
+      if (cloudBackend?.loadWeekStats && cloudSync?.user) {
+        const [now, old] = await Promise.all([cloudBackend.loadWeekStats(teamId, week), cloudBackend.loadWeekStats(teamId, legacyWeek(week)).catch(() => [])]);
+        for (const s of old) rec.stats.set(s.playerId, { ...s, week });
+        for (const s of now) rec.stats.set(s.playerId, s);
+      }
+    } catch (e) { rec.error = e?.message || String(e); }
+    rec.ready = true; refreshScreen();
+  })();
+  return rec;
+}
+function dashboardHTML(r, all, club, today) {
+  const as = r.as, bar = pct => `<div class="dash-bar"><i class="${pct >= 1 ? '' : pct > 0 ? 'part' : 'none'}" style="width:${Math.round(pct * 100)}%"></i></div>`;
+  const items = [...all].sort(byCalendar);
+  const focus = items.length ? calendarFocus(items, today) : null;
+  const practices = items.filter(x => x.kind !== 'game'), games = items.filter(x => x.kind === 'game');
+  const past = practices.filter(x => (x.date || '') < today), upcoming = items.filter(x => (x.date || '') >= today && x !== focus);
+  const minutes = past.reduce((a, x) => a + (+x.minutes || 0), 0);
+  const kindWord = x => x.kind === 'game' ? 'game' : x.surface === 'dryland' ? 'dryland' : 'practice';
+  const hero = focus ? `<a class="pl-item pl-hero" href="${itemPath(as, focus)}" data-nav>
+      <small>${focus.date === today ? 'Today’s' : (focus.date || '') > today ? 'Next' : 'Last'} ${kindWord(focus)}</small>
+      <b>${escHtml(focus.kind === 'game' ? docTitle(focus) : whenLabel(focus, true))}</b>
+      <span>${focus.kind === 'game' ? escHtml(whenLabel(focus, true)) : `${focus.drillCount || 0} drill${focus.drillCount === 1 ? '' : 's'}${focus.minutes ? ` · ${focus.minutes} min` : ''}`}</span>
+      <em>Open ▶</em></a>` : '<p class="muted">Nothing released to this team yet.</p>';
+  const cards = `<div class="dash-grid">
+      <div class="dash-card"><b>${past.length}</b><span>practice${past.length === 1 ? '' : 's'} so far</span></div>
+      <div class="dash-card"><b>${practices.length - past.length}</b><span>practice${practices.length - past.length === 1 ? '' : 's'} coming up</span></div>
+      <div class="dash-card"><b>${games.length}</b><span>game${games.length === 1 ? '' : 's'} with notes</span></div>
+      <div class="dash-card"><b>${minutes >= 120 ? `${Math.round(minutes / 60 * 10) / 10} h` : `${minutes} min`}</b><span>of drills run</span></div>
+    </div>`;
+  // This week's tasks across the team.
+  let tasks = '';
+  if (club) {
+    const week = weekKey(), rec = loadDashboard(club.id, week);
+    const players = Object.entries(rec.players).map(([id, p]) => ({ id, name: p.name || 'Player' })).sort((a, b) => a.name.localeCompare(b.name));
+    const stat = id => rec.stats.get(id) || { values: {}, done: {} };
+    const overall = id => rec.tasks.length ? rec.tasks.reduce((a, k) => a + progressOf(k, stat(id)), 0) / rec.tasks.length : 0;
+    const logged = players.filter(p => rec.stats.has(p.id)).length;
+    const teamPct = players.length ? players.reduce((a, p) => a + overall(p.id), 0) / players.length : 0;
+    let body;
+    if (!rec.ready) body = '<p class="muted">Loading the week…</p>';
+    else if (rec.error) body = `<p class="warn">Could not load the week: ${escHtml(rec.error)}</p>`;
+    else if (!rec.tasks.length) body = '<p class="muted">No task list set for this week.</p>';
+    else body = `<div class="dash-row"><b>Whole team</b><span class="pct">${Math.round(teamPct * 100)}%</span><span class="m">${logged} of ${players.length} player${players.length === 1 ? '' : 's'} logged something</span>${bar(teamPct)}</div>
+      ${rec.tasks.map(k => { const pct = players.length ? players.reduce((a, p) => a + progressOf(k, stat(p.id)), 0) / players.length : 0; const n = players.filter(p => progressOf(k, stat(p.id)) > 0).length;
+        return `<div class="dash-row"><b>${escHtml(k.title)}</b><span class="pct">${Math.round(pct * 100)}%</span><span class="m">${escHtml(goalText(k))} · ${n} of ${players.length} started</span>${bar(pct)}</div>`; }).join('')}
+      <h2>By player</h2>
+      ${players.map(p => { const pct = overall(p.id); return `<div class="dash-row"><b>${escHtml(p.name)}</b><span class="pct">${rec.stats.has(p.id) ? `${Math.round(pct * 100)}%` : '—'}</span>${bar(pct)}</div>`; }).join('') || '<p class="muted">No players on the roster yet.</p>'}`;
+    tasks = `<h2>This week’s tasks</h2><p class="muted small">${escHtml(weekLabel(week))}</p><div class="dash-box">${body}</div>
+      <a class="dash-link" href="${routePath({ view: as, teamId: r.teamId, tab: 'tasks' })}" data-nav>Full weekly output →</a>`;
+  }
+  const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav><b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}</span>${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
+  const next = upcoming.length ? `<h2>Up next</h2>${upcoming.slice(0, 3).map(row).join('')}` : '';
+  const more = `<a class="dash-link" href="${routePath({ view: as, teamId: r.teamId, tab: 'practice' })}" data-nav>All practices →</a>${games.length ? ` · <a class="dash-link" href="${routePath({ view: as, teamId: r.teamId, tab: 'games' })}" data-nav>Game notes →</a>` : ''}`;
+  return `${hero}${cards}${tasks}${next}<p>${more}</p>`;
 }
 /**
  * The Tasks tab: a family logs their player's week right here; a coach gets the team's weekly output. A coach who is

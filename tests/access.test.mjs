@@ -46,6 +46,7 @@ assert.deepEqual(at('/coach/abc'), { view: 'coach', teamId: null, pid: 'abc', di
 assert.deepEqual(at('/coach/t1/abc'), { view: 'coach', teamId: 't1', pid: 'abc', did: null });
 assert.deepEqual(at('/team/t1'), { view: 'team', teamId: null, pid: 't1', did: null, ambiguous: true });
 assert.deepEqual(at('/team/t1/tasks'), { view: 'team', teamId: 't1', pid: null, did: null, tab: 'tasks' }); assert.deepEqual(at('/coach/t1/games'), { view: 'coach', teamId: 't1', pid: null, did: null, tab: 'games' });
+assert.equal(routePath({ view: 'coach', teamId: 't1', tab: 'dashboard' }), '/coach/t1', 'the coach home is the dashboard'); assert.equal(routePath({ view: 'coach', teamId: 't1', tab: 'practice' }), '/coach/t1/practice');
 assert.equal(routePath({ view: 'team', teamId: 't1', tab: 'tasks' }), '/team/t1/tasks'); assert.equal(routePath({ view: 'team', teamId: 't1', tab: 'practice' }), '/team/t1'); assert.equal(routePath({ view: 'team', teamId: 't1', pid: 'p', tab: 'games' }), '/team/t1/p');
 assert.equal(routePath({ view: 'coach', teamId: 't1', pid: 'p' }), '/coach/t1/p'); assert.equal(routePath({ view: 'team', teamId: 't1' }), '/team/t1'); assert.equal(routePath({ view: 'team', pid: 'p' }), '/team/p');
 

@@ -191,7 +191,8 @@ export function calendarFocus(items, today) {
 }
 
 /** Where a URL points: { view: 'root' | 'editor' | 'coach' | 'team' | 'request' | 'unknown', pid, did, legacy }. */
-export const LIST_TABS = ['practice', 'tasks', 'games']; // the team home's tabs; 'practice' is the bare list path
+export const LIST_TABS = ['dashboard', 'practice', 'tasks', 'games']; // the team home's tabs; the bare path is the coach's dashboard or the team's practice list
+export const defaultTab = view => (view === 'coach' ? 'dashboard' : 'practice');
 export function parseRoute({ pathname = '/', hash = '' } = {}) {
   let h = hash;
   try { h = decodeURIComponent(h); } catch { /* a stray % — match it as it is */ }
@@ -215,7 +216,7 @@ export function parseRoute({ pathname = '/', hash = '' } = {}) {
 }
 export function routePath({ view, teamId = null, pid, did, tab = null }) {
   if (view === 'editor') return `/editor${pid ? `/${pid}${did ? `/${did}` : ''}` : ''}`;
-  if (view === 'coach' || view === 'team') return `/${view}${teamId ? `/${teamId}` : ''}${pid ? `/${pid}` : teamId && tab && tab !== 'practice' ? `/${tab}` : ''}`;
+  if (view === 'coach' || view === 'team') return `/${view}${teamId ? `/${teamId}` : ''}${pid ? `/${pid}` : teamId && tab && tab !== defaultTab(view) ? `/${tab}` : ''}`;
   if (view === 'request') return '/request-access';
   return '/';
 }
@@ -249,7 +250,7 @@ export function resolveRoute(route, who) {
   // anyone signed in watch (probe: a refusal sends them on to request access); anything else → request access.
   if (persona === 'unknown') return (view === 'coach' || view === 'team') && pid ? { screen: 'practice', as: 'team', teamId, pid, probe: true } : view === 'request' ? { screen: 'request' } : { go: '/request-access' };
   // A list needs a team: one team → straight to it; several → choose; none → an empty list.
-  const listFor = as => teamId ? { screen: 'list', as, teamId, tab: route.tab || 'practice' } : teams.length === 1 ? { go: routePath({ view: as, teamId: teams[0].id, tab: route.tab }) } : teams.length ? { screen: 'teams', as } : { screen: 'list', as, teamId: null, tab: 'practice' };
+  const listFor = as => teamId ? { screen: 'list', as, teamId, tab: route.tab || defaultTab(as) } : teams.length === 1 ? { go: routePath({ view: as, teamId: teams[0].id, tab: route.tab }) } : teams.length ? { screen: 'teams', as } : { screen: 'list', as, teamId: null, tab: defaultTab(as) };
   if (persona === 'planner') {
     if (view === 'editor') return { screen: 'editor', pid, did: route.did };
     if (view === 'coach' || view === 'team') return pid ? { screen: 'practice', as: view, teamId, pid } : listFor(view);
@@ -258,7 +259,7 @@ export function resolveRoute(route, who) {
   // coach or team
   const home = `/${persona}`;
   if (view === 'root' || view === 'editor' || view === 'request') return { go: home };
-  if (view === 'coach' && persona === 'team') return { go: routePath({ view: 'team', teamId, pid, tab: route.tab }) };
+  if (view === 'coach' && persona === 'team') return { go: routePath({ view: 'team', teamId, pid, tab: route.tab === 'dashboard' ? null : route.tab }) };
   if (!pid) return listFor(view);
   const role = teams.find(t => t.id === teamId)?.role; // their role on that team: 'coach' or 'family' (a coach of one team can be a parent on another)
   if (!role) return { screen: 'practice', as: 'team', teamId, pid, probe: true }; // not their team (or an older link with no team): still tried — an open practice is for anyone signed in, and a refusal explains

@@ -95,7 +95,9 @@ try {
   console.log('coach');
   const coachA = await browser(U.coachA);
   await coachA.open('/'); s = await coachA.state();
-  ok('coach on "/" → /coach, a list of their practices, upcoming first', s.path === '/coach/t1' && s.list.join() === '/coach/t1/p1,/coach/t1/p2,/coach/t1/p0', s);
+  ok('coach on "/" → /coach/t1, the dashboard: today\'s practice up top, then what is coming', s.path === '/coach/t1' && s.list.join() === '/coach/t1/p1,/coach/t1/p2' && await coachA.ev(`document.querySelectorAll('.dash-card').length === 4 && document.querySelector('.dash-card b').textContent === '1'`), s);
+  await coachA.open('/coach/t1/practice'); s = await coachA.state();
+  ok('the Practice tab lists all of their practices, today\'s first, then upcoming, then earlier', s.path === '/coach/t1/practice' && s.list.join() === '/coach/t1/p1,/coach/t1/p2,/coach/t1/p0', s);
   await coachA.open('/editor'); s = await coachA.state();
   ok('coach on /editor → /coach/t1; the editor is neither shown nor built', s.path === '/coach/t1' && !s.editor && !s.editorBuilt, s);
   await coachA.open('/coach/t1/p2'); s = await coachA.state();

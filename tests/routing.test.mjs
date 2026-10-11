@@ -189,6 +189,8 @@ try {
   ok('resolving is saved', cloud.db.get('teams/t1/practices/p1/feedback/ca_d1')?.resolved === true);
   await planner.open('/coach/t1/p3'); s = await planner.state();
   ok('planner previews a draft as coaches will see it', s.path === '/coach/t1/p3' && s.cards[0] === '1. Draft drill' && /coach view/.test(s.title) && s.fb === 0, s);
+  await planner.open('/coach/t1/practice'); s = await planner.state();
+  ok('the planner\'s coach view lists the draft too, marked, so it can be previewed before it goes out', s.list.join() === '/coach/t1/p1,/coach/t1/p2,/coach/t1/p3,/coach/t1/p0' && await planner.ev(`document.querySelector('.pl-item[href="/coach/t1/p3"] .pl-draft')?.textContent === 'draft' && !document.querySelector('.pl-item[href="/coach/t1/p1"] .pl-draft')`), s);
   await planner.open('/team'); s = await planner.state();
   ok('planner previews the team\'s list: released practices only', s.list.join() === '/team/t1/p1,/team/t1/p0', s);
 

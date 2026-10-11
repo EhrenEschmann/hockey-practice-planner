@@ -4913,7 +4913,8 @@ function watchTeamList(teamId) {
 /** The practices this person can open on /coach or /team: { pid, role, team, teamId, date, time }. The planner previewing one practice (`all`) can step through drafts too. */
 function practiceItems(as) {
   if (who.persona === 'planner') {
-    return store.live.filter(p => as === 'team' ? stageOf(p) === 'team' : stageOf(p) !== 'draft')
+    // The coach view is where the planner previews: drafts are listed there (marked), as a coach will see them once sent out. The team view shows only what the team has.
+    return store.live.filter(p => as === 'team' ? stageOf(p) === 'team' : true)
       .map(p => { const ds = (p.drills || []).filter(d => !d.hidden); return { pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, drillCount: ds.length, minutes: ds.reduce((a, d) => a + (+d.duration || 0), 0), drillNames: ds.map(d => d.name || ''), ...(isDryland(p) ? { surface: 'dryland' } : {}), ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }; });
   }
   return [...teamLists.values()].flatMap(r => r.items);
@@ -4939,11 +4940,11 @@ function paintWhen() {
     // the next, else the most recent) whenever that is not the one on screen.
     const tid = p.teamId || screen?.teamId || null; // the practice's team: the bar switches within it
     if (tid) watchTeamList(tid);
-    const items = practiceItems(presentAudience).filter(x => (x.stage === 'team' || (x.stage === 'coaches' && presentAudience === 'coach')) && (!tid || x.teamId === tid)).sort(byCalendar);
+    const items = practiceItems(presentAudience).filter(x => (x.stage === 'team' || (x.stage === 'coaches' && presentAudience === 'coach') || (x.stage === 'draft' && who.persona === 'planner' && presentAudience === 'coach')) && (!tid || x.teamId === tid)).sort(byCalendar);
     const listed = items.some(x => x.pid === p.id);
     const today = todayISO();
     const teams = new Set(items.map(x => String(x.team || '').trim().toLowerCase()));
-    const say = x => `${teams.size > 1 || x.kind === 'game' || x.surface === 'dryland' ? `${docTitle(x)} · ` : ''}${whenLabel(x)}`;
+    const say = x => `${teams.size > 1 || x.kind === 'game' || x.surface === 'dryland' ? `${docTitle(x)} · ` : ''}${whenLabel(x)}${x.stage === 'draft' ? ' · draft' : ''}`;
     bar.hidden = false;
     $('#when-team').textContent = docTitle(p);
     const opt = (x, extra = '') => `<option value="${escHtml(itemPath(presentAudience, x))}"${x.pid === p.id ? ' selected' : ''}>${escHtml(say(x))}${x.date === today ? ' · today' : ''}${extra}</option>`;
@@ -4980,6 +4981,7 @@ function showTeams(r) {
 /** A team's home, as an app: Practice (the one the calendar points at, then the rest), Tasks (a club team's week) and Games (notes). */
 const LIST_TAB_DEFS = [['dashboard', 'Dashboard', 'dashboard'], ['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games']]; // Dashboard: coaches only
 let listKey = null; // which home is on screen, so a repaint doesn't wipe the Tasks tab while someone types
+const draftBadge = x => x.stage === 'draft' ? '<span class="pl-draft" title="Only you see this: it has not been sent to the coaches yet">draft</span>' : ''; // the planner's coach view lists drafts
 function showList(r) {
   ensureLatestViewer();
   const as = r.as, tab = r.tab || (as === 'coach' ? 'dashboard' : 'practice');
@@ -5000,13 +5002,13 @@ function showList(r) {
   const empty = loading ? '<p class="muted">Loading…</p>' : rec?.error && !rec.items.length ? `<p class="warn">Could not load this team's practices: ${escHtml(rec.error.message || rec.error)}</p>` : null;
   const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
       <b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}</span>
-      ${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
+      ${draftBadge(x)}${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
   let html;
   if (tab === 'dashboard') html = dashboardHTML(r, all, club, today);
   else if (tab === 'games') {
     // Game notes: each game with its coaching points listed; open it for the diagrams, video and the coach's voice.
     const games = all.filter(x => x.kind === 'game').sort(byCalendar).reverse();
-    const grow = x => `<a class="pl-item pl-game" href="${itemPath(as, x)}" data-nav><b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}${x.date === today ? ' · today' : ''}</span>
+    const grow = x => `<a class="pl-item pl-game" href="${itemPath(as, x)}" data-nav><b>${escHtml(docTitle(x))}${draftBadge(x)}</b><span>${escHtml(whenLabel(x, true))}${x.date === today ? ' · today' : ''}</span>
       ${x.drillNames?.length ? `<ul class="pl-points">${x.drillNames.map(n => `<li>${escHtml(n || 'Coaching point')}</li>`).join('')}</ul>` : ''}</a>`;
     html = games.length ? `<h2>Game notes</h2>${games.map(grow).join('')}` : empty || '<p class="muted">No game notes yet — they show up here once your coach sends a game out.</p>';
   } else {
@@ -5016,7 +5018,7 @@ function showList(r) {
     const rest = practices.filter(x => x !== focus);
     const upcoming = rest.filter(x => (x.date || '') >= today).sort(byCalendar), past = rest.filter(x => (x.date || '') < today).sort(byCalendar).reverse();
     const hero = focus ? `<a class="pl-item pl-hero" href="${itemPath(as, focus)}" data-nav>
-      <small>${focus.date === today ? 'Today’s' : (focus.date || '') > today ? 'Next' : 'Last'} ${focus.surface === 'dryland' ? 'dryland' : 'practice'}</small>
+      <small>${focus.date === today ? 'Today’s' : (focus.date || '') > today ? 'Next' : 'Last'} ${focus.surface === 'dryland' ? 'dryland' : 'practice'}${focus.stage === 'draft' ? ' · draft, not sent out yet' : ''}</small>
       <b>${escHtml(whenLabel(focus, true))}</b>
       <span>${focus.drillCount || 0} drill${focus.drillCount === 1 ? '' : 's'}${focus.minutes ? ` · ${focus.minutes} min` : ''}</span>
       <em>Open ▶</em></a>` : '';
@@ -5060,7 +5062,7 @@ function dashboardHTML(r, all, club, today) {
   const minutes = past.reduce((a, x) => a + (+x.minutes || 0), 0);
   const kindWord = x => x.kind === 'game' ? 'game' : x.surface === 'dryland' ? 'dryland' : 'practice';
   const hero = focus ? `<a class="pl-item pl-hero" href="${itemPath(as, focus)}" data-nav>
-      <small>${focus.date === today ? 'Today’s' : (focus.date || '') > today ? 'Next' : 'Last'} ${kindWord(focus)}</small>
+      <small>${focus.date === today ? 'Today’s' : (focus.date || '') > today ? 'Next' : 'Last'} ${kindWord(focus)}${focus.stage === 'draft' ? ' · draft, not sent out yet' : ''}</small>
       <b>${escHtml(focus.kind === 'game' ? docTitle(focus) : whenLabel(focus, true))}</b>
       <span>${focus.kind === 'game' ? escHtml(whenLabel(focus, true)) : `${focus.drillCount || 0} drill${focus.drillCount === 1 ? '' : 's'}${focus.minutes ? ` · ${focus.minutes} min` : ''}`}</span>
       <em>Open ▶</em></a>` : '<p class="muted">Nothing released to this team yet.</p>';
@@ -5091,7 +5093,7 @@ function dashboardHTML(r, all, club, today) {
     tasks = `<h2>This week’s tasks</h2><p class="muted small">${escHtml(weekLabel(week))}</p><div class="dash-box">${body}</div>
       <a class="dash-link" href="${routePath({ view: as, teamId: r.teamId, tab: 'tasks' })}" data-nav>Full weekly output →</a>`;
   }
-  const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav><b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}</span>${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
+  const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav><b>${escHtml(docTitle(x))}</b><span>${escHtml(whenLabel(x, true))}</span>${draftBadge(x)}${x.date === today ? '<span class="pl-today">today</span>' : ''}</a>`;
   const next = upcoming.length ? `<h2>Up next</h2>${upcoming.slice(0, 3).map(row).join('')}` : '';
   const more = `<a class="dash-link" href="${routePath({ view: as, teamId: r.teamId, tab: 'practice' })}" data-nav>All practices →</a>${games.length ? ` · <a class="dash-link" href="${routePath({ view: as, teamId: r.teamId, tab: 'games' })}" data-nav>Game notes →</a>` : ''}`;
   return `${hero}${cards}${tasks}${next}<p>${more}</p>`;

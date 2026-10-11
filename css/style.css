@@ -480,6 +480,8 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
 .pl-item{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:14px 14px;margin-bottom:8px;min-height:56px;background:var(--panel);border:1px solid var(--border);border-radius:10px;color:var(--text);text-decoration:none;font-size:16px}
 .pl-item span{color:var(--muted);font-size:14px}
 .pl-item .pl-today{margin-left:auto;color:#fff;background:var(--accent);border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600}
+.pl-item .pl-draft{color:#111;background:#f4c542;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600;margin-left:6px}
+.pl-item .pl-draft+.pl-today{margin-left:6px}
 .pl-item:hover{border-color:var(--accent)}
 /* The team home as an app: a tab bar along the bottom (Practice · Tasks · Games), a hero card for the practice the calendar points at */
 #present-tabs{display:flex;flex:none;background:var(--panel);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom)}

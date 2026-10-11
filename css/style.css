@@ -365,6 +365,33 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .club-task input[type=number]{width:84px;font-size:18px;padding:6px 8px;text-align:right}
 .club-table input[type=number]{width:52px}
 .club-hist{margin-top:12px}
+/* a player's week: days down, tasks across, a tap per rep */
+.club-grid-wrap{overflow-x:auto;margin:0 -4px;padding:0 4px}
+.club-grid{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.club-grid th,.club-grid td{padding:6px 4px;border-bottom:1px solid var(--border);vertical-align:middle}
+.club-grid thead th{text-align:center;vertical-align:bottom;padding-bottom:8px}
+.club-grid thead th b{display:block;font-size:14px}
+.club-grid thead th span{display:block;color:var(--muted);font-size:11.5px;font-weight:400}
+.club-grid tbody th{text-align:left;white-space:nowrap;width:1%;padding-right:10px}
+.club-grid tbody th b{display:block;font-size:14px}
+.club-grid tbody th span{display:block;color:var(--muted);font-size:11px;font-weight:400}
+.club-grid tbody th em{display:inline-block;margin-top:2px;font-style:normal;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#fff;background:var(--accent);border-radius:999px;padding:0 6px}
+.club-grid tr.today{background:rgba(59,130,246,.14);box-shadow:inset 3px 0 0 var(--accent)}
+.club-grid tr.today th b{color:var(--accent-2)}
+.club-grid tr.future{opacity:.45}
+.club-grid tr.earlier{opacity:.7}
+.club-grid .dcell{text-align:center;min-width:92px}
+.club-grid .dval{font-size:20px;font-weight:700;line-height:1.1}
+.club-grid .dval.none{color:var(--muted);font-weight:400}
+.club-grid .dbtns{display:flex;gap:3px;justify-content:center;margin-top:3px}
+.club-grid .dbtns button{padding:3px 8px;font-size:12px;font-weight:600;border-radius:999px;min-width:30px}
+.club-grid .dbtns button:disabled{opacity:.35}
+.club-grid tr.week th b{font-size:14px}
+.club-grid td.total{text-align:center}
+.club-grid td.total b{font-size:18px}
+.club-grid td.total span{display:block;color:var(--muted);font-size:11px}
+.club-grid td.total .club-bar{margin-top:4px}
+@media (pointer:coarse){.club-grid .dbtns button{padding:6px 10px;font-size:13px}}
 .pl-item.pl-club{width:100%;cursor:pointer;font-family:inherit;text-align:left}
 .ros-task{padding:4px 0}
 .ros-task input[data-field=title]{flex:1 1 320px;min-width:200px;font-size:15px;padding:8px 10px}

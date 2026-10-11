@@ -5267,12 +5267,59 @@ function progressOf(k, s) {
   return k.target ? Math.min(1, total / k.target) : 0;
 }
 /** Write one number — the week's total amount (`values`) or sessions done (`done`) for a task: the stat document for that player and week is rewritten whole, signed by this account. */
+/** The tap sizes for a task: a small step and one full session (e.g. +5 and +25 shots); a "times" task counts one at a time. */
+function taskSteps(k) {
+  if (k.unit === 'times' || !k.target) return [1];
+  const t = +k.target, small = t >= 40 ? 10 : t >= 10 ? 5 : t >= 4 ? Math.max(1, Math.round(t / 4)) : 1; // 25 shots → +5 / +25; 10 minutes → +5 / +10; 60 reps → +10 / +60
+  return t > small ? [small, t] : [small];
+}
+/**
+ * A stat document: { playerId, week, days: { [0-6]: { taskId: amount } }, base?: { taskId: amount }, values, done, by, updatedAt }.
+ * `days` is what the family taps in day by day; `base` holds what was logged before day-by-day tracking (or a total a
+ * coach typed in); `values` (the total) and `done` (days with something logged) are kept in step for the output table
+ * and the dashboard, which read only those.
+ */
+function withTotals(doc, taskIds) {
+  const values = {}, done = {};
+  for (const t of new Set([...taskIds, ...Object.keys(doc.base || {}), ...Object.values(doc.days || {}).flatMap(Object.keys)])) {
+    const perDay = Object.values(doc.days || {}).map(dd => +dd[t] || 0);
+    const v = (+doc.base?.[t] || 0) + perDay.reduce((a, b) => a + b, 0), n = (+doc.baseDone?.[t] || 0) + perDay.filter(Boolean).length;
+    if (v) values[t] = v; if (n) done[t] = n;
+  }
+  return { ...doc, values, done };
+}
+const statSaves = new Map(); // playerId_week → timer: taps come in bursts; one write per burst
+async function saveStatSoon(next) {
+  const key = `${next.playerId}_${next.week}`;
+  clubState.stats.set(key, next);
+  clearTimeout(statSaves.get(key));
+  statSaves.set(key, setTimeout(async () => {
+    statSaves.delete(key);
+    try { await cloudBackend.saveStat(clubState.teamId, next); clubState.busy = `✓ Saved ${stamp(next.updatedAt)}`; }
+    catch (e) { clubState.busy = `✗ Not saved: ${e?.message || e}${/permission/i.test(e?.message || '') ? ' — only this player\'s family or a coach may log their numbers' : ''}`; }
+    const el = clubState.mount?.querySelector('.club-note'); if (el) { el.textContent = clubState.busy; el.classList.toggle('warn', /✗/.test(clubState.busy)); }
+  }, 600));
+}
+/** A tap on the grid: `delta` to one task on one day of the week. */
+function logDay(playerId, taskId, day, delta) {
+  const cur = statFor(playerId, clubState.week);
+  const doc = { playerId, week: clubState.week, days: JSON.parse(JSON.stringify(cur.days || {})), by: myEmail(), updatedAt: Date.now() };
+  if (cur.base) doc.base = { ...cur.base }; if (cur.baseDone) doc.baseDone = { ...cur.baseDone };
+  if (!cur.days && (cur.values || cur.done)) { doc.base = { ...(cur.values || {}) }; doc.baseDone = { ...(cur.done || {}) }; } // what was logged before day-by-day tracking stays counted
+  const dd = doc.days[day] = { ...(doc.days[day] || {}) };
+  const v = Math.max(0, (+dd[taskId] || 0) + delta); if (v) dd[taskId] = v; else delete dd[taskId];
+  if (!Object.keys(dd).length) delete doc.days[day];
+  saveStatSoon(withTotals(doc, tasksForWeek(clubState.doc, clubState.week).map(k => k.id)));
+  renderClub();
+}
+/** A total typed in (the coaches' output table): the days stay as they are; `base` takes up the difference. */
 async function logStat(playerId, taskId, value, kind = 'total') {
   const cur = statFor(playerId, clubState.week);
-  const values = { ...(cur.values || {}) }, done = { ...(cur.done || {}) };
-  const box = kind === 'done' ? done : values;
-  if (Number.isFinite(+value) && value !== '') box[taskId] = Math.max(0, Math.round(+value)); else delete box[taskId];
-  const next = { playerId, week: clubState.week, values, done, by: myEmail(), updatedAt: Date.now() };
+  const doc = { playerId, week: clubState.week, days: cur.days || {}, base: { ...(cur.base || {}) }, baseDone: { ...(cur.baseDone || {}) }, by: myEmail(), updatedAt: Date.now() };
+  const perDay = Object.values(doc.days).map(dd => +dd[taskId] || 0);
+  const want = Number.isFinite(+value) && value !== '' ? Math.max(0, Math.round(+value)) : 0;
+  if (kind === 'done') doc.baseDone[taskId] = Math.max(0, want - perDay.filter(Boolean).length); else doc.base[taskId] = Math.max(0, want - perDay.reduce((a, b) => a + b, 0));
+  const next = withTotals(doc, tasksForWeek(clubState.doc, clubState.week).map(k => k.id));
   clubState.stats.set(`${playerId}_${clubState.week}`, next);
   try { await cloudBackend.saveStat(clubState.teamId, next); clubState.busy = `✓ Saved ${stamp(next.updatedAt)}`; }
   catch (e) { clubState.busy = `✗ Not saved: ${e?.message || e}${/permission/i.test(e?.message || '') ? ' — only this player\'s family or a coach may log their numbers' : ''}`; }
@@ -5288,21 +5335,31 @@ function renderClub({ keepFocus = false } = {}) {
   if (!d) { m.innerHTML = `<div class="club-head"><h3>Club</h3></div>${note}`; return; }
   if (who.persona !== 'planner' && !(week in (d.weeks || {}))) loadWeekTasks(week);
   const tasks = tasksForWeek(d, week); // each week has its own list; an unset week is empty
-  if (clubState.player) { // one player's profile: this week's tasks to fill in, then the recent weeks
+  if (clubState.player) { // one player's profile: the week as a grid — days down, tasks across, a tap per rep logged
     const pl = d.players?.[clubState.player] || { name: 'Player' };
     const s = statFor(clubState.player, week);
-    const rows = tasks.map(k => {
-      const v = s.values?.[k.id], n = s.done?.[k.id], pct = progressOf(k, s);
-      const boxes = `${k.times > 1 ? `<label class="club-in"><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="done" value="${n ?? ''}" placeholder="0"><span>of ${k.times} times</span></label>` : ''}<label class="club-in"><input type="number" min="0" step="1" inputmode="numeric" data-log="${k.id}" data-kind="total" value="${v ?? ''}" placeholder="0"><span>${escHtml(unitName(k))} in all</span></label>`;
-      const howto = `${k.audio ? `<button class="wp-toggle" data-howto="audio" data-task="${k.id}">${clubState.playing?.taskId === k.id ? '■ Stop' : '🎙 Listen'}</button>` : ''}${k.video ? `<button class="wp-toggle" data-howto="video" data-task="${k.id}">🎬 Watch</button>` : ''}${!k.video && k.videoUrl && videoEmbed(k.videoUrl) ? `<button class="wp-toggle" data-howto="link" data-task="${k.id}">🎬 Watch</button>` : ''}`;
-      return `<div class="club-task"><div class="t"><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${k.target || k.times > 1 ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}${howto ? `<div class="club-howto">${howto}</div>` : ''}</div><div class="club-ins">${boxes}</div></div><div class="club-media-box" data-task-box="${k.id}"></div>`;
+    const ws = weekStart(week), todayKey = todayISO(), dayDate = i => { const x = new Date(ws); x.setDate(x.getDate() + i); return x; };
+    const iso = x => `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
+    const howto = k => `${k.audio ? `<button class="wp-toggle" data-howto="audio" data-task="${k.id}">${clubState.playing?.taskId === k.id ? '■ Stop' : '🎙 Listen'}</button>` : ''}${k.video ? `<button class="wp-toggle" data-howto="video" data-task="${k.id}">🎬 Watch</button>` : ''}${!k.video && k.videoUrl && videoEmbed(k.videoUrl) ? `<button class="wp-toggle" data-howto="link" data-task="${k.id}">🎬 Watch</button>` : ''}`;
+    const head = tasks.map(k => `<th><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${howto(k) ? `<div class="club-howto">${howto(k)}</div>` : ''}<div class="club-howto-box" data-task-box="${k.id}"></div></th>`).join('');
+    const rows = [0, 1, 2, 3, 4, 5, 6].map(i => {
+      const dt = dayDate(i), key = iso(dt), today = key === todayKey, future = key > todayKey;
+      const cells = tasks.map(k => {
+        const amt = +s.days?.[i]?.[k.id] || 0, st = taskSteps(k);
+        const btn = (inc, label) => `<button data-inc="${inc}" data-task="${k.id}" data-day="${i}" ${future || (inc < 0 && !amt) ? 'disabled' : ''}>${label}</button>`;
+        return `<td class="dcell"><div class="dval${amt ? '' : ' none'}">${amt || '·'}</div><div class="dbtns">${btn(-st[0], '−')}${st.map(v => btn(v, `+${v}`)).join('')}</div></td>`;
+      }).join('');
+      return `<tr class="${today ? 'today' : future ? 'future' : ''}"><th><b>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]}</b><span>${dt.getMonth() + 1}/${dt.getDate()}</span>${today ? '<em>today</em>' : ''}</th>${cells}</tr>`;
     }).join('');
+    const earlier = tasks.some(k => +s.base?.[k.id] > 0) ? `<tr class="earlier"><th><b>Earlier</b><span>before day by day</span></th>${tasks.map(k => `<td class="dcell"><div class="dval${+s.base?.[k.id] ? '' : ' none'}">${+s.base?.[k.id] || '·'}</div></td>`).join('')}</tr>` : '';
+    const totals = tasks.map(k => { const v = +s.values?.[k.id] || 0, n = +s.done?.[k.id] || 0, pct = progressOf(k, s);
+      return `<td class="dcell total"><b>${v}</b>${k.target ? `<span>/ ${k.target * (k.times || 1)} ${unitName(k)}</span>` : ''}${k.times > 1 ? `<span>${n} of ${k.times} days</span>` : ''}${k.target || k.times > 1 ? `<div class="club-bar"><i class="${pct >= 1 ? '' : 'part'}" style="width:${(pct * 100).toFixed(0)}%"></i></div>` : ''}</td>`; }).join('');
     const weeks = [...new Set([week, ...[...clubState.stats.values()].map(x => x.week)])].sort().reverse().slice(0, 8);
     if (who.persona !== 'planner') for (const w of weeks) if (!(w in (d.weeks || {}))) loadWeekTasks(w);
     const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3>${weeks.filter(w => w !== week).map(w => { const st = statFor(clubState.player, w), wt = tasksForWeek(d, w); return `<div class="club-hist-week"><b>${escHtml(weekLabel(w).replace('This week · ', ''))}</b> ${wt.length ? wt.map(k => `<span>${escHtml(k.title)}: ${k.times > 1 ? `${st.done?.[k.id] ?? '·'}/${k.times}× · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `/${k.target * (k.times || 1)}` : ''}</span>`).join(' ') : '<span class="muted">no tasks</span>'}</div>`; }).join('')}</div>` : '';
     m.innerHTML = `<div class="club-head"><h3>🏒 ${escHtml(pl.name || 'Player')} <span class="muted small">· ${escHtml(d.name)}</span></h3>${nav}<button data-club="close" title="Close">✕</button></div>
-      ${tasks.length ? rows : '<p class="muted">No tasks set for this week.</p>'}${note}
-      <p class="muted small">Type the week's numbers as you go — how many times it was done, and the total — each is saved when you leave the field. The bar fills toward the week's goal.</p>${hist}`;
+      ${tasks.length ? `<div class="club-grid-wrap"><table class="club-grid"><thead><tr><th></th>${head}</tr></thead><tbody>${earlier}${rows}<tr class="week"><th><b>Week</b></th>${totals}</tr></tbody></table></div>` : '<p class="muted">No tasks set for this week.</p>'}${note}
+      <p class="muted small">Tap + on the day it happened — each tap is saved. The week row adds the days up and fills toward the goal.</p>${hist}`;
     return;
   }
   // the whole team: players down, tasks across; coaches and the planner may type in a number for anyone
@@ -5338,6 +5395,7 @@ async function playTaskHowto(kind, taskId) {
 for (const sel of ['#tasks-output', '#present-club-body', '#present-body']) { // the editor's Tasks panel, the viewer's sheet, and the team home's Tasks tab
   $(sel).addEventListener('click', e => {
     const h = e.target.closest('[data-howto]'); if (h) { playTaskHowto(h.dataset.howto, h.dataset.task); return; }
+    const inc = e.target.closest('[data-inc]'); if (inc) { if (!inc.disabled) logDay(clubState.player, inc.dataset.task, +inc.dataset.day, +inc.dataset.inc); return; }
     const b = e.target.closest('[data-club]'); if (!b) return;
     if (b.dataset.club === 'close') { $('#present-club').hidden = true; clubState.playing?.stop(); return; }
     clubState.week = shiftWeek(clubState.week, b.dataset.club === 'prev' ? -1 : 1);

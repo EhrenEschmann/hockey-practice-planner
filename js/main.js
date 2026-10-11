@@ -4035,6 +4035,7 @@ const safeName = s => (s || 'practice').replace(/[^\w\-]+/g, '_');
 
 $('#btn-export-json').addEventListener('click', () => { closePopovers(); $('#btn-export').click(); });
 wirePopover('#btn-export-more', '#export-pop', '#btn-export-json');
+wirePopover('#btn-present-more', '#present-pop', '#btn-present-coach');
 wirePopover('#btn-teams', '#team-pop', '#team-manage');
 wirePopover('#btn-account', '#account-pop', '#btn-settings');
 $('#btn-export').addEventListener('click', () => {
@@ -5828,6 +5829,8 @@ document.addEventListener('visibilitychange', () => { if (presenting && document
 // Presentation is its own destination (the very URL coaches / families get) — a new tab, so the editor stays put.
 const openPresentation = view => window.open(`${location.origin}${routePath({ view, teamId: store.practice.teamId || teamOf(store.practice)?.id || null, pid: store.practice.id })}`, '_blank');
 $('#btn-present').addEventListener('click', () => openPresentation('coach'));
+$('#btn-present-coach').addEventListener('click', () => { closePopovers(); openPresentation('coach'); });
+$('#btn-present-team').addEventListener('click', () => { closePopovers(); openPresentation('team'); });
 $('#btn-open-team').addEventListener('click', () => openPresentation('team'));
 $('#btn-open-coach').addEventListener('click', () => openPresentation('coach'));
 $('#present-signin').addEventListener('click', () => cloudSync?.signIn().catch(e => presentMsg(`Sign-in failed: ${friendlyAuthError(e)}`, { signIn: true })));

@@ -111,7 +111,13 @@
     </div>
   </div>
   <button id="btn-print" title="Print practice plan">Print</button>
-  <button id="btn-present" title="Open this practice's presentation — a read-only scroll-through — in a new tab (the same page coaches get via 🔗 Coach link)">📺 Present</button>
+  <div id="present-wrap" class="split">
+    <button id="btn-present" class="split-main" title="Open this practice's presentation in a new tab as the coaches see it (the default — the arrow offers the team's view)">📺 Present</button><button id="btn-present-more" class="split-arrow" title="Present as the coaches or as the team">▾</button>
+    <div id="present-pop" class="split-pop" hidden>
+      <button id="btn-present-coach" title="The coaches' view: every drill sent to the coaches, with feedback buttons — what the 🔗 Coach link opens">📺 Coach view</button>
+      <button id="btn-present-team" title="The team's view: only what the team gets — released drills, no coaches-only ones — what the 🔗 Team link opens">📺 Team view</button>
+    </div>
+  </div>
   <input type="file" id="file-import" accept="application/json,.json" hidden>
   <div id="account-wrap">
     <button id="btn-account" title="Account: who is signed in, cloud status, settings"><span id="account-avatar">👤</span><i id="account-dot" hidden></i></button>

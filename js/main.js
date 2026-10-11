@@ -4734,13 +4734,16 @@ let presentViewIO = null; // list mode: a card scrolled at least half into view 
 function watchListViews(p) {
   presentViewIO?.disconnect();
   const timers = new Map();
+  // "On screen" = at least half the card, or at least half the viewport when the card is taller than it (a phone, where a
+  // card with a diagram can never be half visible at once) — a view is logged after 2 s of that.
+  const onScreen = e => e.isIntersecting && e.intersectionRect.height >= 0.5 * Math.min(e.boundingClientRect.height, (e.rootBounds?.height || innerHeight));
   presentViewIO = new IntersectionObserver(entries => {
     for (const e of entries) {
       const did = e.target.dataset.did; if (!did) continue;
       clearTimeout(timers.get(did));
-      if (e.isIntersecting && presentMode === 'list') timers.set(did, setTimeout(() => logDrillView(p, did, 'view'), 2000));
+      if (onScreen(e) && presentMode === 'list') timers.set(did, setTimeout(() => logDrillView(p, did, 'view'), 2000));
     }
-  }, { threshold: 0.5 });
+  }, { root: $('#present-scroll'), threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 1] });
   for (const sec of $$('#present-body .pr-drill[data-did]')) presentViewIO.observe(sec);
 }
 
@@ -4851,7 +4854,10 @@ function refreshScreen() {
   $('#present-account').hidden = !cloudSync?.user;
   if (!cloudSync?.user) closeAcct();
   applyPresentMode();
-  $('#present-tabs').hidden = !(r.screen === 'list' && r.teamId); // the tab bar belongs to a team's home
+  // The tab bar stays up throughout the team's app — the home tabs and inside a practice or game alike — whenever a team is in hand.
+  if (r.screen === 'list' && r.teamId) paintTabs(r.as, r.teamId, r.tab || (r.as === 'coach' ? 'dashboard' : 'practice'));
+  else if (r.screen === 'practice' && r.teamId && ['coach', 'team', 'planner'].includes(who.persona)) paintTabs(r.as, r.teamId, practiceItems(r.as).find(x => x.pid === r.pid)?.kind === 'game' ? 'games' : 'practice');
+  else $('#present-tabs').hidden = true;
   const offlineMsg = `Couldn't connect. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again.${cloudBootError ? ` (${cloudBootError})` : ''}`;
   switch (r.screen) {
     case 'practice': showPractice(r); paintWhen(); break; // the list may have changed under an open practice (a newer one released)
@@ -5034,6 +5040,14 @@ function showTeams(r) {
 /** A team's home, as an app: Practice (the one the calendar points at, then the rest), Tasks (a club team's week) and Games (notes). */
 const LIST_TAB_DEFS = [['dashboard', 'Dashboard', 'dashboard'], ['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games']]; // Dashboard: coaches only
 let listKey = null; // which home is on screen, so a repaint doesn't wipe the Tasks tab while someone types
+/** The bottom tab bar: Dashboard (coaches) · Practice · Tasks (club teams) · Games — `tab` is the lit one. */
+function paintTabs(as, teamId, tab) {
+  const club = clubsFor().some(c => c.id === teamId);
+  const html = LIST_TAB_DEFS.filter(([k]) => (k !== 'tasks' || club) && (k !== 'dashboard' || as === 'coach')).map(([k, label, ic]) => `<a class="pr-tab${k === tab ? ' active' : ''}" href="${routePath({ view: as, teamId, tab: k })}" data-nav>${icon(ic)}<span>${label}</span></a>`).join('');
+  const bar = $('#present-tabs');
+  if (bar.innerHTML !== html) bar.innerHTML = html;
+  bar.hidden = false;
+}
 const draftBadge = x => x.stage === 'draft' ? '<span class="pl-draft" title="Only you see this: it has not been sent to the coaches yet">draft</span>' : ''; // the planner's coach view lists drafts
 function showList(r) {
   ensureLatestViewer();
@@ -5047,8 +5061,6 @@ function showList(r) {
   $('#present-gate').hidden = true; presentNote(inboxStale || (rec && !rec.ready && rec.items.length) ? 'Offline — this is the list from your last visit.' : '');
   $('#present-home').title = (who.teams || []).length > 1 ? 'Your teams' : 'All your practices';
   const club = r.teamId ? clubsFor().find(c => c.id === r.teamId) : null;
-  // The tab bar: Tasks only on an official club team.
-  $('#present-tabs').innerHTML = LIST_TAB_DEFS.filter(([k]) => (k !== 'tasks' || club) && (k !== 'dashboard' || as === 'coach')).map(([k, label, ic]) => `<a class="pr-tab${k === tab ? ' active' : ''}" href="${routePath({ view: as, teamId: r.teamId, tab: k })}" data-nav>${icon(ic)}<span>${label}</span></a>`).join('');
   const key = `${as}/${r.teamId}/${tab}`;
   if (tab === 'tasks') { if (listKey === key && $('#tasks-tab')) return; listKey = key; renderTasksTab(club, as); $('#present-scroll').scrollTop = 0; return; }
   listKey = key;

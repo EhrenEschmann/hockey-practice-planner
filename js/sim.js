@@ -146,9 +146,23 @@ function carryFrames(o, dense, cum, objs) {
   for (let i = 1; i < pts.length; i++) if (pts[i].pivot) pivots.push({ d: G.closestOnPolyline(dense, pts[i]).along, s: pts[i].pivot === 'L' ? -1 : 1 });
   pivots.sort((a, b) => a.d - b.d);
   const baseFlip = o.backward ? Math.PI : 0;
+  // Crossover (side-step) stretches: from a waypoint marked `cross` ('L' = body faces left of travel, 'R' = right) to
+  // the next waypoint, the skater moves sideways — `o.cross` does the same for the first stretch. Adjacent stretches
+  // facing the same way merge, and the body swings into and out of the sideways facing over PIVOT_TURN ft.
+  const along = pts.map(p => G.closestOnPolyline(dense, p).along);
+  const crosses = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const c = i === 0 ? o.cross : pts[i].cross; if (c !== 'L' && c !== 'R') continue;
+    const sgn = c === 'L' ? -1 : 1, last = crosses[crosses.length - 1];
+    if (last && last.s === sgn && Math.abs(last.d1 - along[i]) < 1e-6) last.d1 = along[i + 1]; else crosses.push({ d0: along[i], d1: along[i + 1], s: sgn });
+  }
   const flipAt = d => {
     let a = baseFlip;
     for (const pv of pivots) a += pv.s * Math.PI * G.clamp((d - pv.d) / PIVOT_TURN + 0.5, 0, 1);
+    for (const c of crosses) {
+      const w = (c.d0 > 1e-6 ? G.clamp((d - c.d0) / PIVOT_TURN + 0.5, 0, 1) : 1) * (c.d1 < len - 1e-6 ? G.clamp((c.d1 - d) / PIVOT_TURN + 0.5, 0, 1) : 1); // no swing at the very start or end of the path
+      if (w > 0) a += w * wrapAngle(c.s * Math.PI / 2 - a);
+    }
     return a;
   };
   const N = Math.max(2, Math.ceil(len / CARRY.step) + 1);

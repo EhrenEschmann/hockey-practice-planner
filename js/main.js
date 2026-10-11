@@ -3358,7 +3358,7 @@ const PROPS = {
   skater: [
     ['label', 'text', 'Label'], ['side', 'select:=— none —,O=Offense (blue),D=Defense (red)', 'Side'], ['color', 'swatch', 'Color'], ['role', 'select:F=Forward,D=Defense,G=Goalie', 'Role'],
     ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'],
-    ['backward', 'checkbox', 'Starts skating backward'], ['facing', 'number', 'Facing (°, blank = auto)'],
+    ['backward', 'checkbox', 'Starts skating backward'], ['cross', 'select:=— no —,L=Crossovers, facing left,R=Crossovers, facing right', 'Side-steps to waypoint 1'], ['facing', 'number', 'Facing (°, blank = auto)'],
   ],
   coach: [['label', 'text', 'Label'], ['color', 'swatch', 'Color'], ['pad', 'checkbox', 'Tackle pad'], ['stick', 'checkbox', 'Stick'], ['speed', 'number', 'Speed (ft/s)'], ['delay', 'number', 'Start delay (s)'], ['facing', 'number', 'Facing (°, blank = auto)']],
   cone: [['color', 'color', 'Color']],
@@ -3437,9 +3437,9 @@ function renderProps() {
       const rows = [`<div class="wp-item" data-wprow="start"><span class="wp-num">S</span>${xy('data-prop="x"', 'data-prop="y"', o)}<span class="wp-what muted">start</span><span class="spacer"></span>${cueBtn('start', o.startCue, 'their start')}</div>`];
       if (o.startCue != null) rows.push(`<label class="field inline wp-sub"><span>Say</span><input data-cue="start" value="${escHtml(o.startCue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
       o.path.forEach((pt, i) => {
-        const flags = [pt.pivot === 'L' ? 'pivot ⟲' : pt.pivot ? 'pivot ⟳' : '', +pt.stop > 0 ? `stop ${+pt.stop}s` : ''].filter(Boolean).join(' · ');
+        const flags = [pt.pivot === 'L' ? 'pivot ⟲' : pt.pivot ? 'pivot ⟳' : '', pt.cross === 'L' ? 'crossovers, facing left' : pt.cross === 'R' ? 'crossovers, facing right' : '', +pt.stop > 0 ? `stop ${+pt.stop}s` : ''].filter(Boolean).join(' · ');
         rows.push(`<div class="wp-item" data-wprow="${i}"><span class="wp-num">${i + 1}</span>${own ? xy(`data-wpx="${i}"`, `data-wpy="${i}"`, pt) : `<span class="wp-pos muted">(${Math.round(pt.x)}, ${Math.round(pt.y)})</span>`}<span class="wp-what muted">${flags}</span><span class="spacer"></span>
-          ${o.type === 'skater' && own ? `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1} (forward ⇄ backward) — click cycles: none → ⟲ face swings left → ⟳ face swings right">⇄</button><button class="wp-toggle ${+pt.stop > 0 ? 'active' : ''}" data-act="wpstop" data-wp="${i}" title="Full stop at waypoint ${i + 1} — a sharp turn, and everything downstream (passes, contacts) waits with them">⏸</button>` : ''}
+          ${o.type === 'skater' && own ? `<button class="wp-toggle ${pt.pivot ? 'active' : ''}" data-act="pivot" data-wp="${i}" title="Pivot at waypoint ${i + 1} (forward ⇄ backward) — click cycles: none → ⟲ face swings left → ⟳ face swings right">⇄</button><button class="wp-toggle ${pt.cross ? 'active' : ''}" data-act="cross" data-wp="${i}" title="Crossovers (side-steps) from waypoint ${i + 1} to the next: the body faces across the line of travel — click cycles: none → facing left → facing right">×</button><button class="wp-toggle ${+pt.stop > 0 ? 'active' : ''}" data-act="wpstop" data-wp="${i}" title="Full stop at waypoint ${i + 1} — a sharp turn, and everything downstream (passes, contacts) waits with them">⏸</button>` : ''}
           ${cueBtn(String(i), pt.cue, `waypoint ${i + 1}`)}
           ${own ? `<button class="wp-toggle wp-del" data-act="wpdel" data-wp="${i}" title="Remove waypoint ${i + 1}">✕</button>` : ''}</div>`);
         if (+pt.stop > 0) rows.push(`<label class="field inline wp-sub"><span>Hold (s)</span><input type="number" min="0" step="0.25" value="${+pt.stop}" data-wpstopdur="${i}" title="How long the full stop lasts — 0 removes it"></label>`);
@@ -3819,6 +3819,12 @@ propsBody.addEventListener('click', e => {
       const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
       // cycle: no pivot → 'L' (face swings left) → 'R' (face swings right) → no pivot
       commit(() => { if (!pt.pivot) pt.pivot = 'L'; else if (pt.pivot === 'L') pt.pivot = 'R'; else delete pt.pivot; });
+      renderProps(); break;
+    }
+    case 'cross': {
+      const pt = o.path?.[+btn.dataset.wp]; if (!pt) break;
+      // cycle: forward stride → crossovers facing left → facing right → forward stride
+      commit(() => { if (!pt.cross) pt.cross = 'L'; else if (pt.cross === 'L') pt.cross = 'R'; else delete pt.cross; });
       renderProps(); break;
     }
     case 'wpstop': {

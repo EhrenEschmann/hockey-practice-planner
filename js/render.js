@@ -67,32 +67,53 @@ function handles(pts) {
 const Z_ORDER = ['zone', 'barricade', 'obstacle', 'jumppad', 'net', 'arrow', 'tire', 'raisedpad', 'cone', 'minicone', 'pile', 'text', 'coach', 'skater', 'puck', 'goalie', 'contact', 'focus'];
 const zType = o => (o.type === 'skater' && o.role === 'G' ? 'goalie' : o.type);
 
-/** A player's skating path (line + arrowhead), or '' if there is none to draw. Backward stretches (from `backward` / waypoint pivots) draw dotted, with a ⇄ marker at each pivot. */
+/**
+ * A player's skating path (line + arrowhead), or '' if there is none to draw. Backward stretches (from `backward` /
+ * waypoint pivots) draw dotted with a ⇄ marker at each pivot; crossover stretches (`cross` on the start or a waypoint:
+ * side-stepping, facing left or right of travel) draw with short cross ticks, the hockey-diagram mark for crossovers.
+ */
 function playerPath(o, opts, selected = false) {
   if (!o.path?.length || (opts.showPaths === false && !selected)) return ''; // paths hidden: only the selected player's route shows, so it can still be edited
   const isCoach = o.type === 'coach';
   const color = skaterHex(o) || (isCoach ? COACH_COLOR : SKATER_COLORS.blue);
   const pts = skaterPoints(o);
   const dense = smoothPath(pts);
-  const dash = back => isCoach ? 'stroke-dasharray="2.5 1.5"' : back ? 'stroke-dasharray="1.5 1.2"' : '';
+  const dash = style => isCoach ? 'stroke-dasharray="2.5 1.5"' : style === 'back' ? 'stroke-dasharray="1.5 1.2"' : '';
   const hit = `<polyline class="path-hit" points="${ptsStr(dense)}"/>`; // fat invisible stroke: forgiving click / double-click target
   // Full-stop badges: the skater holds at these waypoints
   const stopMarks = pts.filter((p, i) => i > 0 && +p.stop > 0).map(p =>
     `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r="1.15" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".4" font-size="1.05" text-anchor="middle" fill="${color}">⏸${+p.stop}</text></g>`).join('');
   const pivots = pts.filter((p, i) => i > 0 && p.pivot);
-  if (!pivots.length) return `${hit}<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward)}/>${arrowHead(dense, color, 1.8, 'path-head')}${stopMarks}`;
-  // Split the line at each pivot; the stretches alternate forward/backward from the start direction.
+  const crossAt = i => { const c = i === 0 ? o.cross : pts[i].cross; return c === 'L' || c === 'R' ? c : null; };
+  const anyCross = pts.some((_, i) => i + 1 < pts.length && crossAt(i));
+  if (!pivots.length && !anyCross) return `${hit}<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward ? 'back' : 'fwd')}/>${arrowHead(dense, color, 1.8, 'path-head')}${stopMarks}`;
+  // One style per stretch between waypoints: forward / backward (alternating at pivots) / crossovers; alike neighbours merge so dashes run on.
   const idxOf = p => { let bi = 0, bd = Infinity; for (let i = 0; i < dense.length; i++) { const d = (dense[i].x - p.x) ** 2 + (dense[i].y - p.y) ** 2; if (d < bd) { bd = d; bi = i; } } return bi; };
-  const cuts = [0, ...pivots.map(idxOf).sort((a, b) => a - b), dense.length - 1];
+  const cuts = pts.map(idxOf); cuts[0] = 0; cuts[cuts.length - 1] = dense.length - 1;
   let back = !!o.backward;
-  const segs = [];
-  for (let s = 0; s + 1 < cuts.length; s++) {
-    const slice = dense.slice(cuts[s], cuts[s + 1] + 1);
-    if (slice.length > 1) segs.push(`<polyline class="path-line" points="${ptsStr(slice)}" stroke="${color}" ${dash(back)}/>`);
-    back = !back;
+  const stretches = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    if (i > 0 && pts[i].pivot) back = !back;
+    const style = crossAt(i) ? 'cross' : back ? 'back' : 'fwd', last = stretches[stretches.length - 1];
+    if (last && last.style === style) last.b = cuts[i + 1]; else stretches.push({ a: cuts[i], b: cuts[i + 1], style });
   }
-  const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">${p.pivot === 'L' ? '⟲' : p.pivot === 'R' ? '⟳' : '⇄'}</text></g>`).join('');
-  return hit + segs.join('') + arrowHead(dense, color, 1.8, 'path-head') + marks + stopMarks;
+  const ticks = slice => { // short cross ticks every 2 ft along a crossover stretch
+    const out = []; let acc = 1;
+    for (let i = 1; i < slice.length; i++) {
+      const p0 = slice[i - 1], p1 = slice[i], seg = Math.hypot(p1.x - p0.x, p1.y - p0.y); if (seg < 1e-6) continue;
+      while (acc <= seg) { const t = acc / seg, x = p0.x + (p1.x - p0.x) * t, y = p0.y + (p1.y - p0.y) * t, nx = -(p1.y - p0.y) / seg, ny = (p1.x - p0.x) / seg;
+        out.push(`M${n(x + nx * 0.9)},${n(y + ny * 0.9)}L${n(x - nx * 0.9)},${n(y - ny * 0.9)}`); acc += 2; }
+      acc -= seg;
+    }
+    return out.join('');
+  };
+  const segs = stretches.map(st => { const slice = dense.slice(st.a, st.b + 1); if (slice.length < 2) return '';
+    return st.style === 'cross'
+      ? `<polyline class="path-line path-cross" points="${ptsStr(slice)}" stroke="${color}"/><path class="path-ticks" d="${ticks(slice)}" stroke="${color}"/>`
+      : `<polyline class="path-line" points="${ptsStr(slice)}" stroke="${color}" ${dash(st.style)}/>`; }).join('');
+  const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">${p.pivot === 'L' ? '⟲' : p.pivot === 'R' ? '⟳' : '⇄'}</text></g>`).join('')
+    + pts.map((p, i) => i > 0 && i + 1 < pts.length && crossAt(i) ? `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".4" font-size="1" text-anchor="middle" fill="${color}">×${crossAt(i)}</text></g>` : '').join('');
+  return hit + segs + arrowHead(dense, color, 1.8, 'path-head') + marks + stopMarks;
 }
 
 export function renderObjects(drill, selId, opts = {}) {

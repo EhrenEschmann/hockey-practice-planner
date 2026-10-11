@@ -56,7 +56,7 @@ input.invalid{border-color:var(--danger)}
 #cloud[hidden]{display:none}
 #cloud-status{line-height:1.35;word-break:break-word}
 
-#layout{display:grid;grid-template-columns:112px 1fr 340px;flex:1;min-height:0}
+#layout{display:grid;grid-template-columns:112px 1fr clamp(360px,28vw,440px);flex:1;min-height:0} /* the side panel grows with the window: ~400px on a laptop, 440px on a big screen, never under 360px */
 
 #toolbar{background:var(--panel);border-right:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:2px;align-content:start;padding:6px 4px;overflow-y:auto}
 #toolbar .tool{display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 2px;background:transparent;border-color:transparent;font-size:10.5px;color:var(--muted);touch-action:none}

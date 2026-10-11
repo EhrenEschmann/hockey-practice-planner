@@ -392,6 +392,9 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .club-grid td.total span{display:block;color:var(--muted);font-size:11px}
 .club-grid td.total .club-bar{margin-top:4px}
 @media (pointer:coarse){.club-grid .dbtns button{padding:6px 10px;font-size:13px}}
+.club-undo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.club-undo-row button{padding:5px 12px;border-radius:999px;font-weight:600;flex:none}
+.club-undo-row button:disabled{opacity:.4}
 .pl-item.pl-club{width:100%;cursor:pointer;font-family:inherit;text-align:left}
 .ros-task{padding:4px 0}
 .ros-task input[data-field=title]{flex:1 1 320px;min-width:200px;font-size:15px;padding:8px 10px}

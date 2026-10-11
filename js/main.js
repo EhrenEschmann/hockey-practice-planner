@@ -5228,7 +5228,7 @@ async function openClubOutput(teamId, { mount, sheet = false, week = weekKey(), 
   await loadClubWeek();
 }
 async function openProfile(teamId, playerId, { mount = $('#present-club-body'), sheet = mount === $('#present-club-body') } = {}) {
-  clubState.teamId = teamId; clubState.player = playerId; clubState.week = weekKey(); clubState.stats = new Map(); clubState.busy = 'Loading…';
+  clubState.teamId = teamId; clubState.player = playerId; clubState.week = weekKey(); clubState.stats = new Map(); clubState.busy = 'Loading…'; clubState.undo = [];
   clubState.mount = mount; if (sheet) $('#present-club').hidden = false;
   renderClub();
   clubState.doc = await loadClubDoc(teamId);
@@ -5303,12 +5303,21 @@ async function saveStatSoon(next) {
 /** A tap on the grid: `delta` to one task on one day of the week. */
 function logDay(playerId, taskId, day, delta) {
   const cur = statFor(playerId, clubState.week);
+  (clubState.undo ||= []).push({ playerId, week: clubState.week, doc: cur }); if (clubState.undo.length > 30) clubState.undo.shift(); // ↶ Undo puts this back
   const doc = { playerId, week: clubState.week, days: JSON.parse(JSON.stringify(cur.days || {})), by: myEmail(), updatedAt: Date.now() };
   if (cur.base) doc.base = { ...cur.base }; if (cur.baseDone) doc.baseDone = { ...cur.baseDone };
   if (!cur.days && (cur.values || cur.done)) { doc.base = { ...(cur.values || {}) }; doc.baseDone = { ...(cur.done || {}) }; } // what was logged before day-by-day tracking stays counted
   const dd = doc.days[day] = { ...(doc.days[day] || {}) };
   const v = Math.max(0, (+dd[taskId] || 0) + delta); if (v) dd[taskId] = v; else delete dd[taskId];
   if (!Object.keys(dd).length) delete doc.days[day];
+  saveStatSoon(withTotals(doc, tasksForWeek(clubState.doc, clubState.week).map(k => k.id)));
+  renderClub();
+}
+/** ↶ Undo: the week as it was before the last tap (any number of taps back, newest first). */
+function undoDay() {
+  const last = clubState.undo?.pop(); if (!last) return;
+  if (last.week !== clubState.week || last.playerId !== clubState.player) { clubState.undo = []; renderClub(); return; } // a different week on screen now: nothing to undo here
+  const doc = { ...last.doc, playerId: last.playerId, week: last.week, by: myEmail(), updatedAt: Date.now() };
   saveStatSoon(withTotals(doc, tasksForWeek(clubState.doc, clubState.week).map(k => k.id)));
   renderClub();
 }
@@ -5359,7 +5368,7 @@ function renderClub({ keepFocus = false } = {}) {
     const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3>${weeks.filter(w => w !== week).map(w => { const st = statFor(clubState.player, w), wt = tasksForWeek(d, w); return `<div class="club-hist-week"><b>${escHtml(weekLabel(w).replace('This week · ', ''))}</b> ${wt.length ? wt.map(k => `<span>${escHtml(k.title)}: ${k.times > 1 ? `${st.done?.[k.id] ?? '·'}/${k.times}× · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `/${k.target * (k.times || 1)}` : ''}</span>`).join(' ') : '<span class="muted">no tasks</span>'}</div>`; }).join('')}</div>` : '';
     m.innerHTML = `<div class="club-head"><h3>🏒 ${escHtml(pl.name || 'Player')} <span class="muted small">· ${escHtml(d.name)}</span></h3>${nav}<button data-club="close" title="Close">✕</button></div>
       ${tasks.length ? `<div class="club-grid-wrap"><table class="club-grid"><thead><tr><th></th>${head}</tr></thead><tbody>${earlier}${rows}<tr class="week"><th><b>Week</b></th>${totals}</tr></tbody></table></div>` : '<p class="muted">No tasks set for this week.</p>'}${note}
-      <p class="muted small">Tap + on the day it happened — each tap is saved. The week row adds the days up and fills toward the goal.</p>${hist}`;
+      <p class="muted small club-undo-row"><button data-club="undo" ${clubState.undo?.length ? '' : 'disabled'} title="Put back what the last tap changed">↶ Undo last tap</button> Tap + on the day it happened — each tap is saved. The week row adds the days up and fills toward the goal.</p>${hist}`;
     return;
   }
   // the whole team: players down, tasks across; coaches and the planner may type in a number for anyone
@@ -5398,7 +5407,8 @@ for (const sel of ['#tasks-output', '#present-club-body', '#present-body']) { //
     const inc = e.target.closest('[data-inc]'); if (inc) { if (!inc.disabled) logDay(clubState.player, inc.dataset.task, +inc.dataset.day, +inc.dataset.inc); return; }
     const b = e.target.closest('[data-club]'); if (!b) return;
     if (b.dataset.club === 'close') { $('#present-club').hidden = true; clubState.playing?.stop(); return; }
-    clubState.week = shiftWeek(clubState.week, b.dataset.club === 'prev' ? -1 : 1);
+    if (b.dataset.club === 'undo') { undoDay(); return; }
+    clubState.week = shiftWeek(clubState.week, b.dataset.club === 'prev' ? -1 : 1); clubState.undo = [];
     if (clubState.player) renderClub(); else loadClubWeek();
   });
   $(sel).addEventListener('change', e => {

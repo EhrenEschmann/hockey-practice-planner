@@ -5302,10 +5302,12 @@ async function saveStatSoon(next) {
     const el = clubState.mount?.querySelector('.club-note'); if (el) { el.textContent = clubState.busy; el.classList.toggle('warn', /✗/.test(clubState.busy)); }
   }, 600));
 }
+const LOG_WINDOW_DAYS = 3; // a day can be logged for this many days after it — then it locks, so a week is filled in as it happens, not reconstructed later
 /** A tap on the grid: `delta` to one task on one day of the week. */
 function logDay(playerId, taskId, day, delta) {
   const dt = weekStart(clubState.week); dt.setDate(dt.getDate() + day);
-  if (`${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}` > todayISO()) return; // never a day that hasn't come, whatever the screen showed
+  const key = `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`, d0 = new Date(Date.now() - LOG_WINDOW_DAYS * 86400000);
+  if (key > todayISO() || key < `${d0.getFullYear()}-${pad2(d0.getMonth() + 1)}-${pad2(d0.getDate())}`) return; // never a day that hasn't come, nor one that has locked — whatever the screen showed
   const cur = statFor(playerId, clubState.week);
   (clubState.undo ||= []).push({ playerId, week: clubState.week, doc: cur }); if (clubState.undo.length > 30) clubState.undo.shift(); // ↶ Undo puts this back
   const doc = { playerId, week: clubState.week, days: JSON.parse(JSON.stringify(cur.days || {})), by: myEmail(), updatedAt: Date.now() };
@@ -5353,17 +5355,19 @@ function renderClub({ keepFocus = false } = {}) {
     const s = statFor(clubState.player, week);
     const ws = weekStart(week), todayKey = todayISO(), dayDate = i => { const x = new Date(ws); x.setDate(x.getDate() + i); return x; };
     const iso = x => `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
+    const openKey = iso(new Date(Date.now() - LOG_WINDOW_DAYS * 86400000)); // the earliest day still open to log
     const howto = k => `${k.audio ? `<button class="wp-toggle" data-howto="audio" data-task="${k.id}">${clubState.playing?.taskId === k.id ? '■ Stop' : '🎙 Listen'}</button>` : ''}${k.video ? `<button class="wp-toggle" data-howto="video" data-task="${k.id}">🎬 Watch</button>` : ''}${!k.video && k.videoUrl && videoEmbed(k.videoUrl) ? `<button class="wp-toggle" data-howto="link" data-task="${k.id}">🎬 Watch</button>` : ''}`;
     const head = tasks.map(k => `<th><b>${escHtml(k.title)}</b><span>${escHtml(goalText(k))}</span>${howto(k) ? `<div class="club-howto">${howto(k)}</div>` : ''}<div class="club-howto-box" data-task-box="${k.id}"></div></th>`).join('');
     const rows = [0, 1, 2, 3, 4, 5, 6].map(i => {
-      const dt = dayDate(i), key = iso(dt), today = key === todayKey, future = key > todayKey;
+      const dt = dayDate(i), key = iso(dt), today = key === todayKey, future = key > todayKey, locked = key < openKey;
       const cells = tasks.map(k => {
         const amt = +s.days?.[i]?.[k.id] || 0, st = taskSteps(k);
         const btn = (inc, label) => `<button data-inc="${inc}" data-task="${k.id}" data-day="${i}" ${inc < 0 && !amt ? 'disabled' : ''}>${label}</button>`;
         if (future) return `<td class="dcell"><div class="dval none" title="Not yet — a day can be logged once it comes">—</div></td>`; // nothing to tap on a day that hasn't come
+        if (locked) return `<td class="dcell"><div class="dval${amt ? '' : ' none'}" title="Locked — a day can be logged for ${LOG_WINDOW_DAYS} days">${amt || '·'}</div><div class="dlock">🔒</div></td>`; // too long ago: what was logged stands
         return `<td class="dcell"><div class="dval${amt ? '' : ' none'}">${amt || '·'}</div><div class="dbtns">${btn(-st[0], '−')}${st.map(v => btn(v, `+${v}`)).join('')}</div></td>`;
       }).join('');
-      return `<tr class="${today ? 'today' : future ? 'future' : ''}"><th><b>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]}</b><span>${dt.getMonth() + 1}/${dt.getDate()}</span>${today ? '<em>today</em>' : ''}</th>${cells}</tr>`;
+      return `<tr class="${today ? 'today' : future ? 'future' : locked ? 'locked' : ''}"><th><b>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]}</b><span>${dt.getMonth() + 1}/${dt.getDate()}</span>${today ? '<em>today</em>' : ''}</th>${cells}</tr>`;
     }).join('');
     const earlier = tasks.some(k => +s.base?.[k.id] > 0) ? `<tr class="earlier"><th><b>Earlier</b><span>before day by day</span></th>${tasks.map(k => `<td class="dcell"><div class="dval${+s.base?.[k.id] ? '' : ' none'}">${+s.base?.[k.id] || '·'}</div></td>`).join('')}</tr>` : '';
     const totals = tasks.map(k => { const v = +s.values?.[k.id] || 0, n = +s.done?.[k.id] || 0, pct = progressOf(k, s);
@@ -5373,7 +5377,7 @@ function renderClub({ keepFocus = false } = {}) {
     const hist = weeks.length > 1 ? `<div class="club-hist"><h3 class="small muted">Recent weeks</h3>${weeks.filter(w => w !== week).map(w => { const st = statFor(clubState.player, w), wt = tasksForWeek(d, w); return `<div class="club-hist-week"><b>${escHtml(weekLabel(w).replace('This week · ', ''))}</b> ${wt.length ? wt.map(k => `<span>${escHtml(k.title)}: ${k.times > 1 ? `${st.done?.[k.id] ?? '·'}/${k.times}× · ` : ''}${st.values?.[k.id] ?? '·'}${k.target ? `/${k.target * (k.times || 1)}` : ''}</span>`).join(' ') : '<span class="muted">no tasks</span>'}</div>`; }).join('')}</div>` : '';
     m.innerHTML = `<div class="club-head"><h3>🏒 ${escHtml(pl.name || 'Player')} <span class="muted small">· ${escHtml(d.name)}</span></h3>${nav}<button data-club="close" title="Close">✕</button></div>
       ${tasks.length ? `<div class="club-grid-wrap"><table class="club-grid"><thead><tr><th></th>${head}</tr></thead><tbody>${earlier}${rows}<tr class="week"><th><b>Week</b></th>${totals}</tr></tbody></table></div>` : '<p class="muted">No tasks set for this week.</p>'}${note}
-      <p class="muted small club-undo-row"><button data-club="undo" ${clubState.undo?.length ? '' : 'disabled'} title="Put back what the last tap changed">↶ Undo last tap</button> Tap + on the day it happened — each tap is saved. The week row adds the days up and fills toward the goal.</p>${hist}`;
+      <p class="muted small club-undo-row"><button data-club="undo" ${clubState.undo?.length ? '' : 'disabled'} title="Put back what the last tap changed">↶ Undo last tap</button> Tap + on the day it happened — each tap is saved. A day stays open for ${LOG_WINDOW_DAYS} days, then locks 🔒. The week row adds the days up and fills toward the goal.</p>${hist}`;
     return;
   }
   // the whole team: players down, tasks across; coaches and the planner may type in a number for anyone

@@ -380,6 +380,8 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .club-grid tr.today{background:rgba(59,130,246,.14);box-shadow:inset 3px 0 0 var(--accent)}
 .club-grid tr.today th b{color:var(--accent-2)}
 .club-grid tr.future{opacity:.45}
+.club-grid tr.locked{opacity:.6}
+.club-grid .dlock{font-size:11px;margin-top:2px;opacity:.7}
 .club-grid tr.earlier{opacity:.7}
 .club-grid .dcell{text-align:center;min-width:92px}
 .club-grid .dval{font-size:20px;font-weight:700;line-height:1.1}

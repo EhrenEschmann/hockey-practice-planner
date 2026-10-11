@@ -44,10 +44,21 @@ export function accessFor(roster, p) {
 }
 
 /** What coaches and the team download: the practice without its access lists, stage bookkeeping or hidden drills. */
-export function publishedCopy(p, owner) {
+/**
+ * `as` = 'coach' (default) or 'team'. A drill marked `audience: 'coaches'` (say, three minutes of free play) is on the
+ * coaches' minute-by-minute agenda but left out of the team's copy — whose remaining drills then carry `at`, their
+ * start in minutes into the practice, so the team's clock times stay right across the gap.
+ */
+export function publishedCopy(p, owner, as = 'coach') {
   const c = JSON.parse(JSON.stringify(p));
   for (const k of ['sharedWith', 'sharedTeam', 'stage', 'sentCoachesAt', 'sentTeamAt', 'open']) delete c[k];
-  c.drills = (c.drills || []).filter(d => !d.hidden);
+  const shown = (c.drills || []).filter(d => !d.hidden);
+  if (as === 'team') {
+    let at = 0;
+    for (const d of shown) { d.at = at; at += +d.duration || 0; }
+    c.drills = shown.filter(d => d.audience !== 'coaches');
+    for (const d of c.drills) delete d.audience;
+  } else c.drills = shown;
   c.owner = owner;
   return c;
 }

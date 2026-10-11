@@ -3034,9 +3034,10 @@ function renderPlan() {
   for (const d of p.drills) { if (d.hidden) continue; startOf.set(d.id, running); running += +d.duration || 0; }
   const when = d => {
     if (d.hidden) return 'hidden';
-    if (game) return '';
+    const co = d.audience === 'coaches' ? ' · coaches only' : '';
+    if (game) return co.slice(3);
     const at = startOf.get(d.id);
-    return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clockFull(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}`;
+    return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clockFull(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}${co}`;
   };
   const fbCount = d => feedbackAll.filter(f => f.pid === p.id && f.drillId === d.id && !f.resolved).length;
   const list = $('#drill-list');
@@ -3044,7 +3045,7 @@ function renderPlan() {
   // or button is no reason to hold back (a click leaves those focused, and their change needs a redraw).
   if (list.contains(document.activeElement) && document.activeElement.matches('textarea, input:not([type]), input[type="text"], input[type="number"], input[type="search"]')) return;
   const btns = d => `
-      <button data-act="hide" class="${d.hidden ? 'is-hidden' : ''}" title="${d.hidden ? 'Hidden: left out of the plan, print and the coaches’ view — click to put it back' : 'Hide this drill: keep it here to come back to, but leave it out of the plan, print and the coaches’ view'}">${icon(d.hidden ? 'eyeoff' : 'eye')}</button>
+      <button data-act="hide" class="${d.hidden ? 'is-hidden' : d.audience === 'coaches' ? 'is-coaches' : ''}" title="${d.hidden ? 'Hidden from everyone: left out of the plan, print and the coaches’ view — click to show it again' : d.audience === 'coaches' ? 'Coaches only: on the coaches’ minute-by-minute agenda, left out of the team’s copy (their clock times stay right across the gap) — click to hide it from everyone' : 'Shown to everyone — click for coaches only (e.g. free play the team needn’t see), click again to hide it from everyone'}">${d.hidden ? icon('eyeoff') : d.audience === 'coaches' ? icon('coach') : icon('eye')}</button>
       <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (any length — it warns when the clip gets big; optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
       <button data-act="intro" class="${d.intro || d.narration ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="${d.intro || d.narration ? `Audio on this drill: ${[d.intro ? 'intro' : '', d.narration ? 'voice-over' : ''].filter(Boolean).join(' + ')}. ` : ''}Intro in your voice (played before the drill when ▶ is pressed) and a voice-over recorded over the animation — both recorded here">${icon('mic')}</button>
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
@@ -3259,7 +3260,11 @@ $('#drill-list').addEventListener('click', e => {
   if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#drill-list .video-url')?.focus(); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
   if (act === 'feedback') { openFeedbackPanel(); return; }
-  if (act === 'hide') { const d = p.drills[i]; commit(() => { if (d.hidden) delete d.hidden; else d.hidden = true; }); renderAll(); return; }
+  if (act === 'hide') { // cycle: everyone → coaches only → hidden from all → everyone
+    const d = p.drills[i];
+    commit(() => { if (d.hidden) { delete d.hidden; delete d.audience; } else if (d.audience === 'coaches') { delete d.audience; d.hidden = true; } else d.audience = 'coaches'; });
+    renderAll(); return;
+  }
   if (li.matches('.notes-editor, .intro-editor, .video-editor, .ai-editor')) return;
   finishActive();
   if (act === 'save' || act === 'cancel') {
@@ -4302,7 +4307,7 @@ function presentHTML(p) {
     <div class="pr-meta pr-review" title="${escHtml(est.detail)}">⏱ About ${est.min} min to review this plan${est.detail ? ` <span class="muted">(${escHtml(est.detail)})</span>` : ''}</div>
     </div>
     ${drills.map((d, i) => {
-      const at = t; t += (+d.duration || 0);
+      const at = d.at != null ? (startMin ?? 0) + d.at : t; t = at + (+d.duration || 0); // `at`: the team's copy keeps the slot of a coaches-only drill left out before this one
       if (isPSDrill(d)) {
         const tiles = (d.psElements || []).map(k => {
           const e = PS_ELEMENTS.find(x => x.key === k);
@@ -4843,7 +4848,7 @@ function showPractice(r) {
       if (presentKey === key) return;
       presentUnsub?.(); presentUnsub = null; presentKey = key;
       presentOwner = ownerFor(); feedbackOn = false;
-      presentDoc(publishedCopy(mine, ownerFor()));
+      presentDoc(publishedCopy(mine, ownerFor(), r.as));
       return;
     }
     if (!cloudBackend) { leavePractice(); presentMsg("This practice isn't on this device.", { list: `/${r.as}` }); return; }
@@ -4879,7 +4884,7 @@ function showPractice(r) {
       return;
     }
     if (!raw) { try { localStorage.removeItem(viewCacheKey(pid)); } catch { /* fine */ } leavePractice(); presentKey = key; return presentMsg('This practice no longer exists.', { list: `/${r.as}` }); }
-    const p = publishedCopy(raw, raw.owner || 'local'); // as the audience gets it: hidden drills and the sharing bookkeeping left out
+    const p = publishedCopy(raw, raw.owner || 'local', r.as); // as the audience gets it: hidden (and, for the team, coaches-only) drills and the sharing bookkeeping left out
     (p.drills || []).forEach(migrateDrill);
     try { localStorage.setItem(viewCacheKey(pid), JSON.stringify({ p, at: Date.now() })); } catch { /* full/blocked storage: live view still works */ }
     presentOwner = p.owner || 'local'; feedbackOn = mayComment;
@@ -5404,7 +5409,7 @@ function drillNowIndex(p) {
   if (min < start) return 0;
   const drills = activeDrills(p);
   let t = start;
-  for (let i = 0; i < drills.length; i++) { t += +drills[i].duration || 0; if (min < t) return i; }
+  for (let i = 0; i < drills.length; i++) { if (drills[i].at != null) t = start + drills[i].at; t += +drills[i].duration || 0; if (min < t) return i; }
   return 0; // practice is over: back to the first page, not the dismissal card
 }
 

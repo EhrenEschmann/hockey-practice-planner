@@ -63,6 +63,14 @@ const p1 = { id: 'p1', team: 'mites', date: '2026-09-21', stage: 'team', sharedT
 assert.deepEqual(accessFor(roster, p1), { stage: 'team', open: false, coach: ['head@x.io'], team: ['mom@x.io', 'guest@x.io'] }, 'roster + extras, lower-cased, a coach-parent is a coach');
 assert.deepEqual(accessFor(roster, { team: 'Squirts', stage: 'coaches' }), { stage: 'coaches', open: false, coach: ['sq@x.io'], team: ['head@x.io'] }, 'per team: the Mites coach is a parent on the Squirts');
 const copy = publishedCopy({ ...p1, sharedWith: ['x@x.io'], sentTeamAt: 1 }, 'OWNER');
+{ // a coaches-only drill: on the coaches' agenda, out of the team's — whose later drills keep their clock slot
+  const q = { id: 'q', team: 'Mites', drills: [{ id: 'a', name: 'Warmup', duration: 10 }, { id: 'b', name: 'Free play', duration: 3, audience: 'coaches' }, { id: 'c', name: 'Scrimmage', duration: 12 }, { id: 'h', name: 'Parked', duration: 5, hidden: true }] };
+  assert.deepEqual(publishedCopy(q, 'o').drills.map(d => d.id), ['a', 'b', 'c'], 'coaches get the coaches-only drill');
+  assert.equal(publishedCopy(q, 'o').drills[1].audience, 'coaches');
+  const team = publishedCopy(q, 'o', 'team');
+  assert.deepEqual(team.drills.map(d => [d.id, d.at]), [['a', 0], ['c', 13]], 'the team does not get it, and the next drill still starts at minute 13');
+  assert.ok(!('audience' in team.drills[0]));
+}
 assert.deepEqual(Object.keys(copy).sort(), ['date', 'drills', 'id', 'owner', 'team']);
 assert.equal(copy.drills.length, 1, 'hidden drills are not published');
 

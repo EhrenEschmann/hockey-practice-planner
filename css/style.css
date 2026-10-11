@@ -249,6 +249,7 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 #drill-list li.hidden-drill{opacity:.55;border-style:dashed}
 #drill-list li.hidden-drill .dname-text{text-decoration:line-through;text-decoration-color:var(--muted)}
 #drill-list li button.is-hidden{color:#f59e0b}
+#drill-list li button.is-coaches{color:#f59e0b} /* coaches only: the coach diamond, in the same amber as hidden */
 #drill-list li button.open{background:var(--accent);color:#fff}
 #drill-list li.notes-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default}
 #drill-list li.intro-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default;display:block}

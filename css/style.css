@@ -264,7 +264,7 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .intro-script.reading{font-size:15px;line-height:1.5;min-height:160px}
 /* the intro / video buttons: quiet line icons like the rest of the row; a tint only once there is something recorded */
 #drill-list li button.has-intro{color:#f59e0b}
-#drill-list li button.has-video{color:#a78bfa}
+#drill-list li button.has-video{color:#22d3ee} /* as loud as the amber mic: a video on the drill should be seen at a glance */
 #drill-list li button[data-act=intro]:not(.has-intro),#drill-list li button[data-act=video]:not(.has-video){color:var(--muted);opacity:.7}
 #drill-list li button[data-act=intro]:not(.has-intro):hover,#drill-list li button[data-act=video]:not(.has-video):hover{opacity:1;color:var(--text)}
 #drill-list li.video-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default;display:block}

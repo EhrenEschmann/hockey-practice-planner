@@ -5304,6 +5304,8 @@ async function saveStatSoon(next) {
 }
 /** A tap on the grid: `delta` to one task on one day of the week. */
 function logDay(playerId, taskId, day, delta) {
+  const dt = weekStart(clubState.week); dt.setDate(dt.getDate() + day);
+  if (`${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}` > todayISO()) return; // never a day that hasn't come, whatever the screen showed
   const cur = statFor(playerId, clubState.week);
   (clubState.undo ||= []).push({ playerId, week: clubState.week, doc: cur }); if (clubState.undo.length > 30) clubState.undo.shift(); // ↶ Undo puts this back
   const doc = { playerId, week: clubState.week, days: JSON.parse(JSON.stringify(cur.days || {})), by: myEmail(), updatedAt: Date.now() };
@@ -5357,7 +5359,8 @@ function renderClub({ keepFocus = false } = {}) {
       const dt = dayDate(i), key = iso(dt), today = key === todayKey, future = key > todayKey;
       const cells = tasks.map(k => {
         const amt = +s.days?.[i]?.[k.id] || 0, st = taskSteps(k);
-        const btn = (inc, label) => `<button data-inc="${inc}" data-task="${k.id}" data-day="${i}" ${future || (inc < 0 && !amt) ? 'disabled' : ''}>${label}</button>`;
+        const btn = (inc, label) => `<button data-inc="${inc}" data-task="${k.id}" data-day="${i}" ${inc < 0 && !amt ? 'disabled' : ''}>${label}</button>`;
+        if (future) return `<td class="dcell"><div class="dval none" title="Not yet — a day can be logged once it comes">—</div></td>`; // nothing to tap on a day that hasn't come
         return `<td class="dcell"><div class="dval${amt ? '' : ' none'}">${amt || '·'}</div><div class="dbtns">${btn(-st[0], '−')}${st.map(v => btn(v, `+${v}`)).join('')}</div></td>`;
       }).join('');
       return `<tr class="${today ? 'today' : future ? 'future' : ''}"><th><b>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]}</b><span>${dt.getMonth() + 1}/${dt.getDate()}</span>${today ? '<em>today</em>' : ''}</th>${cells}</tr>`;

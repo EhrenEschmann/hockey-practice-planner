@@ -410,6 +410,7 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .tabs{display:flex;gap:4px}
 .tabs button{padding:3px 10px;font-size:12.5px}
 .tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.tabs button:disabled{opacity:.4;cursor:not-allowed}
 .cal-week.sel{background:#1e2a44;border-color:var(--accent)}
 
 .cal-nav{display:flex;align-items:center;gap:10px;margin:4px 0 8px}

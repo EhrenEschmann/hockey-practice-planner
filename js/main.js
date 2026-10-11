@@ -2349,7 +2349,8 @@ function renderTasks() {
   $('#tasks-title').textContent = t.name || 'Team';
   $('#tasks-cal').innerHTML = weekCalendarHTML(t, week);
   $('#tasks-week-head').innerHTML = `<h3>${escHtml(weekRange(week))}<span class="muted small"> · ${week === now ? 'this week' : week < now ? 'past' : 'ahead'}</span></h3>
-    <div class="tabs"><button data-tab="tasks" class="${tasksTab === 'tasks' ? 'on' : ''}">Tasks</button><button data-tab="output" class="${tasksTab === 'output' ? 'on' : ''}">📊 Output</button></div>`;
+    <div class="tabs"><button data-tab="tasks" class="${tasksTab === 'tasks' ? 'on' : ''}">Tasks</button><button data-tab="output" class="${tasksTab === 'output' ? 'on' : ''}" ${week > now ? 'disabled title="Numbers come in once the week starts — a week ahead has nothing to show yet"' : ''}>📊 Output</button></div>`;
+  if (tasksTab === 'output' && week > now) tasksTab = 'tasks'; // a week ahead has no numbers: plan its tasks, nothing to log yet
   $('#tasks-week').hidden = tasksTab !== 'tasks'; $('#tasks-output').hidden = tasksTab !== 'output';
   if (tasksTab === 'output') { if (clubState.mount !== $('#tasks-output') || clubState.teamId !== t.id || clubState.week !== week) openClubOutput(t.id, { mount: $('#tasks-output'), week, navless: true }); return; }
   const tasks = weekTasks(t);
@@ -5219,6 +5220,7 @@ function loadWeekTasks(week) {
     .finally(() => { loadingWeeks.delete(`${clubState.teamId}/${week}`); if (clubState.doc === d) renderClub(); });
 }
 async function openClubOutput(teamId, { mount, sheet = false, week = weekKey(), navless = false }) {
+  if (week > weekKey()) week = weekKey(); // never a week ahead: there is nothing logged to show
   clubState.teamId = teamId; clubState.player = null; clubState.week = week; clubState.stats = new Map(); clubState.busy = 'Loading…'; clubState.navless = navless;
   clubState.mount = mount;
   if (sheet) $('#present-club').hidden = false;

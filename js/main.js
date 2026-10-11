@@ -1444,6 +1444,7 @@ function forgetClip(key) { const e = clipMem.get(key); if (e) { URL.revokeObject
 /** Play a fetched clip; onEnd fires once when it finishes, fails or is stopped. */
 function playClip(entry, { onEnd }) {
   const audio = new Audio(entry.url);
+  audio.setAttribute('playsinline', ''); audio.preload = 'auto';
   let done = false;
   const finish = err => { if (done) return; done = true; onEnd(err || null); };
   audio.onended = () => finish();
@@ -1455,32 +1456,72 @@ let introPlaying = null; // the Drills panel's ▶ Listen preview
 
 // ----- narration: the coach's voice over the animation. Decoded once and played through WebAudio, which can start at
 // any offset (a MediaRecorder WebM can't be seeked reliably), so ⏸ / ▶ and the timeline keep voice and picture together.
-let narrAC = null;
-const narrCtx = () => (narrAC ||= new (window.AudioContext || window.webkitAudioContext)());
+// Phones are the hard case. iOS flips the AudioContext to 'interrupted' after an <audio> intro or a video has played,
+// after a call or the lock screen — and a source started on a context that is not running is simply silent, which is
+// how "the voice cut out" happens. So: one context, created at a speech sample rate (a decoded minute costs half the
+// memory of 48 kHz, and a practice can carry many minutes), woken on every tap in the viewer and again whenever the
+// state changes while a voice-over should be playing; decoded buffers kept for the last few drills only.
+let narrAC = null, audioUnlocked = false;
 const activeNarr = new Set();
-/** Decode a fetched clip into an AudioBuffer (cached on the entry). */
+const decodedLRU = []; // entries with a decoded buffer, oldest first — a phone cannot hold a whole practice's voice-overs as PCM
+const DECODED_MAX = 3;
+function narrCtx() {
+  if (narrAC && narrAC.state !== 'closed') return narrAC;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try { narrAC = new AC({ sampleRate: 24000, latencyHint: 'playback' }); } catch { narrAC = new AC(); }
+  narrAC.addEventListener?.('statechange', () => { if (narrAC.state !== 'running' && narrAC.state !== 'closed' && activeNarr.size && document.visibilityState === 'visible') narrAC.resume().catch(() => {}); });
+  return narrAC;
+}
+/** Resolve true once the context is running (resume works inside a tap; after that first unlock it works from anywhere). */
+function wakeAudio() {
+  const ac = narrCtx();
+  if (ac.state === 'running') return Promise.resolve(true);
+  return ac.resume().then(() => ac.state === 'running').catch(() => false);
+}
+/** On a tap in the viewer: unlock WebAudio for the session; on iOS 17+ also ask to be heard over the ringer switch, which WebAudio otherwise obeys. */
+function unlockAudio() {
+  try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch { /* not there */ }
+  wakeAudio().then(ok => {
+    if (!ok || audioUnlocked) return;
+    audioUnlocked = true;
+    try { const ac = narrCtx(), s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, ac.sampleRate); s.connect(ac.destination); s.start(0); } catch { /* fine */ } // a silent tick: the classic iOS unlock
+  });
+}
+for (const ev of ['pointerup', 'touchend', 'keydown']) document.addEventListener(ev, () => { if (presenting) unlockAudio(); }, { capture: true, passive: true });
+document.addEventListener('visibilitychange', () => { if (presenting && document.visibilityState === 'visible' && activeNarr.size) wakeAudio(); });
+/** Decode a fetched clip into an AudioBuffer (cached on the entry; only the last few stay decoded). */
 async function narrationBuffer(entry) {
   if (!entry) return null;
-  if (!entry.buffer) { try { entry.buffer = await narrCtx().decodeAudioData(await (await fetch(entry.url)).arrayBuffer()); } catch { entry.buffer = null; } }
+  if (!entry.buffer) {
+    try { entry.buffer = await narrCtx().decodeAudioData(await (await fetch(entry.url)).arrayBuffer()); } catch { entry.buffer = null; }
+    if (entry.buffer) { decodedLRU.push(entry); while (decodedLRU.length > DECODED_MAX) { const old = decodedLRU.shift(); if (old !== entry) old.buffer = null; } } // a playing source keeps its own reference
+  } else { const i = decodedLRU.indexOf(entry); if (i >= 0) decodedLRU.push(...decodedLRU.splice(i, 1)); }
   return entry.buffer;
 }
 /** Prefetch and decode a drill's narration so ▶ can start it inside the tap. */
 const primeNarration = (owner, pid, d) => { if (d.narration) fetchClip(owner, pid, d, 'narration').then(e => narrationBuffer(e)).catch(() => {}); };
+/** Prefetch the bytes only (the viewer: every drill's clip ready to decode, none of them decoded until played). */
+const prefetchNarration = (owner, pid, d) => { if (d.narration) fetchClip(owner, pid, d, 'narration').catch(() => {}); };
 /**
  * Play a decoded narration from `at` seconds of audio. Resolves synchronously to a handle; onEnd fires once when the
  * clip finishes or is stopped. `at` maps from animation time as t / speed (the clip was recorded in wall time).
+ * The source starts once the context is running — straight away normally, a beat later when iOS had interrupted it.
  */
 function playNarration(buffer, at, { onEnd }) {
   const ac = narrCtx();
-  if (ac.state === 'suspended') ac.resume().catch(() => {});
-  const src = ac.createBufferSource(); src.buffer = buffer; src.connect(ac.destination);
-  let done = false;
-  const handle = { stop() { if (done) return; done = true; activeNarr.delete(handle); try { src.stop(); } catch { /* not started */ } onEnd(); } };
-  src.onended = () => { if (done) return; done = true; activeNarr.delete(handle); onEnd(); };
+  let done = false, src = null;
+  const finish = () => { if (done) return; done = true; activeNarr.delete(handle); onEnd(); };
+  const handle = { stop() { if (done) return; try { src?.stop(); } catch { /* not started */ } finish(); } };
   const off = Math.max(0, Math.min(at, buffer.duration - 0.01));
   if (off >= buffer.duration - 0.02) { done = true; onEnd(); return handle; } // nothing left to say from here
-  try { src.start(0, off); } catch { done = true; onEnd(); return handle; }
   activeNarr.add(handle);
+  const start = () => {
+    if (done) return;
+    src = ac.createBufferSource(); src.buffer = buffer; src.connect(ac.destination);
+    src.onended = finish;
+    try { src.start(0, off); } catch { finish(); }
+  };
+  if (ac.state === 'running') start(); else wakeAudio().then(start); // not running: start as soon as it is (a source started on a sleeping context would be silent for good)
   return handle;
 }
 /** The narration's audio position for animation time t (t runs at `speed` × wall time). */
@@ -4462,7 +4503,7 @@ function wirePresentAnims(p) {
     presentPSObserver.observe(fig);
   }
   const rinkStr = rinkSVG(surfaceOf(p));
-  for (const d of p.drills) { if (d.intro) fetchClip(presentOwner, p.id, d); primeNarration(presentOwner, p.id, d); } // intros and voice-overs ready in memory before the first tap
+  for (const d of p.drills) { if (d.intro) fetchClip(presentOwner, p.id, d); prefetchNarration(presentOwner, p.id, d); } // intros and voice-over bytes ready before the first tap; a voice-over is decoded when its drill plays (a phone can't hold them all as PCM)
   for (const sec of $$('#present-body .pr-drill[data-did]')) {
     wireRules(sec); // rules-only stations have no animation but do have something to say
     const d = p.drills.find(x => x.id === sec.dataset.did);
@@ -4539,7 +4580,14 @@ function wirePresentAnims(p) {
       if (!voiceOn || !d.narration) return;
       const entry = clipMem.get(keyFor(presentOwner, p.id, d, 'narration')); if (!entry) return;
       const token = a.narrToken;
-      const begin = buf => { if (a.narrToken !== token || !buf || !a.playing) return; a.narr = playNarration(buf, narrAt(a.t, spd), { onEnd: () => { if (a.narr) { a.narr = null; draw(); } } }); draw(); };
+      const say = msg => { cueEl.textContent = msg; cueEl.hidden = false; setTimeout(() => { cueEl.hidden = true; }, 5000); };
+      const begin = buf => {
+        if (a.narrToken !== token || !a.playing) return;
+        if (!buf) { say('🎙 voice-over couldn’t be decoded on this device'); return; }
+        a.narr = playNarration(buf, narrAt(a.t, spd), { onEnd: () => { if (a.narr) { a.narr = null; draw(); } } }); draw();
+        // A beat later the context must be running, or the phone is holding the audio back: say so, rather than play silence.
+        setTimeout(() => { const st = narrCtx().state; if (a.narr && a.narrToken === token && st !== 'running') say(`🎙 the phone is holding audio back (${st}) — tap ▶ again`); }, 1500);
+      };
       if (entry.buffer) begin(entry.buffer); else narrationBuffer(entry).then(begin);
     };
     let shown = null; // only rewrite the icon when the state flips — replacing it every frame eats clicks

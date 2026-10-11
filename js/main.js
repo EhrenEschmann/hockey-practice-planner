@@ -5339,7 +5339,7 @@ function renderClub({ keepFocus = false } = {}) {
   const m = clubState.mount; if (!m) return;
   if (keepFocus && m.contains(document.activeElement)) return; // typing: the numbers are already in state; repaint when the field blurs
   const d = clubState.doc, week = clubState.week;
-  const nav = clubState.navless ? '' : `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= weekKey() ? 'disabled' : ''}>▶</button></div>`;
+  const nav = clubState.navless ? '' : `<div class="club-week"><button data-club="prev" title="Earlier week">◀</button><span>${escHtml(weekLabel(week))}</span><button data-club="next" title="Later week" ${week >= weekKey() ? 'disabled' : ''}>▶</button>${week !== weekKey() ? '<button data-club="now" class="club-now" title="Back to the current week">This week</button>' : ''}</div>`;
   const note = `<div class="club-note muted small${/✗/.test(clubState.busy) ? ' warn' : ''}">${escHtml(clubState.busy)}</div>`;
   if (!d) { m.innerHTML = `<div class="club-head"><h3>Club</h3></div>${note}`; return; }
   if (who.persona !== 'planner' && !(week in (d.weeks || {}))) loadWeekTasks(week);
@@ -5408,7 +5408,7 @@ for (const sel of ['#tasks-output', '#present-club-body', '#present-body']) { //
     const b = e.target.closest('[data-club]'); if (!b) return;
     if (b.dataset.club === 'close') { $('#present-club').hidden = true; clubState.playing?.stop(); return; }
     if (b.dataset.club === 'undo') { undoDay(); return; }
-    clubState.week = shiftWeek(clubState.week, b.dataset.club === 'prev' ? -1 : 1); clubState.undo = [];
+    clubState.week = b.dataset.club === 'now' ? weekKey() : shiftWeek(clubState.week, b.dataset.club === 'prev' ? -1 : 1); clubState.undo = [];
     if (clubState.player) renderClub(); else loadClubWeek();
   });
   $(sel).addEventListener('change', e => {

@@ -347,6 +347,7 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 .club-head h3{margin:0;font-size:15px;flex:1 1 auto}
 .club-week{display:flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums}
 .club-week button{padding:2px 8px}
+.club-week .club-now{margin-left:4px;border-radius:999px;background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .club-table{width:100%;border-collapse:collapse;font-size:13px}
 .club-table th,.club-table td{padding:6px 6px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
 .club-table th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}

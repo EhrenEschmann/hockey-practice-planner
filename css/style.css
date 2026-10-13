@@ -27,6 +27,7 @@ textarea{resize:vertical}
 #present-pop{right:auto;left:0} /* Present sits at the left of the bar: its menu hangs to the right */
 .muted{color:var(--muted)}
 .lucide{width:1em;height:1em;vertical-align:-.125em;display:inline-block;flex:none}
+button .lucide{pointer-events:none} /* clicks land on the button, never on an icon that may be re-rendered mid-press */
 .datewrap{display:flex;gap:4px;align-items:center;position:relative}
 .datewrap input[type=text]{flex:1;min-width:0}
 .datewrap .datepick{padding:4px 7px;flex:none}

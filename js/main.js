@@ -1667,9 +1667,16 @@ function stopWithReturn() {
   returning.raf = requestAnimationFrame(step);
 }
 
+/** Swap a button's icon only when it changes: rewriting it every tick detaches the SVG mid-press and the click never lands. */
+function setBtnIcon(el, name) {
+  if (el.dataset.iconNow === name) return;
+  el.dataset.iconNow = name;
+  el.innerHTML = icon(name);
+}
+
 function renderAnimBar() {
   if (isPSDrill(drill())) { // power skating mode: ▶/⏹ drive the 3D viewer; the timeline doesn't apply
-    $('#btn-play').innerHTML = icon(psViewInst?.playing ? 'pause' : 'play');
+    setBtnIcon($('#btn-play'), psViewInst?.playing ? 'pause' : 'play');
     $('#btn-play').disabled = !(drill().psElements || []).length;
     $('#timeline').disabled = true;
     $('#time-display').textContent = 'technique demo';
@@ -1678,7 +1685,7 @@ function renderAnimBar() {
   }
   $('#timeline').disabled = false;
   const T = totalDuration();
-  $('#btn-play').innerHTML = icon(anim.playing || anim.intro || anim.narr || anim.recNarr ? 'pause' : 'play');
+  setBtnIcon($('#btn-play'), anim.playing || anim.intro || anim.narr || anim.recNarr ? 'pause' : 'play');
   $('#btn-play').disabled = T <= 0;
   const tl = $('#timeline');
   tl.max = Math.max(T, 0.01); tl.value = Math.min(anim.t, T);

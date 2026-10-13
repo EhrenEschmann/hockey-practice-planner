@@ -326,6 +326,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
   }
   function onChange(type, id, data) {
     if (type === 'error') { status('error', data?.message || String(data)); return; }
+    if (data?.shareOnly) return; // a single-drill share copy is not a working document
     if (timers.has(id)) return; // we have unsaved local edits to this one; ours will win when written
     applying = true;
     try {
@@ -364,6 +365,7 @@ export function createSync({ store, backend, onStatus = () => {}, onRemote = () 
     applying = true;
     try {
       for (const r of remote) {
+        if (r.shareOnly) continue; // single-drill share copies live in the cloud only, never in the working set
         const i = store.data.practices.findIndex(p => p.id === r.id);
         if (i < 0) { store.data.practices.push(r); changed.push(r.id); }
         else if (newer(r, store.data.practices[i])) { store.data.practices[i] = r; changed.push(r.id); }

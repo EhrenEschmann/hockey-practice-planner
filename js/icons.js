@@ -33,6 +33,7 @@ const ICONS = {
   "check": "<path d=\"M20 6 9 17l-5-5\" />", // lucide: check
   "library": "<path d=\"m16 6 4 14\" /><path d=\"M12 6v14\" /><path d=\"M8 8v12\" /><path d=\"M4 4v16\" />", // lucide: library
   "calendar": "<path d=\"M8 2v3\" /><path d=\"M16 2v3\" /><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\" /><path d=\"M3 9h18\" />", // lucide: calendar
+  "send": "<path d=\"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z\" /><path d=\"m21.854 2.147-10.94 10.939\" />", // lucide: send
   "prev": "<path d=\"m15 18-6-6 6-6\" />", // lucide: chevron-left
   "next": "<path d=\"m9 18 6-6-6-6\" />", // lucide: chevron-right
   "rotate": "<path d=\"M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8\" /><path d=\"M21 3v5h-5\" />", // lucide: rotate-cw

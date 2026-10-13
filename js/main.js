@@ -3098,6 +3098,7 @@ function renderPlan() {
       <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (any length — it warns when the clip gets big; optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
       <button data-act="intro" class="${d.intro || d.narration ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="${d.intro || d.narration ? `Audio on this drill: ${[d.intro ? 'intro' : '', d.narration ? 'voice-over' : ''].filter(Boolean).join(' + ')}. ` : ''}Intro in your voice (played before the drill when ▶ is pressed) and a voice-over recorded over the animation — both recorded here">${icon('mic')}</button>
       <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
+      <button data-act="sharedrill" title="Send just this drill: copies a link anyone can open — the other coach signs in with Google or anonymously. Press again after edits to update the shared copy.">${icon('send')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
   list.innerHTML = p.drills.map((d, i) => {
     const row = editingDrill === d.id
@@ -3331,6 +3332,7 @@ $('#drill-list').addEventListener('click', e => {
     renderAll();
     return;
   }
+  if (act === 'sharedrill') { shareDrill(p.drills[i], btn); return; }
   if (act === 'notes') {
     const d = p.drills[i];
     notesOpenFor = notesOpenFor === d.id ? null : d.id;
@@ -4135,6 +4137,35 @@ function combinedOverview(drills, rink) {
     ],
   };
   return standaloneSVG(merged, rink, SVG_STYLE, { x: -3, y: -3, w: RINK.W + 6, h: RINK.H + 6 });
+}
+
+/**
+ * Send one drill on its own: publish a single-drill copy under its own id (marked shareOnly so it never
+ * shows up in anyone's practice lists) and copy the link. Anyone with the link can watch it — signed in
+ * with Google or as an anonymous guest. Pressing share again after edits republishes the snapshot.
+ */
+async function shareDrill(d, btn) {
+  const u = cloudSync?.user;
+  const p = store.practice;
+  const teamId = p.teamId || rosterTeamFor(store.roster, p)?.id;
+  if (!u || !cloudBackend?.savePractice) { alert('Sign in first — a shared drill is read from your cloud account.'); return; }
+  if (!teamId) { alert('Pick a team for this practice first (👥 Team) — the shared drill is filed under it.'); return; }
+  const dd = JSON.parse(JSON.stringify(d));
+  delete dd.hidden; delete dd.audience;             // sharing it on its own overrides its visibility in the plan
+  delete dd.upload; delete dd.intro; delete dd.narration; // chunked video / recorded clips live under the original practice and don't travel
+  const single = {
+    ...JSON.parse(JSON.stringify(p)),
+    id: `${p.id}d${d.id}`, teamId, drills: [dd],
+    stage: 'team', open: true, shareOnly: true, sharedWith: [], sharedTeam: [],
+    owner: u.uid, updatedAt: Date.now(),
+  };
+  delete single.deleted;
+  try {
+    await cloudBackend.savePractice(single);
+    const url = `${location.origin}${routePath({ view: 'team', teamId, pid: single.id })}`;
+    try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); return; }
+    if (btn) { btn.innerHTML = icon('check'); setTimeout(() => { btn.innerHTML = icon('send'); }, 1500); }
+  } catch (e) { alert(`Could not share the drill: ${e?.message || e}`); }
 }
 
 /** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
@@ -4973,7 +5004,7 @@ function watchTeamList(teamId) {
   teamLists.set(teamId, rec);
   rec.unsub = cloudBackend.subscribeTeamPractices(teamId, role === 'coach' ? ['coaches', 'team'] : ['team'], (heads, err) => {
     if (err) { rec.ready = true; rec.error = err; refreshScreen(); return; }
-    rec.items = (heads || []).map(h => ({ pid: h.id, role, stage: h.stage, team: h.team || '', teamId, date: h.date || '', time: h.time || '', drillCount: h.drillCount || 0, minutes: h.minutes || 0, drillNames: h.drillNames || [], ...(h.surface === 'dryland' ? { surface: 'dryland' } : {}), ...(h.kind === 'game' ? { kind: 'game', opponent: h.opponent || '' } : {}) }));
+    rec.items = (heads || []).filter(h => !h.shareOnly).map(h => ({ pid: h.id, role, stage: h.stage, team: h.team || '', teamId, date: h.date || '', time: h.time || '', drillCount: h.drillCount || 0, minutes: h.minutes || 0, drillNames: h.drillNames || [], ...(h.surface === 'dryland' ? { surface: 'dryland' } : {}), ...(h.kind === 'game' ? { kind: 'game', opponent: h.opponent || '' } : {}) }));
     rec.ready = true; rec.error = null;
     try { localStorage.setItem(teamListKey(teamId), JSON.stringify(rec.items)); } catch { /* fine */ } // the list from the last visit: the rink has no signal
     refreshScreen();

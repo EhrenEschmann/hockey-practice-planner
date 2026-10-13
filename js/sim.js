@@ -1,5 +1,6 @@
 // Drill simulation: skater timing along their paths, and puck timelines (carry / pass / shoot / pickup).
 import * as G from './geometry.js';
+import { RINK, nearestBoardPoint } from './rink.js';
 
 export const SEG = 8;                              // spline subdivisions per waypoint segment
 export const CONTACT_DIST = 3.6;                   // ft: two skater bodies in contact
@@ -62,6 +63,37 @@ export function jumpHeight(pose, pad, reach = 1.5) {
 
 /** A skater's full path: its own position followed by its waypoints. */
 export function skaterPoints(o) { return [{ x: o.x, y: o.y }, ...(o.path || [])]; }
+
+/**
+ * The true bounce point of a bank pass: slide along the boards (corner arcs included) until the law of
+ * reflection holds — the angle into the boards equals the angle out. `seed` picks which stretch of wall.
+ * Mirror method against the local board tangent, iterated because the tangent turns in the corners.
+ */
+export function reflectBankPoint(from, to, seed) {
+  const { W, H, R } = RINK;
+  const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  let B = nearestBoardPoint(seed);
+  if (G.dist(from, to) < 0.5) return { x: G.round1(B.x), y: G.round1(B.y) }; // passer ≈ receiver: any angle works
+  for (let i = 0; i < 8; i++) {
+    // board normal at B: from the nearest point of the inner (corner-centre) rectangle
+    const qx = cl(B.x, R, W - R), qy = cl(B.y, R, H - R);
+    let nx = B.x - qx, ny = B.y - qy;
+    const d = Math.hypot(nx, ny) || 1;
+    nx /= d; ny /= d;
+    // mirror the receiver across the tangent plane at B, then aim straight at the mirror image
+    const dn = (to.x - B.x) * nx + (to.y - B.y) * ny;
+    const mx = to.x - 2 * dn * nx, my = to.y - 2 * dn * ny;
+    const den = (mx - from.x) * nx + (my - from.y) * ny;
+    if (Math.abs(den) < 1e-6) break; // grazing geometry: keep the current point
+    const sPar = ((B.x - from.x) * nx + (B.y - from.y) * ny) / den;
+    if (!(sPar > 0)) break; // mirror line runs away from the boards: keep the current point
+    const next = nearestBoardPoint({ x: from.x + (mx - from.x) * sPar, y: from.y + (my - from.y) * sPar });
+    const moved = Math.hypot(next.x - B.x, next.y - B.y);
+    B = next;
+    if (moved < 0.05) break;
+  }
+  return { x: G.round1(B.x), y: G.round1(B.y) };
+}
 
 /**
  * World position of a carried puck for a skater pose {x, y, heading (rad), lat, lead?}. The stick (render.js) points
@@ -434,16 +466,22 @@ export function makeSim(drill) {
         rec.late = tr > want + 1e-6;
         pushCarried(tr);
         const from = puckAt(carrier, tr);
-        // Lead the receiver: iterate travel time against where they'll be on arrival.
+        // Lead the receiver: iterate travel time against where they'll be on arrival. A bank slides its
+        // bounce point along the boards each round so the angle in always equals the angle out.
+        let bankPt = bank;
         let travel = flight(from, puckAt(ev.to, tr));
-        for (let i = 0; i < 4; i++) travel = flight(from, puckAt(ev.to, tr + travel));
-        const to = puckAt(ev.to, tr + travel);
+        let to = puckAt(ev.to, tr + travel);
+        for (let i = 0; i < 6; i++) {
+          if (bank) bankPt = reflectBankPoint(from, to, bankPt);
+          travel = (bank ? G.dist(from, bankPt) + G.dist(bankPt, to) : G.dist(from, to)) / passSpeed;
+          to = puckAt(ev.to, tr + travel);
+        }
         if (bank) {
-          const tb = tr + G.dist(from, bank) / passSpeed;
-          segs.push({ t0: tr, t1: tb, kind: 'flying', from, to: bank }, { t0: tb, t1: tr + travel, kind: 'flying', from: bank, to });
+          const tb = tr + G.dist(from, bankPt) / passSpeed;
+          segs.push({ t0: tr, t1: tb, kind: 'flying', from, to: bankPt }, { t0: tb, t1: tr + travel, kind: 'flying', from: bankPt, to });
         } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
         t = tr + travel; carrier = ev.to;
-        Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank, by: byReceiver ? 'receiver' : 'carrier',
+        Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank: bankPt, by: byReceiver ? 'receiver' : 'carrier',
           mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr) });
       } else if (ev.type === 'shoot') {
         // A shot (or a coach's chip) can bank off the boards at ev.bank on its way — e.g. rimmed around the end boards.

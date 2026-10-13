@@ -3761,7 +3761,7 @@ propsBody.addEventListener('input', e => {
     }
     else if (k === 'type') { ev.type = el.value; if (ev.type === 'pickup' && !ev.skater) ev.skater = null; }
     else ev[k] = el.value || null;
-    if (el.tagName === 'SELECT') el.blur(); // let the following 'change' re-render the row
+    if (el.tagName === 'SELECT' || el.type === 'checkbox') el.blur(); // let the following 'change' re-render the row (e.g. bank → receiver list gains “themselves”)
     store.save(); renderCanvas(); renderAnimBar();
     return;
   }

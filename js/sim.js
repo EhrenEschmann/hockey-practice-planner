@@ -64,35 +64,14 @@ export function jumpHeight(pose, pad, reach = 1.5) {
 /** A skater's full path: its own position followed by its waypoints. */
 export function skaterPoints(o) { return [{ x: o.x, y: o.y }, ...(o.path || [])]; }
 
-/**
- * The true bounce point of a bank pass: slide along the boards (corner arcs included) until the law of
- * reflection holds — the angle into the boards equals the angle out. `seed` picks which stretch of wall.
- * Mirror method against the local board tangent, iterated because the tangent turns in the corners.
- */
-export function reflectBankPoint(from, to, seed) {
+/** Outward board normal at a point on the boards (corner arcs included). */
+export function boardNormal(B) {
   const { W, H, R } = RINK;
   const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  let B = nearestBoardPoint(seed);
-  if (G.dist(from, to) < 0.5) return { x: G.round1(B.x), y: G.round1(B.y) }; // passer ≈ receiver: any angle works
-  for (let i = 0; i < 8; i++) {
-    // board normal at B: from the nearest point of the inner (corner-centre) rectangle
-    const qx = cl(B.x, R, W - R), qy = cl(B.y, R, H - R);
-    let nx = B.x - qx, ny = B.y - qy;
-    const d = Math.hypot(nx, ny) || 1;
-    nx /= d; ny /= d;
-    // mirror the receiver across the tangent plane at B, then aim straight at the mirror image
-    const dn = (to.x - B.x) * nx + (to.y - B.y) * ny;
-    const mx = to.x - 2 * dn * nx, my = to.y - 2 * dn * ny;
-    const den = (mx - from.x) * nx + (my - from.y) * ny;
-    if (Math.abs(den) < 1e-6) break; // grazing geometry: keep the current point
-    const sPar = ((B.x - from.x) * nx + (B.y - from.y) * ny) / den;
-    if (!(sPar > 0)) break; // mirror line runs away from the boards: keep the current point
-    const next = nearestBoardPoint({ x: from.x + (mx - from.x) * sPar, y: from.y + (my - from.y) * sPar });
-    const moved = Math.hypot(next.x - B.x, next.y - B.y);
-    B = next;
-    if (moved < 0.05) break;
-  }
-  return { x: G.round1(B.x), y: G.round1(B.y) };
+  const qx = cl(B.x, R, W - R), qy = cl(B.y, R, H - R);
+  let nx = B.x - qx, ny = B.y - qy;
+  const d = Math.hypot(nx, ny) || 1;
+  return { x: nx / d, y: ny / d };
 }
 
 /**
@@ -466,22 +445,50 @@ export function makeSim(drill) {
         rec.late = tr > want + 1e-6;
         pushCarried(tr);
         const from = puckAt(carrier, tr);
-        // Lead the receiver: iterate travel time against where they'll be on arrival. A bank slides its
-        // bounce point along the boards each round so the angle in always equals the angle out.
-        let bankPt = bank;
-        let travel = flight(from, puckAt(ev.to, tr));
-        let to = puckAt(ev.to, tr + travel);
-        for (let i = 0; i < 6; i++) {
-          if (bank) bankPt = reflectBankPoint(from, to, bankPt);
-          travel = (bank ? G.dist(from, bankPt) + G.dist(bankPt, to) : G.dist(from, to)) / passSpeed;
-          to = puckAt(ev.to, tr + travel);
-        }
-        if (bank) {
-          const tb = tr + G.dist(from, bankPt) / passSpeed;
+        let to, travel, bankPt = null, impliedSpeed = null, offBy = 0;
+        if (bank && G.dist(from, nearestBoardPoint(bank)) > 0.5) {
+          // The coach owns both points: the release and the bounce. The outgoing leg is the exact mirror of
+          // the incoming leg off the boards, and the puck's SPEED adapts so it meets the receiver where
+          // their path crosses the reflected ray.
+          bankPt = (q => ({ x: G.round1(q.x), y: G.round1(q.y) }))(nearestBoardPoint(bank));
+          const n = boardNormal(bankPt);
+          const inLen = G.dist(from, bankPt);
+          const ux = (bankPt.x - from.x) / inLen, uy = (bankPt.y - from.y) / inLen;
+          const dn = ux * n.x + uy * n.y;
+          const vx = ux - 2 * dn * n.x, vy = uy - 2 * dn * n.y; // reflected direction
+          // where (and when) the receiver meets the outgoing ray: their closest approach to it
+          const moving = skaterEnd(ev.to) > tr + 0.05;
+          let best = null;
+          for (let ta = tr + 0.05; ta <= Math.max(skaterEnd(ev.to), tr) + 1.5 + 1e-9; ta += 0.05) {
+            const pr = puckAt(ev.to, ta);
+            const sAlong = (pr.x - bankPt.x) * vx + (pr.y - bankPt.y) * vy;
+            if (sAlong < 1) continue; // behind the bounce
+            const q = { x: bankPt.x + vx * sAlong, y: bankPt.y + vy * sAlong };
+            const dd = G.dist(pr, q);
+            if (!best || dd < best.dd) best = { ta, q, dd };
+          }
+          if (!best) { // the receiver never gets in front of the bounce: send a nominal-length pass out anyway
+            const q = { x: bankPt.x + vx * 20, y: bankPt.y + vy * 20 };
+            best = { ta: tr + (inLen + 20) / passSpeed, q, dd: G.dist(puckAt(ev.to, tr), q) };
+          }
+          to = { x: G.round1(best.q.x), y: G.round1(best.q.y) };
+          offBy = best.dd;
+          const total = inLen + G.dist(bankPt, to);
+          travel = moving
+            ? G.clamp(best.ta - tr, total / 160, total / 8) // meet them there: speed adapts (kept plausible, 8–160 ft/s)
+            : total / passSpeed;                            // nobody to meet: the configured pass speed
+          impliedSpeed = total / travel;
+          const tb = tr + inLen / impliedSpeed;
           segs.push({ t0: tr, t1: tb, kind: 'flying', from, to: bankPt }, { t0: tb, t1: tr + travel, kind: 'flying', from: bankPt, to });
-        } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
+        } else {
+          // Straight pass: lead the receiver at the configured speed.
+          travel = flight(from, puckAt(ev.to, tr));
+          for (let i = 0; i < 4; i++) travel = flight(from, puckAt(ev.to, tr + travel));
+          to = puckAt(ev.to, tr + travel);
+          segs.push({ t0: tr, t1: tr + travel, kind: 'flying', from, to });
+        }
         t = tr + travel; carrier = ev.to;
-        Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank: bankPt, by: byReceiver ? 'receiver' : 'carrier',
+        Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank: bankPt, impliedSpeed, offBy, by: byReceiver ? 'receiver' : 'carrier',
           mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr) });
       } else if (ev.type === 'shoot') {
         // A shot (or a coach's chip) can bank off the boards at ev.bank on its way — e.g. rimmed around the end boards.

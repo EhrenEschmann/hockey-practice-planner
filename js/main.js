@@ -3683,7 +3683,8 @@ function puckProps(o) {
       // Off the boards: the receiver may then be the passer themselves.
       const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
         + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button><span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="bankx" value="${G.round1(ev.bank.x)}" title="bounce x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="banky" value="${G.round1(ev.bank.y)}" title="bounce y (ft)"></span>` : '');
-      const arrivesAt = rec?.ok && rec.to ? `<span class="muted" title="Where the pass arrives — drag the → marker on the ice along the receiver's path to change it">arrives at (${G.round1(rec.to.x)}, ${G.round1(rec.to.y)})</span>` : '';
+      const arrivesAt = rec?.ok && rec.to ? `<span class="muted" title="Where the pass arrives — drag the → marker on the ice along the receiver's path to change it">arrives at (${G.round1(rec.to.x)}, ${G.round1(rec.to.y)})${rec.impliedSpeed ? ` · puck ${Math.round(rec.impliedSpeed)} ft/s` : ''}</span>`
+        + (rec.offBy > 2.5 ? `<span class="warn">⚠ the reflected pass misses ${playerName(rcv)} by ${Math.round(rec.offBy)} ft — move the bounce point or the release</span>` : '') : '';
       body = `<span>${who} passes to</span><select data-ev="${i}" data-evprop="to">${skaterOptions(ev.to, '— receiver —', ev.bank ? null : rec?.carrier, rec?.carrier)}</select>${bankUI}${bySel}${where('')}${arrive}${arrivesAt}${mark}`;
     }
     else if (ev.type === 'shoot') {

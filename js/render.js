@@ -122,6 +122,16 @@ export function renderObjects(drill, selId, opts = {}) {
     .sort((a, b) => (Z_ORDER.indexOf(zType(a.o)) - Z_ORDER.indexOf(zType(b.o))) || (a.i - b.i))
     .map(x => x.o);
   const o2 = { ...opts, sim: opts.sim || makeSim(drill), objs: drill.objects };
+  // Inside a focus area the rink's own markings step back: an ice-coloured veil under the objects
+  // (none on dryland — a gym floor has no markings to fade).
+  const veils = o2.dryland ? '' : drill.objects
+    .filter(o => o.type === 'focus' && +(o.fade ?? 0.5) > 0)
+    .map(o => {
+      const d = o.points?.length >= 2
+        ? 'M' + o.points.map(q => `${n(q.x)},${n(q.y)}`).join(' L') + ' Z'
+        : `M${n(o.x)},${n(o.y)} h${n(o.w)} v${n(o.h)} h${n(-o.w)} Z`;
+      return `<path class="focus-veil" d="${d}" fill-opacity="${Math.min(1, +(o.fade ?? 0.5))}" pointer-events="none"/>`;
+    }).join('');
   // Players' paths all draw in one underlay beneath every player body, so a busy drill's path lines
   // never cover another skater. The underlay groups repeat the player's data-id so clicking a path
   // still selects its player.
@@ -132,7 +142,7 @@ export function renderObjects(drill, selId, opts = {}) {
     .map(o => { const p = playerPath(o, o2, o.id === selId); return p ? `<g class="obj ${o.type} path-under" data-id="${o.id}">${p}</g>` : ''; }).join('');
   // Raised pads are drawn in two parts: tires in normal order, and the slab on top of everything so
   // skaters visibly slide underneath it.
-  return below.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
+  return veils + below.map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
     + pathLayer
     + above.filter(o => o.type !== 'focus').map(o => (draw[o.type] ? draw[o.type](o, o.id === selId, o2) : '')).join('')
     + objs.filter(o => o.type === 'raisedpad').map(raisedPadTop).join('')
@@ -447,6 +457,7 @@ function raisedPadTop(o) {
 
 /** Standalone SVG document string for export/print. `opts` passes through to renderObjects (e.g. { showPaths: false }). */
 export function standaloneSVG(drill, rinkSVG, style, view, opts) {
+  opts = { dryland: /class="floor"/.test(rinkSVG || ''), ...opts };
   const v = view || drill.view;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(v.x)} ${n(v.y)} ${n(v.w)} ${n(v.h)}" width="${n(v.w * 6)}" height="${n(v.h * 6)}">
   <style>${style}</style><rect x="${n(v.x)}" y="${n(v.y)}" width="${n(v.w)}" height="${n(v.h)}" fill="#fff"/>

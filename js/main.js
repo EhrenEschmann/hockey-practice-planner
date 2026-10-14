@@ -126,7 +126,7 @@ function renderCanvas() {
   primeNarration(ownerFor(), store.practice.id, d);
   fxLayer.innerHTML = '';
   const selObj = getObj(sel);
-  objLayer.innerHTML = renderObjects(d, sel, { tool, showPaths: drillPaths(), sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
+  objLayer.innerHTML = renderObjects(d, sel, { tool, dryland: isDryland(store.practice), showPaths: drillPaths(), sim, numberWaypoints: selObj?.type === 'puck' || !!selObj?.trigger || (isPlayer(selObj) && !!selObj.path?.length) });
   drawSelection();
   if (anim.t > 0) applyAnimation(anim.t);
   $$('#viewbar [data-view]').forEach(b => b.classList.toggle('active', sameView(VIEWS[b.dataset.view], d.view)));
@@ -658,7 +658,7 @@ function onPointerDown(e) {
       }
       const o = tool === 'zone'
         ? { id: uid(), type: 'zone', x: p.x, y: p.y, w: 0, h: 0, label: `Station ${drill().objects.filter(x => x.type === 'zone').length + 1}`, color: ZONE_COLORS[lastZoneColor++ % ZONE_COLORS.length] }
-        : tool === 'focusarea' ? { id: uid(), type: 'focus', x: p.x, y: p.y, w: 0, h: 0, dim: '0.55' }
+        : tool === 'focusarea' ? { id: uid(), type: 'focus', x: p.x, y: p.y, w: 0, h: 0, dim: '0.55', fade: '0.5' }
         : { id: uid(), type: 'obstacle', x: p.x, y: p.y, w: 0, h: 0, rot: 0, label: '' };
       store.pushUndo();
       drill().objects.push(o);
@@ -3366,7 +3366,7 @@ function libraryCards(filter) {
     if (q && !`${d.name} ${p.team || ''} ${p.date || ''} ${usDate(p.date)}`.toLowerCase().includes(q)) continue;
     const v = d.view || VIEWS.full;
     cards.push(`<div class="lib-card">
-      <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG(surfaceOf(p))}${renderObjects(d, null)}</svg>
+      <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG(surfaceOf(p))}${renderObjects(d, null, { dryland: isDryland(p) })}</svg>
       <div class="lib-name" title="${escHtml(d.name)}">${escHtml(d.name)}</div>
       <div class="lib-meta" title="${escHtml(practiceLabel(p))}">${escHtml(practiceLabel(p))} · ${+d.duration || 0} min</div>
       <button data-lib-add="${p.id}:${d.id}">+ Add to this practice</button>
@@ -3427,7 +3427,8 @@ const PROPS = {
   obstacle: [['label', 'text', 'Label'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   raisedpad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
   jumppad: [['label', 'text', 'Label'], ['w', 'number', 'Length (ft)'], ['h', 'number', 'Depth (ft)'], ['rot', 'number', 'Rotation (°)']],
-  focus: [['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)'], ['dim', 'select:0.35=Light,0.55=Medium,0.8=Dark', 'Gray-out outside the box']],
+  focus: [['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)'], ['dim', 'select:0.35=Light,0.55=Medium,0.8=Dark', 'Gray-out outside the box'],
+    ['fade', 'select:0=Full,0.5=Lightened,0.75=Faint,1=Hidden', 'Ice markings inside the box']],
   zone: [['label', 'text', 'Title'], ['color', 'zoneswatch', 'Color'], ['w', 'number', 'Width (ft)'], ['h', 'number', 'Height (ft)'],
     ['constraints', 'textarea', 'Constraints — one per line. Drawn in the zone, listed under the drill, and read aloud in the viewer']],
   barricade: [],

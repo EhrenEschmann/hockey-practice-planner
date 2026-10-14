@@ -116,6 +116,7 @@ export const SVG_STYLE = `
   .pass-head{fill-opacity:.7}
   .shot-head{fill-opacity:.8}
   .barricade .stripe{fill:none;stroke:#f5a623;stroke-width:.7;stroke-dasharray:2 2;stroke-linecap:butt}
+  .focus-veil{fill:#f7fbff}
   .focus .core{fill:none;stroke:#222;stroke-width:.9;stroke-linejoin:round} /* a thin barricade around the focus area */
   .focus .stripe{fill:none;stroke:#f5a623;stroke-width:.4;stroke-dasharray:1.4 1.4;stroke-linecap:butt}
 `;

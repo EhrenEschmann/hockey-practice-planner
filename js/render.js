@@ -344,7 +344,7 @@ const draw = {
       // receiver ("arriving as they reach…"). A receiver-timed pass already shows its R mark there instead.
       const ev = o.events?.[i];
       const rcvMoves = !!(opts.objs || []).find(x => x.id === ev?.to)?.path?.length;
-      const arrive = r.by !== 'receiver' && rcvMoves
+      const arrive = r.by !== 'receiver' && rcvMoves && !r.bank // a bounce's landing is set by the release and bounce points — not a handle
         ? `<g class="arrive-mark${sel ? ' draggable' : ''}" data-arrive="${i}" transform="translate(${n(r.to.x)} ${n(r.to.y)})"><circle r="1.25"/><text y=".55" font-size="1.4" text-anchor="middle">→</text></g>` : ''
       // a receiver-timed pass keeps a P at the release too: drag it to pin the release instead (the R re-derives)
       + (r.by === 'receiver' && r.releaseMark
@@ -354,9 +354,13 @@ const draw = {
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>${arrive}`;
     }).join('');
     const letter = { pass: 'P', shoot: 'S', pickup: 'U' };
-    const marks = opts.showPaths === false ? '' : ps.info.map((r, i) => r.ok && r.mark
-      ? `<g class="ev-mark ${r.type}${r.by === 'receiver' ? ' receive' : ''}${sel ? ' draggable' : ''}" data-evmark="${i}" transform="translate(${n(r.mark.x)} ${n(r.mark.y)})"><circle r="1.25"/><text y=".55" font-size="1.5" text-anchor="middle">${r.by === 'receiver' ? 'R' : letter[r.type] || '?'}</text></g>`
-      : '').join('');
+    const marks = opts.showPaths === false ? '' : ps.info.map((r, i) => {
+      if (!(r.ok && r.mark)) return '';
+      // The R of a banked pass is derived from where the reflected puck crosses the receiver's path:
+      // it is shown but not draggable (move the P or the B instead).
+      const lock = r.type === 'pass' && r.by === 'receiver' && !!r.bank;
+      return `<g class="ev-mark ${r.type}${r.by === 'receiver' ? ' receive' : ''}${sel && !lock ? ' draggable' : ''}"${lock ? '' : ` data-evmark="${i}"`} transform="translate(${n(r.mark.x)} ${n(r.mark.y)})"><circle r="1.25"/><text y=".55" font-size="1.5" text-anchor="middle">${r.by === 'receiver' ? 'R' : letter[r.type] || '?'}</text>${lock ? '<title>Where the bounce arrives — set by the release (P) and bounce (B) points</title>' : ''}</g>`;
+    }).join('');
     return `<g class="obj puck" data-id="${o.id}"><g class="puck-lines">${lines}</g>${marks}
       <g class="puck-disc" data-puck="${o.id}" transform="translate(${n(pos.x)} ${n(pos.y)})"><circle r="1.6" fill="transparent"/><circle r=".65" class="puck"/>${sel ? '<circle r="1.3" class="puck-ring"/>' : ''}</g></g>`;
   },

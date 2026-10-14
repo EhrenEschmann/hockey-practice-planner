@@ -94,6 +94,7 @@ export const SVG_STYLE = `
   .ev-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .ev-mark.draggable{cursor:move}
   .ev-mark.draggable circle{stroke:#3b82f6;stroke-width:.4}
+  .ev-mark.release circle{stroke-dasharray:.6 .45} /* the derived end of a receiver-timed pass: it follows the R */
   .arrive-mark circle{fill:#fff;stroke:#1f9d55;stroke-width:.3}
   .arrive-mark text{fill:#1f9d55;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .arrive-mark.draggable{cursor:move}

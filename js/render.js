@@ -345,7 +345,10 @@ const draw = {
       const ev = o.events?.[i];
       const rcvMoves = !!(opts.objs || []).find(x => x.id === ev?.to)?.path?.length;
       const arrive = r.by !== 'receiver' && rcvMoves
-        ? `<g class="arrive-mark${sel ? ' draggable' : ''}" data-arrive="${i}" transform="translate(${n(r.to.x)} ${n(r.to.y)})"><circle r="1.25"/><text y=".55" font-size="1.4" text-anchor="middle">→</text></g>` : '';
+        ? `<g class="arrive-mark${sel ? ' draggable' : ''}" data-arrive="${i}" transform="translate(${n(r.to.x)} ${n(r.to.y)})"><circle r="1.25"/><text y=".55" font-size="1.4" text-anchor="middle">→</text></g>` : ''
+      // a receiver-timed pass keeps a P at the release too: drag it to pin the release instead (the R re-derives)
+      + (r.by === 'receiver' && r.releaseMark
+        ? `<g class="ev-mark pass release${sel ? ' draggable' : ''}" data-release="${i}" transform="translate(${n(r.releaseMark.x)} ${n(r.releaseMark.y)})"><circle r="1.25"/><text y=".55" font-size="1.5" text-anchor="middle">P</text></g>` : '');
       if (!r.bank) return `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.2, 'pass-head')}${arrive}`;
       return `<polyline class="pass-line" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 1.2, 'pass-head')}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>${arrive}`;

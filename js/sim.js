@@ -489,7 +489,8 @@ export function makeSim(drill) {
         }
         t = tr + travel; carrier = ev.to;
         Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank: bankPt, impliedSpeed, offBy, by: byReceiver ? 'receiver' : 'carrier',
-          mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr) });
+          mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr),
+          releaseMark: byReceiver ? markAt(rec.carrier, tr) : null }); // the derived P beside a pinned R
       } else if (ev.type === 'shoot') {
         // A shot (or a coach's chip) can bank off the boards at ev.bank on its way — e.g. rimmed around the end boards.
         const bank = ev.bank && Number.isFinite(+ev.bank.x) && Number.isFinite(+ev.bank.y) ? { x: +ev.bank.x, y: +ev.bank.y } : null;

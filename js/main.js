@@ -550,6 +550,8 @@ function onPointerDown(e) {
       const bankEl = e.target.closest('[data-bank]');
       const arriveEl = e.target.closest('[data-arrive]');
       const arriveTo = arriveEl && id ? getObj(id)?.events?.[+arriveEl.dataset.arrive]?.to : null;
+      const releaseEl = e.target.closest('[data-release]');
+      const releaseWho = releaseEl && id ? sim.puck(id).info[+releaseEl.dataset.release]?.carrier : null;
       const rotEl = e.target.closest('[data-rot]');
       if (rotEl && id && getObj(id)?.type === 'focus') {
         const o = getObj(id);
@@ -577,6 +579,10 @@ function onPointerDown(e) {
       } else if (arriveTo && getObj(arriveTo)?.path?.length) {
         // the arrival end of a pass: drag it along the receiver's path
         drag = { type: 'arrive', id, ev: +arriveEl.dataset.arrive, who: arriveTo, pushed: false };
+        select(id);
+      } else if (releaseWho && getObj(releaseWho)?.path?.length) {
+        // the release end of a receiver-timed pass: dragging it pins the release (and the R re-derives)
+        drag = { type: 'release', id, ev: +releaseEl.dataset.release, who: releaseWho, pushed: false };
         select(id);
       } else if (markWho) {
         drag = { type: 'evmark', id, ev: +markEl.dataset.evmark, who: markWho, pushed: false };
@@ -780,6 +786,14 @@ function onPointerMove(e) {
       renderCanvas();
       break;
     }
+    case 'release': { // the pass now leaves where the passer's path passes the pointer (carrier-timed; the R re-derives)
+      const ev = getObj(drag.id)?.events?.[drag.ev]; if (!ev) return;
+      if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
+      delete ev.by;
+      ev.dist = pathDistanceAt(drag.who, raw);
+      renderCanvas();
+      break;
+    }
     case 'resize': {
       const o = getObj(drag.id); if (!o) return;
       if (!drag.pushed) { store.pushUndo(); drag.pushed = true; }
@@ -842,7 +856,7 @@ function onPointerUp(e) {
       syncFocusBox(o);
       store.save(); renderAll(); break;
     }
-    case 'evmark': case 'arrive': {
+    case 'evmark': case 'arrive': case 'release': {
       // Dropped before the puck can be there? The sim already fires the event where the player has it;
       // store that spot so the panel's feet-on-path matches the marker instead of showing an impossible value.
       const pk = getObj(dg.id); const ev = pk?.events?.[dg.ev];

@@ -46,10 +46,9 @@ export const SVG_STYLE = `
   .hash{stroke:#d7263d;stroke-width:.25}
   .crease{fill:#9ec9ee;fill-opacity:.75;stroke:#d7263d;stroke-width:.3}
   .trap{stroke:#d7263d;stroke-width:.3}
-  .path-line{fill:none;stroke-width:.4;stroke-opacity:.7;stroke-linecap:round;stroke-linejoin:round} /* skating routes stay light: the skaters, pucks and stations are what the eye should land on */
-  .path-head{fill-opacity:.7}
+  .path-line{fill:none;stroke-width:.25;stroke-opacity:.55;stroke-linecap:round;stroke-linejoin:round} /* skating routes stay light: the skaters, pucks and stations are what the eye should land on */
   .path-cross{stroke-width:.3} /* a crossover stretch: thin line with cross ticks */
-  .path-ticks{fill:none;stroke-width:.3;stroke-opacity:.7;stroke-linecap:round}
+  .path-ticks{fill:none;stroke-width:.2;stroke-opacity:.55;stroke-linecap:round}
   .path-hit{fill:none;stroke:#000;stroke-width:2.6;stroke-opacity:0;pointer-events:stroke}
   .arrow-line{fill:none;stroke-width:.6;stroke-linecap:round;stroke-linejoin:round}
   .skater-body .body{stroke:#fff;stroke-width:.3}
@@ -81,12 +80,12 @@ export const SVG_STYLE = `
   .selection{fill:none;stroke:#3b82f6;stroke-width:.4;stroke-dasharray:1 .8;pointer-events:none}
   .zone text,.obstacle text,.txt{font-family:system-ui,sans-serif}
   .barricade .core{fill:none;stroke:#222;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-  .pass-line{fill:none;stroke:#333;stroke-width:.35;stroke-dasharray:1.2 .9}
+  .pass-line{fill:none;stroke:#333;stroke-width:.22;stroke-opacity:.7;stroke-dasharray:1.2 .9}
   .bank-mark circle{fill:#fff;stroke:#f07f13;stroke-width:.35}
   .bank-mark text{fill:#333;font-family:system-ui,sans-serif;font-weight:700;pointer-events:none}
   .bank-mark.draggable{cursor:move}
   .bank-mark.draggable circle{stroke:#3b82f6;stroke-width:.45}
-  .shot-line{fill:none;stroke:#8a8f99;stroke-width:.35;stroke-dasharray:2.4 1.2} /* lighter and long-dashed, so a shot reads apart from the short-dashed pass */
+  .shot-line{fill:none;stroke:#8a8f99;stroke-width:.22;stroke-opacity:.8;stroke-dasharray:2.4 1.2} /* lighter and long-dashed, so a shot reads apart from the short-dashed pass */
   .shot-overlay{opacity:.5;pointer-events:none}
   .puck-ring{fill:none;stroke:#3b82f6;stroke-width:.3}
   .ev-mark circle{fill:#fff;stroke:#333;stroke-width:.3}
@@ -113,6 +112,9 @@ export const SVG_STYLE = `
   .skater-body.hit .body{stroke:#dc2626;stroke-width:.5}
   .fx-burst polygon{fill:#fbbf24;stroke:#b45309;stroke-width:.2}
   .fx-burst circle{fill:none;stroke:#f59e0b;stroke-width:.4}
+  .path-head{fill-opacity:.6}
+  .pass-head{fill-opacity:.7}
+  .shot-head{fill-opacity:.8}
   .barricade .stripe{fill:none;stroke:#f5a623;stroke-width:.7;stroke-dasharray:2 2;stroke-linecap:butt}
   .focus .core{fill:none;stroke:#222;stroke-width:.9;stroke-linejoin:round} /* a thin barricade around the focus area */
   .focus .stripe{fill:none;stroke:#f5a623;stroke-width:.4;stroke-dasharray:1.4 1.4;stroke-linecap:butt}

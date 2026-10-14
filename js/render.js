@@ -86,7 +86,7 @@ function playerPath(o, opts, selected = false) {
   const pivots = pts.filter((p, i) => i > 0 && p.pivot);
   const crossAt = i => { const c = i === 0 ? o.cross : pts[i].cross; return c === 'L' || c === 'R' ? c : null; };
   const anyCross = pts.some((_, i) => i + 1 < pts.length && crossAt(i));
-  if (!pivots.length && !anyCross) return `${hit}<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward ? 'back' : 'fwd')}/>${arrowHead(dense, color, 1.8, 'path-head')}${stopMarks}`;
+  if (!pivots.length && !anyCross) return `${hit}<polyline class="path-line" points="${ptsStr(dense)}" stroke="${color}" ${dash(o.backward ? 'back' : 'fwd')}/>${arrowHead(dense, color, 1.3, 'path-head')}${stopMarks}`;
   // One style per stretch between waypoints: forward / backward (alternating at pivots) / crossovers; alike neighbours merge so dashes run on.
   const idxOf = p => { let bi = 0, bd = Infinity; for (let i = 0; i < dense.length; i++) { const d = (dense[i].x - p.x) ** 2 + (dense[i].y - p.y) ** 2; if (d < bd) { bd = d; bi = i; } } return bi; };
   const cuts = pts.map(idxOf); cuts[0] = 0; cuts[cuts.length - 1] = dense.length - 1;
@@ -113,7 +113,7 @@ function playerPath(o, opts, selected = false) {
       : `<polyline class="path-line" points="${ptsStr(slice)}" stroke="${color}" ${dash(st.style)}/>`; }).join('');
   const marks = pivots.map(p => `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".45" font-size="1.2" text-anchor="middle" fill="${color}">${p.pivot === 'L' ? '⟲' : p.pivot === 'R' ? '⟳' : '⇄'}</text></g>`).join('')
     + pts.map((p, i) => i > 0 && i + 1 < pts.length && crossAt(i) ? `<g class="pivot-mark" transform="translate(${n(p.x)} ${n(p.y)})"><circle r=".95" fill="#fff" stroke="${color}" stroke-width=".3"/><text y=".4" font-size="1" text-anchor="middle" fill="${color}">×${crossAt(i)}</text></g>` : '').join('');
-  return hit + segs + arrowHead(dense, color, 1.8, 'path-head') + marks + stopMarks;
+  return hit + segs + arrowHead(dense, color, 1.3, 'path-head') + marks + stopMarks;
 }
 
 export function renderObjects(drill, selId, opts = {}) {
@@ -155,7 +155,7 @@ function shotOverlay(opts) {
       if (r.type !== 'shoot' || !r.ok || !r.from) continue;
       const pts = r.bank ? [r.from, r.bank, r.to] : [r.from, r.to];
       if (!goalies.some(g => closestOnPolyline(pts, g).dist < 2.8)) continue;
-      lines.push(`<polyline class="shot-line" fill="none" points="${ptsStr(pts)}"/>${arrowHead(pts.slice(-2), '#8a8f99', 2)}`);
+      lines.push(`<polyline class="shot-line" fill="none" points="${ptsStr(pts)}"/>${arrowHead(pts.slice(-2), '#8a8f99', 1.5, 'shot-head')}`);
     }
   }
   return lines.length ? `<g class="shot-overlay">${lines.join('')}</g>` : '';
@@ -326,8 +326,8 @@ const draw = {
     const lines = opts.showPaths === false ? '' : ps.info.map((r, i) => {
       if (!r.ok || !r.from) return '';
       if (r.type !== 'pass') {
-        if (!r.bank) return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#8a8f99', 2)}`;
-        return `<polyline class="shot-line" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#8a8f99', 2)}
+        if (!r.bank) return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#8a8f99', 1.5, 'shot-head')}`;
+        return `<polyline class="shot-line" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#8a8f99', 1.5, 'shot-head')}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;
       }
       // The arrival end of a pass is a handle too: dragging it along the receiver's path times the pass by the
@@ -336,8 +336,8 @@ const draw = {
       const rcvMoves = !!(opts.objs || []).find(x => x.id === ev?.to)?.path?.length;
       const arrive = r.by !== 'receiver' && rcvMoves
         ? `<g class="arrive-mark${sel ? ' draggable' : ''}" data-arrive="${i}" transform="translate(${n(r.to.x)} ${n(r.to.y)})"><circle r="1.25"/><text y=".55" font-size="1.4" text-anchor="middle">→</text></g>` : '';
-      if (!r.bank) return `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.6)}${arrive}`;
-      return `<polyline class="pass-line" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 1.6)}
+      if (!r.bank) return `<line class="pass-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#333', 1.2, 'pass-head')}${arrive}`;
+      return `<polyline class="pass-line" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 1.2, 'pass-head')}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>${arrive}`;
     }).join('');
     const letter = { pass: 'P', shoot: 'S', pickup: 'U' };

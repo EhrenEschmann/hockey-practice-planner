@@ -130,6 +130,116 @@ export function closestOnPolyline(pts, p) {
   return { along, dist: best };
 }
 
+/** Signed curvature of the circumcircle through three points (0 for collinear). */
+function circumCurvature(a, b, c) {
+  const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const d = dist(a, b) * dist(b, c) * dist(c, a);
+  return d < 1e-9 ? 0 : (2 * cross) / d;
+}
+
+/** Least-squares (Kåsa) circle fit → { x, y, r }, or null for degenerate input. */
+function fitCircle(pts) {
+  let sx = 0, sy = 0;
+  for (const p of pts) { sx += p.x; sy += p.y; }
+  const mx = sx / pts.length, my = sy / pts.length;
+  let suu = 0, suv = 0, svv = 0, suuu = 0, svvv = 0, suvv = 0, svuu = 0;
+  for (const p of pts) {
+    const u = p.x - mx, v = p.y - my;
+    suu += u * u; suv += u * v; svv += v * v;
+    suuu += u * u * u; svvv += v * v * v; suvv += u * v * v; svuu += v * u * u;
+  }
+  const det = suu * svv - suv * suv;
+  if (Math.abs(det) < 1e-9) return null;
+  const uc = (svv * (suuu + suvv) - suv * (svvv + svuu)) / (2 * det);
+  const vc = (suu * (svvv + svuu) - suv * (suuu + suvv)) / (2 * det);
+  return { x: mx + uc, y: my + vc, r: Math.sqrt(uc * uc + vc * vc + (suu + svv) / pts.length) };
+}
+
+/**
+ * Tidy a drawn path into the shape it was aiming for: straight-ish runs become straight lines, and
+ * curved runs (a loop around a tire, a turn around a cone) become true circular arcs with evenly
+ * spaced waypoints. Returns a fresh [start, ...waypoints] list; the start point is kept exactly.
+ */
+export function beautifyPath(pts) {
+  const tidy = q => ({ x: round1(q.x), y: round1(q.y) });
+  if (pts.length < 3) return pts.map(tidy);
+  const dense = smoothPath(pts, 8);
+  const cum = cumulative(dense);
+  const len = cum[cum.length - 1];
+  if (len < 4) return pts.map(tidy);
+  // 1. even samples along the drawn line
+  const step = clamp(len / 120, 1, 2.5);
+  const P = [];
+  for (let d = 0; d <= len + 1e-9; d += step) P.push(pointAt(dense, cum, Math.min(d, len)));
+  // 2. curvature at each sample, over a ±3 ft window
+  const w = Math.max(2, Math.round(3 / step));
+  const curv = P.map((_, i) => (i < w || i >= P.length - w) ? null : circumCurvature(P[i - w], P[i], P[i + w]));
+  for (let i = 0; i < w; i++) curv[i] = curv[w];
+  for (let i = P.length - w; i < P.length; i++) curv[i] = curv[P.length - w - 1];
+  // 3. classify (curved = turn radius under ~45 ft), then a small majority filter against jitter
+  let cls = curv.map(k => Math.abs(k) > 1 / 45);
+  cls = cls.map((c, i) => { const a = cls.slice(Math.max(0, i - 2), i + 3); return a.filter(Boolean).length > a.length / 2; });
+  // 4. runs of one kind; short blips are absorbed by their neighbour
+  const runs = [];
+  for (let i = 0; i < P.length; i++) {
+    const r = runs[runs.length - 1];
+    if (r && r.curved === cls[i]) r.end = i;
+    else runs.push({ curved: cls[i], start: i, end: i });
+  }
+  const minRun = Math.max(3, Math.round(5 / step));
+  for (let i = runs.length - 1; i >= 0 && runs.length > 1; i--) {
+    if (runs[i].end - runs[i].start + 1 >= minRun) continue;
+    const into = runs[i - 1] || runs[i + 1];
+    into.start = Math.min(into.start, runs[i].start);
+    into.end = Math.max(into.end, runs[i].end);
+    runs.splice(i, 1);
+    if (runs[i] && runs[i - 1] && runs[i - 1].curved === runs[i].curved) { runs[i - 1].end = runs[i].end; runs.splice(i, 1); }
+  }
+  // 5. rebuild: a straight run is just its endpoint; a curved run is an even arc on its fitted circle.
+  // A "curved" run that hugs its own chord is really a wobbly straight — treat it as one.
+  const chordDev = seg => {
+    const a0 = seg[0], b0 = seg[seg.length - 1], L = dist(a0, b0) || 1e-9;
+    return Math.max(...seg.map(q => Math.abs((b0.x - a0.x) * (a0.y - q.y) - (a0.x - q.x) * (b0.y - a0.y)) / L));
+  };
+  const out = [P[0]];
+  const push = q => { if (dist(out[out.length - 1], q) > 1.2) out.push(q); };
+  for (const r of runs) {
+    const seg = P.slice(r.start, r.end + 1);
+    const endPt = seg[seg.length - 1];
+    const straightish = !r.curved || seg.length < 4 || chordDev(seg) < Math.max(1.4, dist(seg[0], endPt) * 0.04);
+    const c = straightish ? null : fitCircle(seg);
+    if (!c || c.r < 1.5 || c.r > 80) { push(endPt); continue; }
+    // unwrap the samples' angles so a loop past 360° survives
+    const a = Math.atan2(seg[0].y - c.y, seg[0].x - c.x);
+    let sweep = 0;
+    for (let i = 1; i < seg.length; i++) {
+      const ai = Math.atan2(seg[i].y - c.y, seg[i].x - c.x);
+      let da = ai - (a + sweep);
+      while (da > Math.PI) da -= 2 * Math.PI;
+      while (da < -Math.PI) da += 2 * Math.PI;
+      sweep += da;
+    }
+    const nSeg = Math.max(2, Math.ceil(Math.abs(sweep) / (Math.PI / 7)));
+    for (let j = 1; j <= nSeg; j++) {
+      const t = a + sweep * j / nSeg;
+      push({ x: c.x + c.r * Math.cos(t), y: c.y + c.r * Math.sin(t), arc: true });
+    }
+  }
+  const last = P[P.length - 1];
+  if (dist(out[out.length - 1], last) > 0.6) out.push(last); else out[out.length - 1] = { ...last, arc: out[out.length - 1].arc };
+  // 6. straight stretches collapse to clean lines (arc points are anchors and stay put)
+  const res = [];
+  let i0 = 0;
+  for (let i = 1; i <= out.length; i++) {
+    if (i < out.length && !out[i].arc) continue;
+    const sub = out.slice(i0, Math.min(i + 1, out.length));
+    const simp = rdp(sub, 1.2);
+    res.push(...(res.length ? simp.slice(1) : simp));
+    i0 = i;
+  }
+  return res.map(tidy);
+}
+
 export function rectFromPoints(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
 }

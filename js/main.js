@@ -3529,6 +3529,7 @@ function renderProps() {
     extra.push(myPuck ? `<button data-act="selpuck">Puck: passes &amp; shots…</button>` : `<button data-act="givepuck">Give puck</button>`);
     extra.push(`<button data-act="extend" ${o.follow ? 'disabled title="Following another skater&#39;s path"' : ''}>${hasPath ? 'Extend path' : 'Add path'}</button>`);
     extra.push(`<button data-act="clearpath" ${hasPath && !o.follow ? '' : 'disabled'}>Clear path</button>`);
+    extra.push(`<button data-act="tidypath" ${hasPath && !o.follow ? '' : 'disabled'} title="Fit the drawn path to clean geometry: straight-ish runs become straight, loops and turns become even circular arcs. Waypoint flags (pivots, stops) are reset.">✨ Even out path</button>`);
     if (drill().objects.some(x => x.type === 'pile')) extra.push(`<button data-act="takepuck" title="Add a puck they pick up from the nearest pile where their path passes it">Take puck from pile</button>`);
     if (!myPuck && nearestLoosePuck(o)) extra.push(`<button data-act="chasepuck" title="They pick up the nearest puck that ends up loose (a coach's chip in the corner, a missed shot, a loose puck) where their path passes its resting spot">Pick up loose puck</button>`);
     if (o.type === 'coach') {
@@ -3865,6 +3866,7 @@ propsBody.addEventListener('click', e => {
       commit(() => drill().objects.push(copy)); select(copy.id); renderProps(); break;
     }
     case 'clearpath': commit(() => o.path = []); break;
+    case 'tidypath': commit(() => { o.path = G.beautifyPath([{ x: o.x, y: o.y }, ...(o.path || [])]).slice(1); }); renderProps(); break;
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
     case 'readzone': readAloud([o.label || 'Zone', ...zoneLines(o)]); break;

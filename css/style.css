@@ -203,12 +203,12 @@ body.palette-dragging,body.palette-dragging *{cursor:grabbing!important}
 
 #sidebar{background:var(--panel);border-left:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column}
 /* wide video editing: the rink, toolbar and Selection step aside; the drills pane (with its open 🎬 row) fills the window */
-body.video-wide #layout{grid-template-columns:1fr}
-body.video-wide #toolbar,body.video-wide #stage,body.video-wide #props,body.video-wide #viewbar{display:none}
-body.video-wide #sidebar{border-left:none}
-body.video-wide #plan{flex:1 1 auto}
-body.video-wide #drill-list li.video-editor .intro-box{max-width:1100px;margin:0 auto}
-body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(100vh - 330px);object-fit:contain}
+#stage-split{display:flex;flex:1;min-height:0}
+#canvas-wrap{flex:1;min-width:0}
+#video-pane{width:min(460px,42%);flex:none;border-left:1px solid var(--border);background:var(--panel);overflow-y:auto;padding:10px}
+#video-pane .intro-box{border:none;background:transparent;padding:0}
+#video-pane .vid-preview,#video-pane .vid-player video{max-height:45vh;object-fit:contain}
+#video-pane .vid-poster{width:100%;border-radius:6px;display:block;margin:6px 0}
 .vid-head{justify-content:space-between;margin-bottom:6px}
 .vid-wide{font-size:12px;padding:2px 8px}
 #plan{flex:1 1 0;min-height:0;overflow-y:auto}
@@ -270,7 +270,6 @@ body.video-wide .vid-preview,body.video-wide .vid-player video{max-height:calc(1
 #drill-list li button.has-video{color:#22d3ee} /* as loud as the amber mic: a video on the drill should be seen at a glance */
 #drill-list li button[data-act=intro]:not(.has-intro),#drill-list li button[data-act=video]:not(.has-video){color:var(--muted);opacity:.7}
 #drill-list li button[data-act=intro]:not(.has-intro):hover,#drill-list li button[data-act=video]:not(.has-video):hover{opacity:1;color:var(--text)}
-#drill-list li.video-editor{padding:2px 0 6px;background:transparent;border:none;cursor:default;display:block}
 .video-url{width:100%;font-size:12.5px}
 .vid-drop{border:2px dashed var(--border);border-radius:8px;padding:12px 10px;text-align:center;font-size:12.5px;color:var(--muted);margin-bottom:8px}
 .vid-drop.over{border-color:var(--accent);color:var(--text);background:#1e2a44}
@@ -753,6 +752,8 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
   #print-area .p-head b{font-size:11px}
   #print-area .p-time{margin-left:auto;font-variant-numeric:tabular-nums}
   #print-area .p-drill svg{max-width:100%;max-height:45mm;width:auto;height:auto;display:block;border:1px solid #ccc;border-radius:1.5mm}
+  #print-area .p-vid{display:flex;align-items:center;gap:2mm;margin-top:1mm}
+  #print-area .p-poster{height:16mm;border-radius:1mm;border:1px solid #ccc}
   #print-area .p-combined{margin:2mm 0}
   #print-area .p-combined svg{width:100%;height:auto;display:block;border:1px solid #ccc;border-radius:1.5mm}
   #print-area pre{white-space:pre-wrap;font:9.5px/1.35 system-ui,sans-serif;margin:1.5mm 0 0}
@@ -791,3 +792,12 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
 .event-body select{width:auto;max-width:140px}
 .warn{color:#f59e0b;font-size:12px}
 .small{font-size:11.5px}
+
+/* library: a drill that carries a video */
+.lib-card{position:relative}
+.lib-card .lib-video{position:absolute;top:6px;right:6px;background:rgba(20,23,30,.75);color:#fff;border-radius:6px;padding:2px 6px;font-size:12px;display:inline-flex;align-items:center;gap:4px}
+/* viewer: video-first drills with a Layout tab */
+.pr-tabs{display:flex;gap:6px;margin:4px 0}
+.pr-tab{padding:3px 12px;border-radius:999px;font-size:12.5px}
+.pr-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.pr-video .pr-poster{display:block;width:100%;max-width:520px;border-radius:8px;cursor:pointer;margin-bottom:4px}

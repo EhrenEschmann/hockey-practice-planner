@@ -2095,7 +2095,7 @@ function renderSettings() {
   const u = cloudSync?.user;
   $('#settings-who').textContent = u ? u.email : cloudBoot === 'none' ? 'local only' : 'not signed in';
   $('#settings-account').textContent = u ? `Signed in as ${u.name || u.email} (${u.email})${isOwner(u) ? ' — the planner' : ''}. Sign out is on the top bar.` : cloudBoot === 'none' ? 'No Firebase configured: everything stays on this device.' : 'Not signed in — practices, games and the Claude key are saved to the cloud once you sign in (top bar).';
-  const vals = { 'tire-keep': keepTool.tire, 'skater-keep': keepTool.skater, 'plan-pin': $('#sidebar').classList.contains('plan-unpinned') === false, 'video-wide': videoWide, voice: voiceOn, viewmode: presentMode === 'list' ? 'list' : 'focus' };
+  const vals = { 'tire-keep': keepTool.tire, 'skater-keep': keepTool.skater, 'plan-pin': $('#sidebar').classList.contains('plan-unpinned') === false, voice: voiceOn, viewmode: presentMode === 'list' ? 'list' : 'focus' };
   for (const el of $$('#settings [data-set]')) { if (el.type === 'checkbox') el.checked = !!vals[el.dataset.set]; else el.value = vals[el.dataset.set]; }
   renderAIPop();
 }
@@ -2104,7 +2104,6 @@ $('#settings').addEventListener('change', e => {
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (k === 'tire-keep' || k === 'skater-keep') { const box = $(`#${k}`); if (box.checked !== v) { box.checked = v; box.dispatchEvent(new Event('change')); } }
   else if (k === 'plan-pin') { if ($('#sidebar').classList.contains('plan-unpinned') === v) $('#plan-pin').click(); }
-  else if (k === 'video-wide') setVideoWide(v);
   else if (k === 'voice') setVoice(v);
   else if (k === 'viewmode') { presentMode = v; try { localStorage.setItem('hpp.viewmode', v); } catch { /* fine */ } }
   renderSettings();
@@ -2593,22 +2592,6 @@ async function uploadPendingIntros() {
 }
 const cloudHint = err => /permission|insufficient/i.test(err || '') ? ' — deploy the latest firestore.rules, then Upload now' : '';
 let videoOpenFor = null; // drill whose 🎬 video row is open in the Drills panel
-// Wide video editing: while a 🎬 row is open, the rink and toolbar can step aside so the sidebar gets the whole window. Remembered per browser.
-const VIDEO_WIDE_KEY = 'hpp.ui.videoWide';
-let videoWide = false;
-try { videoWide = localStorage.getItem(VIDEO_WIDE_KEY) === '1'; } catch { /* stay narrow */ }
-function setVideoWide(on) {
-  videoWide = on;
-  try { localStorage.setItem(VIDEO_WIDE_KEY, on ? '1' : '0'); } catch { /* fine */ }
-  renderPlan();
-}
-/** The wide layout applies only while a video row is open; closing the row (or switching drills) brings the rink back. */
-function applyVideoWide() {
-  const on = videoWide && !!videoOpenFor && store.practice.drills.some(d => d.id === videoOpenFor);
-  if (document.body.classList.contains('video-wide') === on) return;
-  document.body.classList.toggle('video-wide', on);
-  drawSelection(); // the canvas changed size
-}
 let vidPending = null;   // a dropped file being prepared: { drillId, file, url, duration, width, height, audio, vo, voSecs, voFit: 'post'|'pre', voRec, voTimer, encoding, error }
 const fmtSecs = t => Number.isFinite(+t) ? `${Math.floor(+t / 60)}:${String(Math.round(+t % 60)).padStart(2, '0')}` : '?:??';
 /** The span a staged video will keep: [start, end) clipped to the file. */
@@ -2688,7 +2671,7 @@ async function videoAction(act, li) {
   const pid = store.practice.id;
   const vp = vidPending?.drillId === d.id ? vidPending : null;
   if (act === 'pick') { li.querySelector('.vid-file')?.click(); return; }
-  if (act === 'wide') { setVideoWide(!videoWide); return; }
+  if (act === 'close') { videoOpenFor = null; renderPlan(); return; }
   if ((act === 'setstart' || act === 'setend') && vp) {
     const t = li.querySelector('.vid-preview')?.currentTime || 0;
     if (act === 'setstart') { vp.start = Math.round(t * 10) / 10; if (Number.isFinite(vp.end) && vp.end <= vp.start + 0.5) vp.end = NaN; }
@@ -2701,7 +2684,7 @@ async function videoAction(act, li) {
     try { vp.voRec = await startRecording(); } catch (e) { vp.error = `Microphone not available: ${e?.message || e}`; renderPlan(); return; }
     vp.voPastEnd = false;
     renderPlan(); // the row now shows ■ Stop — play the (re-drawn) preview silently from the top
-    const preview = $('#drill-list .vid-preview'); if (!preview) return;
+    const preview = $('#video-pane .vid-preview'); if (!preview) return;
     const span = trimSpan(vp);
     const kept = keptSecs(vp);
     preview.muted = true; preview.currentTime = span.start;
@@ -2730,7 +2713,7 @@ async function videoAction(act, li) {
     vp.dubAudio = new Audio(URL.createObjectURL(vp.vo));
     vp.previewing = true;
     renderPlan();
-    const pv = $('#drill-list .vid-preview'); if (!pv) return;
+    const pv = $('#video-pane .vid-preview'); if (!pv) return;
     pv.muted = true; pv.currentTime = span.start;
     const stop = () => { stopDubPreview(vp, pv); renderPlan(); };
     let vidDone = false, audDone = false;
@@ -2746,7 +2729,7 @@ async function videoAction(act, li) {
   }
   if (act === 'vostop' && vp?.voRec) {
     const r = vp.voRec; vp.voRec = null; clearInterval(vp.voTimer); vp.voTimer = null;
-    const preview = $('#drill-list .vid-preview'); if (preview) { preview.pause(); preview.onended = null; preview.ontimeupdate = null; preview.muted = false; }
+    const preview = $('#video-pane .vid-preview'); if (preview) { preview.pause(); preview.onended = null; preview.ontimeupdate = null; preview.muted = false; }
     const { blob, secs } = await r.stop();
     if (blob.size && secs >= 0.5) { vp.vo = blob; vp.voSecs = secs; vp.audio = 'vo'; vp.voFit = vp.voFit || 'post'; }
     renderPlan();
@@ -2754,19 +2737,20 @@ async function videoAction(act, li) {
   }
   if (act === 'encode' && vp && !vp.encoding) {
     vp.encoding = true; renderPlan();
-    const progress = msg => { const el = $('#drill-list .vid-progress'); if (el) el.textContent = msg; };
+    const progress = msg => { const el = $('#video-pane .vid-progress'); if (el) el.textContent = msg; };
     try {
       const span = trimSpan(vp);
       const out = await transcodeVideo(vp.file, { voiceover: vp.audio === 'vo' ? vp.vo : null, voiceoverFit: vp.voFit || 'post', start: span.start, end: Number.isFinite(span.end) ? span.end : null, onProgress: (t, total) => progress(`Encoding… ${t.toFixed(0)}${Number.isFinite(total) ? ` / ${total.toFixed(0)}` : ''} s`) });
       const at = Date.now();
       const meta = { mime: out.mime, secs: out.secs, size: out.blob.size, width: out.width, height: out.height };
+      const poster = await capturePoster(out.blob).catch(() => null);
       try { await idbPutClip(clipKey(`video:${ownerFor()}`, pid, d.id, at), { mime: out.mime, blob: out.blob, secs: out.secs }); } catch { /* the cloud copy still serves this device */ }
       progress(`Uploading ${(out.blob.size / 1048576).toFixed(1)} MB…`);
       const up = await uploadVideo(pid, d, out.blob, meta, at);
       const old = d.upload;
       if (old?.cloud && cloudBackend?.removeVideo && cloudSync?.user) cloudBackend.removeVideo(teamFor(pid), pid, d.id, old.at, old.chunks).catch(() => {});
       if (old) { const k = videoKey(ownerFor(), pid, d); forgetClip(k); idbDelClip(k).catch(() => {}); }
-      commit(() => { d.upload = { at, ...meta, chunks: Math.ceil(out.blob.size / 700_000), cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) }; });
+      commit(() => { d.upload = { at, ...meta, ...(poster ? { poster } : {}), chunks: Math.ceil(out.blob.size / 700_000), cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) }; });
       if (vp.url) URL.revokeObjectURL(vp.url);
       vidPending = null;
     } catch (e) { vp.encoding = false; vp.error = `Encoding failed: ${e?.message || e}`; }
@@ -3079,9 +3063,94 @@ function narrationHTML(d) {
       </div>
       <p class="muted small">Recording plays the ${noun} from the top at its current speed (${drillSpeed()}×) with the mic open; keep talking after it finishes if you like. Plays back in sync whenever ▶ runs it. Changing the speed later deletes it.</p>`;
 }
+/** A small JPEG poster from the start of an encoded clip (null when the frame can't be read). */
+function capturePoster(blob, at = 0.1) {
+  return new Promise(resolve => {
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.src = URL.createObjectURL(blob);
+    let settled = false;
+    const done = url => { if (settled) return; settled = true; URL.revokeObjectURL(v.src); resolve(url); };
+    v.onerror = () => done(null);
+    v.onloadeddata = () => { try { v.currentTime = Math.min(at, Math.max(0, (v.duration || 1) - 0.05)); } catch { done(null); } };
+    v.onseeked = () => {
+      try {
+        const w = 320, h = Math.round(w * v.videoHeight / v.videoWidth) || 180;
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(v, 0, 0, w, h);
+        done(c.toDataURL('image/jpeg', 0.6));
+      } catch { done(null); }
+    };
+    setTimeout(() => done(null), 4000);
+  });
+}
+
+/** The split-pane video manager that opens beside the rink (🎬 on a drill row): drop/trim/voice-over/encode, or a link. */
+function videoPaneHTML(d, p) {
+    const v = d.video ? videoEmbed(d.video) : null;
+    const vp = vidPending?.drillId === d.id ? vidPending : null, up = d.upload;
+    const uploadHTML = vp ? (vp.error
+      ? `<div class="intro-warn warn small">⚠ ${escHtml(vp.error)}</div><div class="row"><button data-vact="cancel">OK</button></div>`
+      : `<video class="vid-preview" src="${vp.url}" controls playsinline preload="metadata"></video>
+        <div class="row vid-trim" title="Trim: only the part between the two times is kept. Play the preview to a spot and press ‘start here’ / ‘end here’, or type the seconds.">
+          <span class="muted small">Trim</span>
+          <button data-vact="setstart" ${vp.encoding ? 'disabled' : ''}>⟵ start here</button>
+          <input type="number" class="vid-in" step="0.1" min="0" value="${(+vp.start || 0).toFixed(1)}" ${vp.encoding ? 'disabled' : ''}>
+          <span class="muted small">to</span>
+          <input type="number" class="vid-out" step="0.1" min="0" value="${Number.isFinite(vp.end) ? vp.end.toFixed(1) : ''}" placeholder="${Number.isFinite(vp.duration) ? vp.duration.toFixed(1) : 'end'}" ${vp.encoding ? 'disabled' : ''}>
+          <button data-vact="setend" ${vp.encoding ? 'disabled' : ''}>end here ⟶</button>
+        </div>
+        <div class="intro-status muted small vid-summary">${trimSummary(vp)}</div>
+        ${vp.encoding || vp.voRec ? '' : sizeWarning(estimateMB(vp))}
+        <div class="row">
+          <label class="check small"><input type="radio" name="vidaudio" value="keep" ${vp.audio !== 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> keep its sound</label>
+          <label class="check small"><input type="radio" name="vidaudio" value="vo" ${vp.audio === 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> my voice instead</label>
+        </div>
+        ${vp.audio === 'vo' && !vp.encoding ? `<div class="row">${vp.voRec
+          ? '<button data-vact="vostop" class="danger">■ Stop</button><span class="vo-status muted small">● Recording — the video is playing silently, talk over it</span>'
+          : `<button data-vact="vorec">● ${vp.vo ? 'Re-record' : 'Record'} voiceover</button>${vp.vo ? `<button data-vact="vopreview">${vp.previewing ? '■ Stop preview' : '▶ Preview with my voice'}</button>` : ''}<span class="muted small">${vp.vo ? `${vp.voSecs.toFixed(1)} s recorded${voOverrun(vp) > 0.25 ? ` — ${fmtSecs(voOverrun(vp))} longer than the picture` : ''}` : 'plays the video (silently) while you talk; keep talking after it ends if you like'}</span>`}</div>
+        ${vp.vo && !vp.voRec && voOverrun(vp) > 0.25 ? `<div class="row vo-fit" title="Your voice runs longer than the picture. Neither is cut: choose which frame holds still for the extra time.">
+          <span class="muted small">Extra voice</span>
+          <label class="check small"><input type="radio" name="vofit" value="pre" ${vp.voFit === 'pre' ? 'checked' : ''}> before the video — hold the first frame</label>
+          <label class="check small"><input type="radio" name="vofit" value="post" ${vp.voFit !== 'pre' ? 'checked' : ''}> after the video — hold the last frame</label>
+        </div>` : ''}` : ''}
+        <div class="row">${vp.encoding
+          ? '<span class="vid-progress muted small">Starting the encoder…</span>'
+          : `<button data-vact="encode" class="primary" ${vp.audio === 'vo' && !vp.vo ? 'disabled title="Record the voiceover first"' : ''}>⬆ Encode &amp; upload</button><button data-vact="cancel">Cancel</button>`}</div>`)
+      : up
+      ? `${up.poster ? `<img class="vid-poster" src="${up.poster}" alt="">` : ''}<div class="intro-status muted small">Uploaded video · ${fmtSecs(up.secs)} · ${(up.size / 1048576).toFixed(1)} MB · ${up.width}×${up.height}${up.cloud === true ? ' · ☁ in the cloud' : ''}</div>
+        ${up.cloud !== true ? `<div class="intro-warn warn small">⚠ Not in the cloud — coaches can’t see it${up.cloudError ? ` (${escHtml(up.cloudError)}${cloudHint(up.cloudError)})` : ''}</div>` : ''}
+        ${sizeWarning((+up.size || 0) / 1048576)}
+        <div class="row"><button data-vact="play">▶ Watch</button>${up.cloud !== true && cloudBackend?.saveVideo ? '<button data-vact="upload" class="primary">☁ Upload now</button>' : ''}<button data-vact="del">✕ Delete video</button></div>
+        <div class="vid-player"></div><div class="vid-progress muted small"></div>`
+      : '';
+    const dropHTML = vp ? '' : `<div class="vid-drop">📼 ${up ? 'Drop a new video here to replace it' : 'Drop a video here (any length — trim it or watch the size estimate below)'} or <button data-vact="pick">choose a file</button><input type="file" class="vid-file" accept="video/*,.mov,.mp4,.webm" hidden></div>`;
+    return `<div class="intro-box">
+      <div class="row vid-head"><span class="muted small">🎬 Video for “${escHtml(d.name)}” — plays beside the layout</span><span class="spacer"></span><button data-vact="close" title="Close the video pane">${icon('x')}</button></div>
+      ${uploadHTML}${dropHTML}
+      <div class="muted small vid-or">— or link one —</div>
+      <input class="video-url" data-video="${d.id}" value="${escHtml(d.video || '')}" placeholder="Paste a YouTube, Vimeo or Cloudflare Stream link" spellcheck="false" autocomplete="off">
+      <div class="intro-status muted small">${!d.video ? (up ? 'The uploaded video is what coaches see; a link here is used only when there is no upload.' : 'Coaches get a ▶ Watch video button on the drill; the diagram stays.') : v ? `${v.host} · ${escHtml(v.id)}${up ? ' (the upload above takes precedence)' : ''}` : '⚠ Not a link this app can embed — use a YouTube, Vimeo or Cloudflare Stream page link (or a direct .mp4 link).'}</div>
+      ${v && !up ? videoPlayerHTML(v) : ''}
+    </div>`;
+}
+
+/** Show or hide the video pane beside the canvas for the drill whose 🎬 row is open. */
+function renderVideoPane() {
+  const pane = $('#video-pane');
+  const p = store.practice;
+  const d = p.drills.find(x => x.id === videoOpenFor);
+  pane.hidden = !d;
+  document.body.classList.toggle('video-split', !!d);
+  if (!d) { if (pane.innerHTML) { pane.innerHTML = ''; drawSelection(); } return; }
+  if (pane.contains(document.activeElement) && document.activeElement.matches('input[type="number"], input[type="text"], input:not([type]), textarea')) return; // typing — don't clobber
+  pane.innerHTML = videoPaneHTML(d, p);
+  drawSelection(); // the canvas may have changed size
+}
+
 function renderPlan() {
   const p = store.practice;
-  applyVideoWide();
+  renderVideoPane();
   const total = activeDrills(p).reduce((a, d) => a + (+d.duration || 0), 0);
   const hiddenCount = p.drills.length - activeDrills(p).length;
   const startMin = parseStart(p), game = isGame(p);
@@ -3149,53 +3218,7 @@ function renderPlan() {
       <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here (unless 🔊 voice is muted in the editor) and always on the coaches’ phones. No length limit — it warns when a clip gets too big for the cloud.</p>
       ${narrationHTML(d)}
     </div></li>` : '';
-    const v = d.video ? videoEmbed(d.video) : null;
-    const vp = vidPending?.drillId === d.id ? vidPending : null, up = d.upload;
-    const uploadHTML = vp ? (vp.error
-      ? `<div class="intro-warn warn small">⚠ ${escHtml(vp.error)}</div><div class="row"><button data-vact="cancel">OK</button></div>`
-      : `<video class="vid-preview" src="${vp.url}" controls playsinline preload="metadata"></video>
-        <div class="row vid-trim" title="Trim: only the part between the two times is kept. Play the preview to a spot and press ‘start here’ / ‘end here’, or type the seconds.">
-          <span class="muted small">Trim</span>
-          <button data-vact="setstart" ${vp.encoding ? 'disabled' : ''}>⟵ start here</button>
-          <input type="number" class="vid-in" step="0.1" min="0" value="${(+vp.start || 0).toFixed(1)}" ${vp.encoding ? 'disabled' : ''}>
-          <span class="muted small">to</span>
-          <input type="number" class="vid-out" step="0.1" min="0" value="${Number.isFinite(vp.end) ? vp.end.toFixed(1) : ''}" placeholder="${Number.isFinite(vp.duration) ? vp.duration.toFixed(1) : 'end'}" ${vp.encoding ? 'disabled' : ''}>
-          <button data-vact="setend" ${vp.encoding ? 'disabled' : ''}>end here ⟶</button>
-        </div>
-        <div class="intro-status muted small vid-summary">${trimSummary(vp)}</div>
-        ${vp.encoding || vp.voRec ? '' : sizeWarning(estimateMB(vp))}
-        <div class="row">
-          <label class="check small"><input type="radio" name="vidaudio" value="keep" ${vp.audio !== 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> keep its sound</label>
-          <label class="check small"><input type="radio" name="vidaudio" value="vo" ${vp.audio === 'vo' ? 'checked' : ''} ${vp.encoding ? 'disabled' : ''}> my voice instead</label>
-        </div>
-        ${vp.audio === 'vo' && !vp.encoding ? `<div class="row">${vp.voRec
-          ? '<button data-vact="vostop" class="danger">■ Stop</button><span class="vo-status muted small">● Recording — the video is playing silently, talk over it</span>'
-          : `<button data-vact="vorec">● ${vp.vo ? 'Re-record' : 'Record'} voiceover</button>${vp.vo ? `<button data-vact="vopreview">${vp.previewing ? '■ Stop preview' : '▶ Preview with my voice'}</button>` : ''}<span class="muted small">${vp.vo ? `${vp.voSecs.toFixed(1)} s recorded${voOverrun(vp) > 0.25 ? ` — ${fmtSecs(voOverrun(vp))} longer than the picture` : ''}` : 'plays the video (silently) while you talk; keep talking after it ends if you like'}</span>`}</div>
-        ${vp.vo && !vp.voRec && voOverrun(vp) > 0.25 ? `<div class="row vo-fit" title="Your voice runs longer than the picture. Neither is cut: choose which frame holds still for the extra time.">
-          <span class="muted small">Extra voice</span>
-          <label class="check small"><input type="radio" name="vofit" value="pre" ${vp.voFit === 'pre' ? 'checked' : ''}> before the video — hold the first frame</label>
-          <label class="check small"><input type="radio" name="vofit" value="post" ${vp.voFit !== 'pre' ? 'checked' : ''}> after the video — hold the last frame</label>
-        </div>` : ''}` : ''}
-        <div class="row">${vp.encoding
-          ? '<span class="vid-progress muted small">Starting the encoder…</span>'
-          : `<button data-vact="encode" class="primary" ${vp.audio === 'vo' && !vp.vo ? 'disabled title="Record the voiceover first"' : ''}>⬆ Encode &amp; upload</button><button data-vact="cancel">Cancel</button>`}</div>`)
-      : up
-      ? `<div class="intro-status muted small">Uploaded video · ${fmtSecs(up.secs)} · ${(up.size / 1048576).toFixed(1)} MB · ${up.width}×${up.height}${up.cloud === true ? ' · ☁ in the cloud' : ''}</div>
-        ${up.cloud !== true ? `<div class="intro-warn warn small">⚠ Not in the cloud — coaches can’t see it${up.cloudError ? ` (${escHtml(up.cloudError)}${cloudHint(up.cloudError)})` : ''}</div>` : ''}
-        ${sizeWarning((+up.size || 0) / 1048576)}
-        <div class="row"><button data-vact="play">▶ Watch</button>${up.cloud !== true && cloudBackend?.saveVideo ? '<button data-vact="upload" class="primary">☁ Upload now</button>' : ''}<button data-vact="del">✕ Delete video</button></div>
-        <div class="vid-player"></div><div class="vid-progress muted small"></div>`
-      : '';
-    const dropHTML = vp ? '' : `<div class="vid-drop">📼 ${up ? 'Drop a new video here to replace it' : 'Drop a video here (any length — trim it or watch the size estimate below)'} or <button data-vact="pick">choose a file</button><input type="file" class="vid-file" accept="video/*,.mov,.mp4,.webm" hidden></div>`;
-    const video = videoOpenFor === d.id ? `<li class="video-editor"><div class="intro-box">
-      <div class="row vid-head"><span class="muted small">🎬 Video for this ${itemNoun(p)}</span><button data-vact="wide" class="vid-wide" title="${videoWide ? 'Bring the rink back' : 'Hide the rink so the video editor gets the whole window'}">${videoWide ? '⤡ Show rink' : '⤢ Hide rink'}</button></div>
-      ${uploadHTML}${dropHTML}
-      <div class="muted small vid-or">— or link one —</div>
-      <input class="video-url" data-video="${d.id}" value="${escHtml(d.video || '')}" placeholder="Paste a YouTube, Vimeo or Cloudflare Stream link" spellcheck="false" autocomplete="off">
-      <div class="intro-status muted small">${!d.video ? (up ? 'The uploaded video is what coaches see; a link here is used only when there is no upload.' : 'Coaches get a ▶ Watch video button on the drill; the diagram stays.') : v ? `${v.host} · ${escHtml(v.id)}${up ? ' (the upload above takes precedence)' : ''}` : '⚠ Not a link this app can embed — use a YouTube, Vimeo or Cloudflare Stream page link (or a direct .mp4 link).'}</div>
-      ${v && !up ? videoPlayerHTML(v) : ''}
-    </div></li>` : '';
-    return row + notes + intro + video;
+    return row + notes + intro;
   }).join('') + aiEditorHTML(p);
 }
 
@@ -3243,36 +3266,41 @@ $('#drill-list').addEventListener('drop', e => {
 $('#drill-list').addEventListener('dragend', () => { dragDrill = null; clearDropMarks(); });
 
 // Inline notes editing (live) — name/minutes only commit via the edit row's Save button.
-$('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea:not(.ai-prompt), .video-url')) store.beginPending(); });
-$('#drill-list').addEventListener('dragover', e => { const z = e.target.closest('.vid-drop'); if (!z) return; e.preventDefault(); z.classList.add('over'); });
-$('#drill-list').addEventListener('dragleave', e => { e.target.closest('.vid-drop')?.classList.remove('over'); });
-$('#drill-list').addEventListener('drop', e => {
+$('#drill-list').addEventListener('focusin', e => { if (e.target.matches('textarea:not(.ai-prompt)')) store.beginPending(); });
+$('#video-pane').addEventListener('focusin', e => { if (e.target.matches('.video-url')) store.beginPending(); });
+$('#video-pane').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (btn?.dataset.vact) { btn.blur(); videoAction(btn.dataset.vact, $('#video-pane')); }
+});
+$('#video-pane').addEventListener('dragover', e => { const z = e.target.closest('.vid-drop'); if (!z) return; e.preventDefault(); z.classList.add('over'); });
+$('#video-pane').addEventListener('dragleave', e => { e.target.closest('.vid-drop')?.classList.remove('over'); });
+$('#video-pane').addEventListener('drop', e => {
   const z = e.target.closest('.vid-drop'); if (!z) return;
   e.preventDefault(); z.classList.remove('over');
   const d = store.practice.drills.find(x => x.id === videoOpenFor); if (!d) return;
   stageVideoFile(d, e.dataTransfer?.files?.[0]);
 });
-$('#drill-list').addEventListener('change', e => {
+$('#video-pane').addEventListener('change', e => {
   if (e.target.matches('.vid-file')) { const d = store.practice.drills.find(x => x.id === videoOpenFor); if (d) stageVideoFile(d, e.target.files?.[0]); }
   if (e.target.matches('input[name="vidaudio"]') && vidPending) { vidPending.audio = e.target.value; renderPlan(); }
-  if (e.target.matches('input[name="vofit"]') && vidPending) { if (vidPending.previewing) stopDubPreview(vidPending, $('#drill-list .vid-preview')); vidPending.voFit = e.target.value; renderPlan(); }
+  if (e.target.matches('input[name="vofit"]') && vidPending) { if (vidPending.previewing) stopDubPreview(vidPending, $('#video-pane .vid-preview')); vidPending.voFit = e.target.value; renderPlan(); }
   if (e.target.matches('.vid-in, .vid-out') && vidPending) { unfocusList(); renderPlan(); }
 });
-$('#drill-list').addEventListener('input', e => {
+$('#video-pane').addEventListener('input', e => {
   if (!e.target.matches('.vid-in, .vid-out') || !vidPending) return;
   const v = e.target.value === '' ? NaN : +e.target.value;
   if (e.target.matches('.vid-in')) vidPending.start = Number.isFinite(v) ? Math.max(0, v) : 0; else vidPending.end = Number.isFinite(v) ? v : NaN;
-  const sum = $('#drill-list .vid-summary'); if (sum) sum.textContent = trimSummary(vidPending);
+  const sum = $('#video-pane .vid-summary'); if (sum) sum.textContent = trimSummary(vidPending);
 });
-$('#drill-list').addEventListener('input', e => {
+$('#video-pane').addEventListener('input', e => {
   if (!e.target.matches('.video-url')) return;
   const d = store.practice.drills.find(x => x.id === e.target.dataset.video); if (!d) return;
   const v = e.target.value.trim();
   if (v) d.video = v; else delete d.video;
   store.save();
 });
-$('#drill-list').addEventListener('change', e => { if (e.target.matches('.video-url')) { store.commitPending(); e.target.blur(); renderPlan(); } }); // blur: the list won't rebuild under a focused input
-$('#drill-list').addEventListener('keydown', e => { if (e.target.matches('.video-url') && e.key === 'Enter') { e.preventDefault(); e.target.blur(); renderPlan(); } });
+$('#video-pane').addEventListener('change', e => { if (e.target.matches('.video-url')) { store.commitPending(); e.target.blur(); renderPlan(); } }); // blur: the pane won't rebuild under a focused input
+$('#video-pane').addEventListener('keydown', e => { if (e.target.matches('.video-url') && e.key === 'Enter') { e.preventDefault(); e.target.blur(); renderPlan(); } });
 $('#drill-list').addEventListener('input', e => {
   const el = e.target;
   if (el.dataset.notes != null) {
@@ -3319,9 +3347,8 @@ $('#drill-list').addEventListener('click', e => {
   btn?.blur(); // a focused list button must not trip the "typing in the list" rebuild guard
   const p = store.practice;
   if (li.matches('.intro-editor')) { introAction(btn?.dataset.iact, li); return; }
-  if (li.matches('.video-editor')) { if (btn?.dataset.vact) videoAction(btn.dataset.vact, li); return; }
   if (li.matches('.ai-editor')) { if (btn?.dataset.aiact) aiAction(btn.dataset.aiact, li); return; }
-  if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#drill-list .video-url')?.focus(); return; }
+  if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#video-pane .video-url')?.focus(); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
   if (act === 'feedback') { openFeedbackPanel(); return; }
   if (act === 'hide') { // cycle: everyone → coaches only → hidden from all → everyone
@@ -3381,6 +3408,7 @@ function libraryCards(filter) {
     const v = d.view || VIEWS.full;
     cards.push(`<div class="lib-card">
       <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG(surfaceOf(p))}${renderObjects(d, null, { dryland: isDryland(p) })}</svg>
+      ${hasVideo(d) ? `<span class="lib-video" title="This drill has a video">${icon('video')} video</span>` : ''}
       <div class="lib-name" title="${escHtml(d.name)}">${escHtml(d.name)}</div>
       <div class="lib-meta" title="${escHtml(practiceLabel(p))}">${escHtml(practiceLabel(p))} · ${+d.duration || 0} min</div>
       <button data-lib-add="${p.id}:${d.id}">+ Add to this practice</button>
@@ -4222,7 +4250,7 @@ $('#btn-print').addEventListener('click', () => {
         <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clockFull(at)}</span>` : ''}</div>
         ${standaloneSVG(d, rink, SVG_STYLE, shareView(d))}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
-        ${d.upload ? `<div class="p-meta">Video: uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)</div>` : d.video && videoEmbed(d.video) ? `<div class="p-meta">Video: ${escHtml(d.video)}</div>` : ''}
+        ${hasVideo(d) ? `<div class="p-vid">${videoPoster(d) ? `<img class="p-poster" src="${videoPoster(d)}" alt="">` : ''}<span class="p-meta">🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : escHtml(d.video)}</span></div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
       </div>`;
   }).join('');
@@ -4255,11 +4283,31 @@ let cloudBoot = 'loading', cloudBootError = ''; // 'loading' → 'ready' | 'fail
 let uploadsChecked = false; // pending intro uploads are retried once per session
 
 /** A drill's video, collapsed to a button: the player only loads when tapped (data, and it takes the diagram's place on a phone). */
-function videoBlockHTML(d) {
-  if (d.upload) return `<div class="pr-video" data-upload="1"><button class="pr-video-btn wp-toggle">🎬 Watch video <span class="muted small">(${fmtSecs(d.upload.secs)})</span></button></div>`;
-  const v = d.video ? videoEmbed(d.video) : null;
-  return v ? `<div class="pr-video" data-src="${escHtml(v.src)}" data-kind="${v.kind}" data-host="${escHtml(v.host)}"><button class="pr-video-btn wp-toggle">🎬 Watch video <span class="muted small">(${escHtml(v.host)})</span></button></div>` : '';
+/** A drill's poster frame: the captured first frame of an upload, or a YouTube thumbnail for links. */
+function videoPoster(d) {
+  if (d.upload?.poster) return d.upload.poster;
+  const v = !d.upload && d.video ? videoEmbed(d.video) : null;
+  return v && /youtube/i.test(v.host || '') && v.id ? `https://img.youtube.com/vi/${v.id}/hqdefault.jpg` : null;
 }
+const hasVideo = d => !!(d.upload || (d.video && videoEmbed(d.video)));
+function videoBlockHTML(d) {
+  const poster = videoPoster(d);
+  const img = poster ? `<img class="pr-poster" src="${poster}" alt="" title="Watch the video">` : '';
+  if (d.upload) return `<div class="pr-video" data-upload="1">${img}<button class="pr-video-btn wp-toggle">🎬 Watch video <span class="muted small">(${fmtSecs(d.upload.secs)})</span></button></div>`;
+  const v = d.video ? videoEmbed(d.video) : null;
+  return v ? `<div class="pr-video" data-src="${escHtml(v.src)}" data-kind="${v.kind}" data-host="${escHtml(v.host)}">${img}<button class="pr-video-btn wp-toggle">🎬 Watch video <span class="muted small">(${escHtml(v.host)})</span></button></div>` : '';
+}
+$('#present-body').addEventListener('click', e => {
+  const poster = e.target.closest('.pr-poster');
+  if (poster) { poster.closest('.pr-video')?.querySelector('.pr-video-btn')?.click(); return; }
+  const tab = e.target.closest('.pr-tab');
+  if (!tab) return;
+  const sec = tab.closest('.pr-drill'); if (!sec) return;
+  for (const b of sec.querySelectorAll('.pr-tab')) b.classList.toggle('active', b === tab);
+  for (const pn of sec.querySelectorAll('.pr-pane')) pn.hidden = pn.dataset.pane !== tab.dataset.prtab;
+  if (tab.dataset.prtab === 'layout') sec._pause?.(); // leaving the video for the layout parks whatever is playing
+});
+
 function wireVideos(p) {
   for (const box of $$('#present-body .pr-video')) {
     const sec = box.closest('.pr-drill');
@@ -4423,8 +4471,10 @@ function presentHTML(p) {
       return `
       <section class="pr-drill" data-did="${d.id}">
         <header><b>${i + 1}. ${escHtml(d.name)}</b>${minHTML(d)}${whenHTML(at, +d.duration || 0)}</header>
+        ${hasVideo(d) ? `<div class="pr-tabs"><button class="pr-tab active" data-prtab="video">🎬 Video</button><button class="pr-tab" data-prtab="layout">Layout</button></div>
+        <div class="pr-pane" data-pane="video">${videoBlockHTML(d)}</div>
+        <div class="pr-pane" data-pane="layout" hidden>` : ''}
         <div class="pr-fig" data-ar="${(shareView(d).w / shareView(d).h).toFixed(3)}">${standaloneSVG(d, rink, SVG_STYLE, shareView(d), { showPaths: d.showPaths !== false })}</div>
-        ${videoBlockHTML(d)}
         <div class="pr-animbar">
           <button class="pr-play" title="Watch the drill">${icon('play')}</button>
           <input type="range" class="pr-tl" min="0" max="10" step="0.01" value="0">
@@ -4434,6 +4484,7 @@ function presentHTML(p) {
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
           <span class="pr-impact"></span>
         </div>
+        ${hasVideo(d) ? '</div>' : ''}
         <div class="pr-text"><div class="pr-cue" hidden></div>
         ${rulesHTML(d)}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>

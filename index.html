@@ -181,9 +181,12 @@
 
   <main id="stage">
 
-    <div id="canvas-wrap">
-      <svg id="rink" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
-      <div id="cue-caption" hidden></div>
+    <div id="stage-split">
+      <div id="canvas-wrap">
+        <svg id="rink" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="cue-caption" hidden></div>
+      </div>
+      <div id="video-pane" hidden></div>
     </div>
 
     <div id="ps-wrap" hidden>
@@ -282,7 +285,6 @@
         <label class="check"><input type="checkbox" data-set="tire-keep"> Quick place tires (the tool stays selected after each one)</label>
         <label class="check"><input type="checkbox" data-set="skater-keep"> Quick place skaters (the tool stays selected after each one)</label>
         <label class="check"><input type="checkbox" data-set="plan-pin"> Keep the Drills pane pinned open</label>
-        <label class="check"><input type="checkbox" data-set="video-wide"> Hide the rink while a 🎬 video row is open</label>
         <label class="check"><input type="checkbox" data-set="voice"> 🔊 Voice: play intros, voice-overs and spoken cues</label>
       </section>
       <section class="set-sec">

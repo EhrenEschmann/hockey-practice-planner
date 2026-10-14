@@ -2541,13 +2541,13 @@ let editingDrill = null;  // drill id being renamed inline (explicit edit mode: 
  * on this device and in the cloud — in the background; until each is up its row says so, and Upload now retries.
  */
 function markAssetsPending(d) {
-  for (const k of ['intro', 'narration', 'upload']) if (d[k]) d[k] = { ...d[k], cloud: false, cloudError: 'copying from the original…' };
+  for (const k of ['intro', 'narration', 'coachnote', 'upload']) if (d[k]) d[k] = { ...d[k], cloud: false, cloudError: 'copying from the original…' };
 }
 async function copyDrillAssets(srcPid, src, dstPid, dst) {
   const owner = ownerFor();
   const settle = (k, up) => { if (!dst[k]) return; dst[k] = { ...dst[k], cloud: up.ok }; if (up.error) dst[k].cloudError = up.error; else delete dst[k].cloudError; store.save(); renderPlan(); };
   const missing = { ok: false, error: 'no copy of the original on this device or in the cloud' };
-  for (const kind of ['intro', 'narration']) {
+  for (const kind of ['intro', 'narration', 'coachnote']) {
     if (!src[kind] || !dst[kind]) continue;
     let rec = null;
     try { rec = await idbGetClip(keyFor(owner, srcPid, src, kind)); } catch { rec = null; }
@@ -2580,7 +2580,7 @@ async function uploadClip(pid, did, { mime, blob, secs }) {
 /** After sign-in: any clip recorded while offline or refused by the rules is uploaded from this device's copy. */
 async function uploadPendingIntros() {
   if (!cloudBackend?.saveClip || !cloudSync?.user) return;
-  for (const p of store.data.practices) for (const d of p.drills) for (const kind of ['intro', 'narration']) {
+  for (const p of store.data.practices) for (const d of p.drills) for (const kind of ['intro', 'narration', 'coachnote']) {
     if (!d[kind] || d[kind].cloud === true) continue;
     let rec = null;
     try { rec = await idbGetClip(keyFor(ownerFor(), p.id, d, kind)); } catch { rec = null; }
@@ -2790,6 +2790,41 @@ function clipSizeWarning(bytes) {
 let introOpenFor = null; // drill whose 🎙 recorder is open in the Drills panel
 let introRec = null;      // an in-progress recording: { drillId, stop(), since, timer }
 /** The recorder row's buttons: record / stop / listen / delete a drill's intro clip. */
+let cnRec = null, cnPlaying = null;
+/** Coach-only audio note on a drill: recorded like an intro, stored as the drill's 'coachnote' clip. */
+async function coachNoteAction(act) {
+  const d = store.practice.drills.find(x => x.id === notesOpenFor); if (!d) return;
+  const pid = store.practice.id;
+  const key = keyFor(ownerFor(), pid, d, 'coachnote');
+  if (act === 'cnrec') {
+    if (cnRec) return;
+    try { cnRec = await startRecording(); } catch (e) { alert(`Microphone not available: ${e?.message || e}`); return; }
+    cnRec.drillId = d.id; renderPlan();
+  } else if (act === 'cnstop') {
+    if (!cnRec) return;
+    const r = cnRec; cnRec = null;
+    const { blob, mime, secs } = await r.stop();
+    if (!blob.size || secs < 0.5) { renderPlan(); return; }
+    const at = Date.now();
+    forgetClip(key); idbDelClip(key).catch(() => {});
+    try { await idbPutClip(clipKey(ownerFor(), pid, clipDocId(d.id, 'coachnote'), at), { mime, blob, secs }); } catch { /* the cloud copy still serves this device */ }
+    const up = await uploadClip(pid, clipDocId(d.id, 'coachnote'), { mime, blob, secs });
+    commit(() => { d.coachnote = { secs, mime, size: blob.size, at, cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) }; });
+    renderPlan();
+  } else if (act === 'cnplay') {
+    if (cnPlaying) { cnPlaying.stop(); cnPlaying = null; renderPlan(); return; }
+    const entry = await fetchClip(ownerFor(), pid, d, 'coachnote');
+    if (!entry) return;
+    cnPlaying = playClip(entry, { onEnd: () => { cnPlaying = null; renderPlan(); } });
+    renderPlan();
+  } else if (act === 'cndel') {
+    forgetClip(key); idbDelClip(key).catch(() => {});
+    if (cloudBackend?.removeClip && cloudSync?.user) cloudBackend.removeClip(teamFor(pid), pid, clipDocId(d.id, 'coachnote')).catch(() => {});
+    commit(() => { delete d.coachnote; });
+    renderPlan();
+  }
+}
+
 async function introAction(iact, li) {
   const d = store.practice.drills.find(x => x.id === introOpenFor); if (!d) return;
   const pid = store.practice.id, key = keyFor(ownerFor(), pid, d); // the current recording's copy on this device
@@ -3180,7 +3215,7 @@ function renderPlan() {
       <button data-act="hide" class="${d.hidden ? 'is-hidden' : d.audience === 'coaches' ? 'is-coaches' : ''}" title="${d.hidden ? 'Hidden from everyone: left out of the plan, print and the coaches’ view — click to show it again' : d.audience === 'coaches' ? 'Coaches only: on the coaches’ minute-by-minute agenda, left out of the team’s copy (their clock times stay right across the gap) — click to hide it from everyone' : 'Shown to everyone — click for coaches only (e.g. free play the team needn’t see), click again to hide it from everyone'}">${d.hidden ? icon('eyeoff') : d.audience === 'coaches' ? icon('coach') : icon('eye')}</button>
       <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (any length — it warns when the clip gets big; optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
       <button data-act="intro" class="${d.intro || d.narration ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="${d.intro || d.narration ? `Audio on this drill: ${[d.intro ? 'intro' : '', d.narration ? 'voice-over' : ''].filter(Boolean).join(' + ')}. ` : ''}Intro in your voice (played before the drill when ▶ is pressed) and a voice-over recorded over the animation — both recorded here">${icon('mic')}</button>
-      <button data-act="notes" class="${(d.notes || '').trim() ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes">${icon('notes')}</button>
+      <button data-act="notes" class="${(d.notes || '').trim() || (d.coachNotes || '').trim() || d.coachnote ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes — including coach-only notes and audio">${icon('notes')}</button>
       <button data-act="sharedrill" title="Send just this drill: copies a link anyone can open — the other coach signs in with Google or anonymously. Press again after edits to update the shared copy.">${icon('send')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
   list.innerHTML = p.drills.map((d, i) => {
@@ -3200,7 +3235,16 @@ function renderPlan() {
           ${btns(d)}
         </li>`;
     const notes = notesOpenFor === d.id
-      ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea></li>`
+      ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea>
+        <div class="coach-notes">
+          <div class="muted small">👁 Coaches only — never in the team’s copy</div>
+          <textarea data-coachnotes="${i}" rows="2" placeholder="Notes just for the coaches…">${escHtml(d.coachNotes || '')}</textarea>
+          <div class="row">
+            ${cnRec?.drillId === d.id ? '<button data-act="cnstop" class="danger">■ Stop recording</button>' : `<button data-act="cnrec">● ${d.coachnote ? 'Re-record' : 'Record'} audio</button>`}
+            ${d.coachnote ? `<button data-act="cnplay">${cnPlaying ? '■ Stop' : `▶ Play (${Math.round(d.coachnote.secs)} s)`}</button><button data-act="cndel" title="Delete the audio note">${icon('x')}</button>` : ''}
+            <span class="intro-status muted small">${d.coachnote && d.coachnote.cloud !== true ? '⚠ audio not in the cloud — coaches can’t hear it yet' : ''}</span>
+          </div>
+        </div></li>`
       : '';
     const recording = introRec?.drillId === d.id;
     const intro = introOpenFor === d.id ? `<li class="intro-editor"><div class="intro-box">
@@ -3307,6 +3351,10 @@ $('#drill-list').addEventListener('input', e => {
     const d = store.practice.drills[+el.dataset.notes];
     if (d) { d.notes = el.value; store.save(); }
   }
+  if (el.dataset.coachnotes != null) {
+    const d = store.practice.drills[+el.dataset.coachnotes];
+    if (d) { if (el.value.trim()) d.coachNotes = el.value; else delete d.coachNotes; store.save(); }
+  }
   if (el.matches('.intro-script, .intro-age, .intro-secs')) {
     const d = store.practice.drills.find(x => x.id === introOpenFor); if (!d) return;
     if (el.matches('.intro-script')) d.introScript = el.value;
@@ -3348,6 +3396,7 @@ $('#drill-list').addEventListener('click', e => {
   const p = store.practice;
   if (li.matches('.intro-editor')) { introAction(btn?.dataset.iact, li); return; }
   if (li.matches('.ai-editor')) { if (btn?.dataset.aiact) aiAction(btn.dataset.aiact, li); return; }
+  if (li.matches('.notes-editor')) { if (btn?.dataset.act?.startsWith('cn')) coachNoteAction(btn.dataset.act); return; }
   if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#video-pane .video-url')?.focus(); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
   if (act === 'feedback') { openFeedbackPanel(); return; }
@@ -4197,6 +4246,7 @@ async function shareDrill(d, btn) {
   if (!teamId) { alert('Pick a team for this practice first (👥 Team) — the shared drill is filed under it.'); return; }
   const dd = JSON.parse(JSON.stringify(d));
   delete dd.hidden; delete dd.audience;             // sharing it on its own overrides its visibility in the plan
+  delete dd.coachNotes; delete dd.coachnote;        // coach-only content never rides a public share
   delete dd.upload; delete dd.intro; delete dd.narration; // chunked video / recorded clips live under the original practice and don't travel
   const single = {
     ...JSON.parse(JSON.stringify(p)),
@@ -4252,6 +4302,7 @@ $('#btn-print').addEventListener('click', () => {
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${hasVideo(d) ? `<div class="p-vid">${videoPoster(d) ? `<img class="p-poster" src="${videoPoster(d)}" alt="">` : ''}<span class="p-meta">🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : escHtml(d.video)}</span></div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+        ${(d.coachNotes || '').trim() || d.coachnote ? `<div class="p-coach"><b>👁 Coaches only:</b> ${escHtml(d.coachNotes || '')}${d.coachnote ? `${(d.coachNotes || '').trim() ? ' · ' : ''}▶ audio note (${Math.round(d.coachnote.secs)} s, in the app)` : ''}</div>` : ''}
       </div>`;
   }).join('');
   $('#print-area').innerHTML = `
@@ -4290,6 +4341,12 @@ function videoPoster(d) {
   return v && /youtube/i.test(v.host || '') && v.id ? `https://img.youtube.com/vi/${v.id}/hqdefault.jpg` : null;
 }
 const hasVideo = d => !!(d.upload || (d.video && videoEmbed(d.video)));
+/** The coaches-only block on a drill card: shown on the coach link only. */
+function coachNotesHTML(d) {
+  if (presentAudience !== 'coach' || (!(d.coachNotes || '').trim() && !d.coachnote)) return '';
+  return `<div class="pr-coachnotes"><div class="pr-cn-head">👁 Coaches only${d.coachnote ? ` <button class="pr-cn-play" data-cndid="${d.id}">▶ Audio note (${Math.round(d.coachnote.secs)} s)</button>` : ''}</div>${(d.coachNotes || '').trim() ? `<pre>${escHtml(d.coachNotes)}</pre>` : ''}</div>`;
+}
+
 function videoBlockHTML(d) {
   const poster = videoPoster(d);
   const img = poster ? `<img class="pr-poster" src="${poster}" alt="" title="Watch the video">` : '';
@@ -4297,7 +4354,17 @@ function videoBlockHTML(d) {
   const v = d.video ? videoEmbed(d.video) : null;
   return v ? `<div class="pr-video" data-src="${escHtml(v.src)}" data-kind="${v.kind}" data-host="${escHtml(v.host)}">${img}<button class="pr-video-btn wp-toggle">🎬 Watch video <span class="muted small">(${escHtml(v.host)})</span></button></div>` : '';
 }
-$('#present-body').addEventListener('click', e => {
+let prCnPlaying = null;
+$('#present-body').addEventListener('click', async e => {
+  const cn = e.target.closest('.pr-cn-play');
+  if (cn) {
+    if (prCnPlaying) { prCnPlaying.stop(); prCnPlaying = null; return; }
+    const d = (presentPractice?.drills || []).find(x => x.id === cn.dataset.cndid);
+    if (!d?.coachnote) return;
+    const entry = await fetchClip(presentOwner, presentPractice.id, d, 'coachnote');
+    if (entry) prCnPlaying = playClip(entry, { onEnd: () => { prCnPlaying = null; } });
+    return;
+  }
   const poster = e.target.closest('.pr-poster');
   if (poster) { poster.closest('.pr-video')?.querySelector('.pr-video-btn')?.click(); return; }
   const tab = e.target.closest('.pr-tab');
@@ -4465,7 +4532,7 @@ function presentHTML(p) {
         <header><b>${i + 1}. ${escHtml(d.name)}</b>${minHTML(d)}${whenHTML(at, +d.duration || 0)}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : ''}
         ${videoBlockHTML(d)}
-        <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>
+        <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${coachNotesHTML(d)}${fbBtn(d.id)}</div>
       </section>`;
       }
       return `
@@ -4487,7 +4554,7 @@ function presentHTML(p) {
         ${hasVideo(d) ? '</div>' : ''}
         <div class="pr-text"><div class="pr-cue" hidden></div>
         ${rulesHTML(d)}
-        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${fbBtn(d.id)}</div>
+        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${coachNotesHTML(d)}${fbBtn(d.id)}</div>
       </section>`;
     }).join('')}
     <section class="pr-drill pr-dismissal">

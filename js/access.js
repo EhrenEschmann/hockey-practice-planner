@@ -57,7 +57,7 @@ export function publishedCopy(p, owner, as = 'coach') {
     let at = 0;
     for (const d of shown) { d.at = at; at += +d.duration || 0; }
     c.drills = shown.filter(d => d.audience !== 'coaches');
-    for (const d of c.drills) delete d.audience;
+    for (const d of c.drills) { delete d.audience; delete d.coachNotes; delete d.coachnote; } // coach-only notes stay off the team's copy
   } else c.drills = shown;
   c.owner = owner;
   return c;

@@ -471,10 +471,10 @@ function select(id) { sel = id; renderCanvas(); renderProps(); }
 // Tools that stay selected after a placement ("keep placing"): a row of tires, or a line of skaters, takes one click each.
 // With the skater option on, a click on open ice always places a new skater (finishing the one before as it stands); a
 // skater's path is drawn by clicking the skater itself, which extends its path as it always has.
-const keepTool = { tire: false, skater: false };
+const keepTool = { tire: false, skater: false, cone: false };
 let skaterExtending = false; // the active skater was clicked to extend its path (so, with keep placing on, clicks add waypoints)
 // The switch is a pin badge on the tool's own button (plus a hidden checkbox the Settings panel mirrors).
-for (const [t, box] of [['tire', '#tire-keep'], ['skater', '#skater-keep']]) {
+for (const [t, box] of [['tire', '#tire-keep'], ['skater', '#skater-keep'], ['cone', '#cone-keep']]) {
   try { keepTool[t] = localStorage.getItem(`hpp.keep.${t}`) === '1'; } catch { /* fine */ }
   const btn = $(`#toolbar .tool[data-tool="${t}"]`), badge = btn.querySelector('.qp');
   const paint = () => { btn.classList.toggle('qp-on', keepTool[t]); badge.setAttribute('aria-checked', String(keepTool[t])); };
@@ -2095,14 +2095,14 @@ function renderSettings() {
   const u = cloudSync?.user;
   $('#settings-who').textContent = u ? u.email : cloudBoot === 'none' ? 'local only' : 'not signed in';
   $('#settings-account').textContent = u ? `Signed in as ${u.name || u.email} (${u.email})${isOwner(u) ? ' — the planner' : ''}. Sign out is on the top bar.` : cloudBoot === 'none' ? 'No Firebase configured: everything stays on this device.' : 'Not signed in — practices, games and the Claude key are saved to the cloud once you sign in (top bar).';
-  const vals = { 'tire-keep': keepTool.tire, 'skater-keep': keepTool.skater, 'plan-pin': $('#sidebar').classList.contains('plan-unpinned') === false, voice: voiceOn, viewmode: presentMode === 'list' ? 'list' : 'focus' };
+  const vals = { 'tire-keep': keepTool.tire, 'skater-keep': keepTool.skater, 'cone-keep': keepTool.cone, 'plan-pin': $('#sidebar').classList.contains('plan-unpinned') === false, voice: voiceOn, viewmode: presentMode === 'list' ? 'list' : 'focus' };
   for (const el of $$('#settings [data-set]')) { if (el.type === 'checkbox') el.checked = !!vals[el.dataset.set]; else el.value = vals[el.dataset.set]; }
   renderAIPop();
 }
 $('#settings').addEventListener('change', e => {
   const k = e.target.dataset.set; if (!k) return;
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-  if (k === 'tire-keep' || k === 'skater-keep') { const box = $(`#${k}`); if (box.checked !== v) { box.checked = v; box.dispatchEvent(new Event('change')); } }
+  if (k === 'tire-keep' || k === 'skater-keep' || k === 'cone-keep') { const box = $(`#${k}`); if (box.checked !== v) { box.checked = v; box.dispatchEvent(new Event('change')); } }
   else if (k === 'plan-pin') { if ($('#sidebar').classList.contains('plan-unpinned') === v) $('#plan-pin').click(); }
   else if (k === 'voice') setVoice(v);
   else if (k === 'viewmode') { presentMode = v; try { localStorage.setItem('hpp.viewmode', v); } catch { /* fine */ } }

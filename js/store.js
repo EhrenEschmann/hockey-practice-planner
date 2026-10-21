@@ -99,6 +99,7 @@ export function migrateDrill(d) {
   for (const o of d.objects) if (o.type === 'coach') { o.path ||= []; o.speed ??= 10; o.delay ??= 0; } // coaches learned to move
   for (const o of d.objects) if (o.type === 'skater' && o.role === 'G' && o.color === 'black') o.color = 'green'; // goalies wear green now
   for (const o of d.objects) if (o.type === 'focus') o.fade ??= '0.5'; // focus areas lighten the ice markings inside
+  if (d.board?.audio) { d.boardAudio = d.board.audio; delete d.board.audio; } // chalk-talk audio moved to its own clip-kind field
   syncFollowers(d);
   return d;
 }

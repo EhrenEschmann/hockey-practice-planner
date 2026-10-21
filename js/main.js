@@ -17,7 +17,7 @@ const isEditing = () => /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?
 
 // ---------- setup ----------
 const svg = $('#rink');
-svg.innerHTML = `<style>${SVG_STYLE}</style><g id="rink-layer">${rinkSVG()}</g><g id="obj-layer"></g><g id="fx-layer"></g><g id="overlay-layer"></g>`;
+svg.innerHTML = `<style>${SVG_STYLE}</style><g id="rink-layer">${rinkSVG()}</g><g id="obj-layer"></g><g id="fx-layer"></g><g id="board-layer"></g><g id="overlay-layer"></g>`;
 let paintedSurface = 'ice';
 /** The surface under the open practice: the rink, or a dryland floor. Redrawn only when it changes. */
 function paintSurface() {
@@ -493,6 +493,242 @@ function placed(id) {
   if (tool !== 'select' && !keepTool[tool]) setTool('select');
 }
 
+// ---------- chalk talk: a whiteboard over the drill — draw while you talk, replay in sync ----------
+const boardLayer = svg.querySelector('#board-layer');
+let boardMode = null; // { strokes, cur, rec, recT0, recTimer, revoice, staged, audioMeta, playing, speed, color, dirty }
+const bNow = () => boardMode?.recT0 ? (performance.now() - boardMode.recT0) / 1000 : 0;
+const inkSecs = () => { let m = 0; for (const st of boardMode.strokes) { for (const q of st.pts) m = Math.max(m, q.t || 0); if (st.gone != null) m = Math.max(m, st.gone + ERASE_SECS); } return m; };
+
+function enterBoard() {
+  if (boardMode) return;
+  finishActive();
+  if (anim.playing) togglePlay();
+  const d = drill();
+  boardMode = {
+    strokes: JSON.parse(JSON.stringify(d.board?.strokes || [])),
+    cur: null, rec: null, recT0: 0, recTimer: 0, revoice: false,
+    staged: null, audioMeta: d.boardAudio || null, playing: null, arming: false,
+    speed: +(d.board?.speed) || 1, color: $('#board-color').value || '#e11d48', dirty: false,
+  };
+  document.body.classList.add('board-mode');
+  $('#board-bar').hidden = false;
+  $('#board-speed').value = String(boardMode.speed);
+  drawBoard();
+  renderBoardBar();
+}
+
+function exitBoard() {
+  if (!boardMode) return;
+  stopBoardPlayback();
+  clearInterval(boardMode.recTimer);
+  if (boardMode.rec) boardMode.rec.stop().catch(() => {});
+  boardMode = null;
+  boardLayer.innerHTML = '';
+  document.body.classList.remove('board-mode');
+  $('#board-bar').hidden = true;
+  renderAnimBar();
+}
+
+const ERASE_SECS = 0.6; // how long an undone stroke takes to un-draw itself in the replay
+
+/**
+ * Draw the ink; `tInk` (seconds on the ink clock) clips it for replay — Infinity shows the live board.
+ * A stroke undone during the take carries `gone`: in the replay it draws, then retracts at that moment;
+ * on the live board (and once the retraction is over) it is simply off the ice.
+ */
+function drawBoard(tInk = Infinity) {
+  if (!boardMode) return;
+  boardLayer.innerHTML = boardMode.strokes.map(st => {
+    let pts = st.pts;
+    if (tInk === Infinity) {
+      if (st.gone != null) return '';
+    } else {
+      if (st.gone != null && tInk >= st.gone + ERASE_SECS) return '';
+      pts = st.pts.filter(q => (q.t || 0) <= tInk);
+      if (st.gone != null && tInk > st.gone) { // being erased: un-draw from the end
+        const drawn = st.pts.filter(q => (q.t || 0) <= st.gone);
+        pts = drawn.slice(0, Math.max(0, Math.round(drawn.length * (1 - (tInk - st.gone) / ERASE_SECS))));
+      }
+    }
+    if (pts.length < 1) return '';
+    const dd = 'M' + pts.map(q => `${q.x},${q.y}`).join(' L');
+    return `<path d="${dd}" stroke="${st.color}" stroke-width="${st.w}"/>`;
+  }).join('');
+}
+
+function boardDown(e) {
+  if (boardMode.playing) stopBoardPlayback();
+  svg.setPointerCapture(e.pointerId);
+  const q = toRink(e);
+  boardMode.cur = { color: boardMode.color, w: 0.7, pts: [{ x: G.round1(q.x), y: G.round1(q.y), t: Math.round(bNow() * 100) / 100 }] };
+  boardMode.strokes.push(boardMode.cur);
+  boardMode.dirty = true;
+  drawBoard(); renderBoardBar();
+}
+function boardMove(e) {
+  const cur = boardMode.cur; if (!cur) return;
+  const q = toRink(e);
+  const last = cur.pts[cur.pts.length - 1];
+  if (Math.hypot(q.x - last.x, q.y - last.y) < 0.25) return;
+  cur.pts.push({ x: G.round1(q.x), y: G.round1(q.y), t: Math.round(bNow() * 100) / 100 });
+  drawBoard();
+}
+function boardUp() { boardMode.cur = null; }
+
+async function boardRecToggle() {
+  const b = boardMode;
+  if (b.arming) return; // the microphone is still warming up
+  if (b.rec) { // stop a take (fresh or re-voice)
+    const r = b.rec; b.rec = null;
+    clearInterval(b.recTimer);
+    stopBoardPlayback();
+    const { blob, mime, secs } = await r.stop();
+    if (blob.size && secs > 0.5) { b.staged = { blob, mime, secs }; b.dirty = true; }
+    b.revoice = false;
+    renderBoardBar(); return;
+  }
+  // The take starts NOW: the board clears and the clock runs, so strokes drawn while the
+  // microphone is still warming up are kept (re-based to the audio clock once it starts).
+  b.revoice = false; b.arming = true;
+  b.strokes = []; b.staged = null; b.dirty = true;
+  b.recT0 = performance.now();
+  b.recTimer = setInterval(renderBoardBar, 500);
+  drawBoard(); renderBoardBar();
+  let rec = null;
+  try { rec = await startRecording(); } catch (e) {
+    clearInterval(b.recTimer); b.recT0 = 0; b.arming = false;
+    alert(`Microphone not available: ${e?.message || e}`);
+    renderBoardBar(); return;
+  }
+  b.arming = false;
+  if (!boardMode || boardMode !== b) { rec.stop().catch(() => {}); return; } // the mode was left while the mic came up
+  const delay = (performance.now() - b.recT0) / 1000;
+  if (delay > 0.05) { // ink drawn during warm-up slides back to the start of the audio
+    for (const st of b.strokes) for (const q of st.pts) q.t = Math.max(0, Math.round((q.t - delay) * 100) / 100);
+    b.recT0 = performance.now();
+  }
+  b.rec = rec;
+  renderBoardBar();
+}
+
+async function boardRevoice() { // keep the ink; the drawing replays silently while a new voice records
+  const b = boardMode;
+  if (b.rec) return;
+  try { b.rec = await startRecording(); } catch (e) { alert(`Microphone not available: ${e?.message || e}`); return; }
+  b.revoice = true;
+  b.recT0 = performance.now();
+  b.recTimer = setInterval(renderBoardBar, 500);
+  startBoardPlayback({ silent: true });
+  renderBoardBar();
+}
+
+async function startBoardPlayback({ silent = false } = {}) {
+  stopBoardPlayback();
+  const b = boardMode;
+  const speed = b.speed || 1;
+  const total = inkSecs() / speed;
+  let audio = null, audioUrl = null;
+  if (!silent) {
+    if (b.staged) { audioUrl = URL.createObjectURL(b.staged.blob); audio = new Audio(audioUrl); }
+    else if (b.audioMeta) {
+      const entry = await fetchClip(ownerFor(), store.practice.id, drill(), 'boardAudio');
+      if (entry) audio = new Audio(entry.url);
+    }
+    audio?.play().catch(() => {});
+  }
+  const t0 = performance.now();
+  const st = { audio, audioUrl, raf: 0 };
+  b.playing = st;
+  const frame = () => {
+    if (boardMode?.playing !== st) return;
+    const el = (performance.now() - t0) / 1000;
+    drawBoard(el * speed);
+    const audioDone = !audio || audio.ended || audio.paused;
+    if (el >= total + 0.3 && audioDone && !(silent && boardMode.rec)) { stopBoardPlayback(); renderBoardBar(); return; }
+    st.raf = requestAnimationFrame(frame);
+  };
+  st.raf = requestAnimationFrame(frame);
+  renderBoardBar();
+}
+function stopBoardPlayback() {
+  const st = boardMode?.playing; if (!st) return;
+  cancelAnimationFrame(st.raf);
+  st.audio?.pause();
+  if (st.audioUrl) URL.revokeObjectURL(st.audioUrl);
+  boardMode.playing = null;
+  drawBoard();
+}
+
+async function boardSave() {
+  const b = boardMode, d = drill(), pid = store.practice.id;
+  let audio = b.audioMeta || null;
+  if (b.staged) {
+    const { blob, mime, secs } = b.staged;
+    const at = Date.now();
+    const key = keyFor(ownerFor(), pid, d, 'boardAudio');
+    forgetClip(key); idbDelClip(key).catch(() => {});
+    try { await idbPutClip(clipKey(ownerFor(), pid, clipDocId(d.id, 'boardAudio'), at), { mime, blob, secs }); } catch { /* the cloud copy still serves this device */ }
+    const up = await uploadClip(pid, clipDocId(d.id, 'boardAudio'), { mime, blob, secs });
+    audio = { secs, mime, size: blob.size, at, cloud: up.ok, ...(up.error ? { cloudError: up.error } : {}) };
+  }
+  const strokes = b.strokes.filter(st => st.pts.length > 1);
+  commit(() => {
+    if (!strokes.length && !audio) { delete d.board; delete d.boardAudio; }
+    else {
+      d.board = { strokes, speed: b.speed, secs: Math.round(Math.max(inkSecs(), audio?.secs || 0) * 10) / 10 };
+      if (audio) d.boardAudio = audio; else delete d.boardAudio;
+    }
+  });
+  b.audioMeta = audio; b.staged = null; b.dirty = false;
+  renderBoardBar();
+}
+
+function renderBoardBar() {
+  const b = boardMode; if (!b) return;
+  $('#board-rec').textContent = b.arming ? '● mic…' : b.rec && !b.revoice ? `■ Stop (${bNow().toFixed(0)} s)` : '● Record talk';
+  $('#board-rec').classList.toggle('danger', (!!b.rec || b.arming) && !b.revoice);
+  $('#board-rec').disabled = !!b.rec && b.revoice;
+  $('#board-revoice').hidden = !b.strokes.length && !b.rec;
+  $('#board-revoice').textContent = b.rec && b.revoice ? `■ Stop (${bNow().toFixed(0)} s)` : '🎙 Re-record voice';
+  $('#board-revoice').classList.toggle('danger', !!b.rec && b.revoice);
+  $('#board-play').hidden = !!b.rec || (!b.strokes.length && !b.staged && !b.audioMeta);
+  $('#board-play').textContent = b.playing ? '■ Stop' : '▶ Replay';
+  $('#board-save').disabled = !b.dirty;
+  $('#board-status').textContent = b.rec ? (b.revoice ? '● New voice — the drawing is replaying, talk over it' : '● Recording — draw as you talk')
+    : b.staged ? `New voice staged (${b.staged.secs.toFixed(0)} s) — Save to keep it`
+    : b.audioMeta ? `Voice: ${Math.round(b.audioMeta.secs)} s${b.audioMeta.cloud !== true ? ' · ⚠ not in the cloud' : ''}`
+    : 'Draw on the ice — ● records your voice while you draw';
+}
+
+$('#btn-board').addEventListener('click', enterBoard);
+$('#board-exit').addEventListener('click', exitBoard);
+$('#board-rec').addEventListener('click', boardRecToggle);
+$('#board-revoice').addEventListener('click', () => (boardMode?.rec && boardMode.revoice ? boardRecToggle() : boardRevoice()));
+$('#board-play').addEventListener('click', () => (boardMode?.playing ? (stopBoardPlayback(), renderBoardBar()) : startBoardPlayback()));
+$('#board-color').addEventListener('input', e => { if (boardMode) boardMode.color = e.target.value; });
+$('#board-speed').addEventListener('change', e => { if (!boardMode) return; boardMode.speed = +e.target.value || 1; boardMode.dirty = true; renderBoardBar(); });
+$('#board-undo').addEventListener('click', () => {
+  const b = boardMode; if (!b || (b.rec && b.revoice)) return;
+  if (b.rec) { // mid-take: the stroke stays in the story — it draws, then erases itself at this moment
+    const st = [...b.strokes].reverse().find(x => x.gone == null);
+    if (st) { st.gone = Math.round(bNow() * 100) / 100; b.dirty = true; }
+  } else {
+    const i = b.strokes.findLastIndex(x => x.gone == null);
+    b.strokes.splice(i >= 0 ? i : b.strokes.length - 1, 1);
+    b.dirty = true;
+  }
+  b.cur = null; drawBoard(); renderBoardBar();
+});
+$('#board-save').addEventListener('click', () => { boardSave(); });
+$('#board-clear').addEventListener('click', () => {
+  const b = boardMode; if (!b || (b.rec && b.revoice)) return;
+  if (b.rec) { // mid-take: a sweeping erase in the replay
+    const t = Math.round(bNow() * 100) / 100;
+    for (const st of b.strokes) if (st.gone == null) st.gone = t;
+  } else b.strokes = [];
+  b.cur = null; b.dirty = true; drawBoard(); renderBoardBar();
+});
+
 // ---------- pointer handling ----------
 svg.addEventListener('pointerdown', onPointerDown);
 svg.addEventListener('pointermove', onPointerMove);
@@ -504,6 +740,7 @@ svg.addEventListener('contextmenu', e => e.preventDefault());
 
 function onPointerDown(e) {
   if (e.button === 2) return;
+  if (boardMode) { if (e.button === 0) boardDown(e); return; }
   svg.setPointerCapture(e.pointerId);
   const raw = toRink(e);
   const p = snapPt(raw);
@@ -693,6 +930,7 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
+  if (boardMode) { boardMove(e); return; }
   if (pendingDbl && Math.hypot(e.clientX - pendingDbl.x, e.clientY - pendingDbl.y) > 4) pendingDbl = null; // it became a drag
   if (!drag) {
     if (activePoly && getObj(activePoly)) {
@@ -837,6 +1075,7 @@ function withObj(orig) {
 }
 
 function onPointerUp(e) {
+  if (boardMode) { boardUp(e); return; }
   document.body.classList.remove('panning');
   if (pendingDbl) { // released without moving: this really was a double-click
     const pd = pendingDbl; pendingDbl = null;
@@ -986,6 +1225,12 @@ document.addEventListener('keydown', e => {
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#tasks').hidden) { if (e.key === 'Escape' && !isEditing()) closeTasks(); return; } // the Tasks panel
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
+  if (boardMode) { // the whiteboard owns the keys: Esc leaves, C (or Delete) clears the ink, Backspace undoes a stroke
+    if (e.key === 'Escape') exitBoard();
+    else if (!isEditing() && (e.key === 'c' || e.key === 'C' || e.key === 'Delete')) $('#board-clear').click();
+    else if (!isEditing() && e.key === 'Backspace') { e.preventDefault(); $('#board-undo').click(); }
+    return;
+  }
   if (!$('#settings').hidden) { if (e.key === 'Escape') closeSettings(); return; }
   if (!$('#viewlog').hidden) { if (e.key === 'Escape') $('#viewlog').hidden = true; return; }
   if (!$('#feedback').hidden) { if (e.key === 'Escape') $('#feedback').hidden = true; return; }
@@ -1689,6 +1934,7 @@ function setBtnIcon(el, name) {
 }
 
 function renderAnimBar() {
+  $('#btn-board').classList.toggle('has-board', !!drill()?.board);
   if (isPSDrill(drill())) { // power skating mode: ▶/⏹ drive the 3D viewer; the timeline doesn't apply
     setBtnIcon($('#btn-play'), psViewInst?.playing ? 'pause' : 'play');
     $('#btn-play').disabled = !(drill().psElements || []).length;
@@ -2541,13 +2787,13 @@ let editingDrill = null;  // drill id being renamed inline (explicit edit mode: 
  * on this device and in the cloud — in the background; until each is up its row says so, and Upload now retries.
  */
 function markAssetsPending(d) {
-  for (const k of ['intro', 'narration', 'coachnote', 'upload']) if (d[k]) d[k] = { ...d[k], cloud: false, cloudError: 'copying from the original…' };
+  for (const k of ['intro', 'narration', 'coachnote', 'boardAudio', 'upload']) if (d[k]) d[k] = { ...d[k], cloud: false, cloudError: 'copying from the original…' };
 }
 async function copyDrillAssets(srcPid, src, dstPid, dst) {
   const owner = ownerFor();
   const settle = (k, up) => { if (!dst[k]) return; dst[k] = { ...dst[k], cloud: up.ok }; if (up.error) dst[k].cloudError = up.error; else delete dst[k].cloudError; store.save(); renderPlan(); };
   const missing = { ok: false, error: 'no copy of the original on this device or in the cloud' };
-  for (const kind of ['intro', 'narration', 'coachnote']) {
+  for (const kind of ['intro', 'narration', 'coachnote', 'boardAudio']) {
     if (!src[kind] || !dst[kind]) continue;
     let rec = null;
     try { rec = await idbGetClip(keyFor(owner, srcPid, src, kind)); } catch { rec = null; }
@@ -2580,7 +2826,7 @@ async function uploadClip(pid, did, { mime, blob, secs }) {
 /** After sign-in: any clip recorded while offline or refused by the rules is uploaded from this device's copy. */
 async function uploadPendingIntros() {
   if (!cloudBackend?.saveClip || !cloudSync?.user) return;
-  for (const p of store.data.practices) for (const d of p.drills) for (const kind of ['intro', 'narration', 'coachnote']) {
+  for (const p of store.data.practices) for (const d of p.drills) for (const kind of ['intro', 'narration', 'coachnote', 'boardAudio']) {
     if (!d[kind] || d[kind].cloud === true) continue;
     let rec = null;
     try { rec = await idbGetClip(keyFor(ownerFor(), p.id, d, kind)); } catch { rec = null; }

@@ -199,6 +199,19 @@
       <div id="ps-caption"></div>
     </div>
 
+    <div id="board-bar" hidden>
+      <span id="board-status" class="muted small"></span>
+      <button id="board-rec">● Record talk</button>
+      <button id="board-revoice" hidden title="Keep the drawing, replace the voice: the ink replays silently while you talk">🎙 Re-record voice</button>
+      <button id="board-play" hidden>▶ Replay</button>
+      <label class="check small">Pen <input type="color" id="board-color" value="#e11d48" title="Ink colour"></label>
+      <label class="check small">Drawing speed <select id="board-speed" title="Replay the ink faster or slower — the voice keeps its own pace"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+      <button id="board-undo" title="Remove the last stroke (Backspace). During a recording it stays in the story: the replay shows it drawn, then erased at this moment.">⌫ Undo stroke</button>
+      <button id="board-clear" title="Clear all ink (C or Delete). During a recording the replay shows everything being wiped at this moment.">🗑</button>
+      <span class="spacer"></span>
+      <button id="board-save" class="primary" disabled>Save</button>
+      <button id="board-exit" title="Leave the whiteboard (Esc)">Exit</button>
+    </div>
     <div id="animbar">
       <button id="btn-play" title="Play / pause (Space)"><span data-icon="play"></span></button>
       <button id="btn-stop" title="Stop &amp; reset"><span data-icon="stop"></span></button>
@@ -216,6 +229,7 @@
         </select>
       </label>
       <label class="check"><input type="checkbox" id="anim-trails" checked> Show paths</label>
+      <button id="btn-board" title="Chalk talk: a separate whiteboard mode — draw on this drill’s ice while you talk; edit the voice and the drawing speed afterwards">✏️ Talk</button>
       <button id="anim-voice" class="wp-toggle" title="Voice cues on — click to mute" hidden>🔊 voice</button>
       <label id="impact-loser-wrap" hidden>Impact: worse for
         <select id="impact-loser" title="Which skater gets the worse of each impact during playback"></select>

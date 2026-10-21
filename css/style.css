@@ -808,3 +808,15 @@ button.attn{border-color:var(--accent);color:var(--accent-2)}
 .pr-tab{padding:3px 12px;border-radius:999px;font-size:12.5px}
 .pr-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
 .pr-video .pr-poster{display:block;width:100%;max-width:520px;border-radius:8px;cursor:pointer;margin-bottom:4px}
+
+/* chalk talk (whiteboard) mode */
+#board-bar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--panel);border-top:1px solid var(--border);flex:none;flex-wrap:wrap}
+#board-bar[hidden]{display:none}
+#board-status{min-width:200px}
+#board-color{width:34px;height:24px;padding:1px;border-radius:5px}
+body.board-mode #animbar{display:none}
+body.board-mode #toolbar{pointer-events:none;opacity:.35}
+body.board-mode #video-pane{display:none}
+body.board-mode #rink{cursor:crosshair}
+#board-layer path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+#btn-board.has-board{border-color:#f5a623;color:#f5a623}

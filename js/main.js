@@ -532,13 +532,12 @@ function exitBoard() {
 const ERASE_SECS = 0.6; // how long an undone stroke takes to un-draw itself in the replay
 
 /**
- * Draw the ink; `tInk` (seconds on the ink clock) clips it for replay — Infinity shows the live board.
- * A stroke undone during the take carries `gone`: in the replay it draws, then retracts at that moment;
- * on the live board (and once the retraction is over) it is simply off the ice.
+ * The ink as SVG at ink-time `tInk` (Infinity = the finished board). A stroke undone during the take
+ * carries `gone`: it draws, then retracts at that moment; after the retraction (and on the live board)
+ * it is off the ice. Shared by the editor's whiteboard and the viewer's chalk-talk playback.
  */
-function drawBoard(tInk = Infinity) {
-  if (!boardMode) return;
-  boardLayer.innerHTML = boardMode.strokes.map(st => {
+function boardInkSVG(strokes, tInk = Infinity) {
+  return (strokes || []).map(st => {
     let pts = st.pts;
     if (tInk === Infinity) {
       if (st.gone != null) return '';
@@ -552,8 +551,13 @@ function drawBoard(tInk = Infinity) {
     }
     if (pts.length < 1) return '';
     const dd = 'M' + pts.map(q => `${q.x},${q.y}`).join(' L');
-    return `<path d="${dd}" stroke="${st.color}" stroke-width="${st.w}"/>`;
+    return `<path d="${dd}" stroke="${st.color}" stroke-width="${st.w}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
   }).join('');
+}
+
+function drawBoard(tInk = Infinity) {
+  if (!boardMode) return;
+  boardLayer.innerHTML = boardInkSVG(boardMode.strokes, tInk);
 }
 
 function boardDown(e) {
@@ -4600,8 +4604,54 @@ function videoBlockHTML(d) {
   const v = d.video ? videoEmbed(d.video) : null;
   return v ? `<div class="pr-video" data-src="${escHtml(v.src)}" data-kind="${v.kind}" data-host="${escHtml(v.host)}">${img}<button class="pr-video-btn wp-toggle">🎬 Watch video <span class="muted small">(${escHtml(v.host)})</span></button></div>` : '';
 }
+// ----- chalk talk in the viewer: the coach's drawing replays over the drill's ice, voice in sync -----
+let prBoard = null; // { sec, btn, layer, audio, raf }
+function stopPrBoard() {
+  if (!prBoard) return;
+  cancelAnimationFrame(prBoard.raf);
+  prBoard.audio?.pause();
+  prBoard.layer?.remove();
+  prBoard.btn.textContent = '🖍 Chalk talk';
+  prBoard = null;
+}
+async function togglePrBoard(sec, btn) {
+  if (prBoard?.sec === sec) { stopPrBoard(); return; }
+  stopPrBoard();
+  const d = (presentPractice?.drills || []).find(x => x.id === sec?.dataset.did);
+  const svgEl = sec?.querySelector('.pr-fig svg');
+  if (!d?.board?.strokes?.length || !svgEl) return;
+  sec._pause?.(); // the drill's own animation (and voice) steps aside
+  const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  layer.setAttribute('class', 'pr-board-layer');
+  svgEl.appendChild(layer);
+  let audio = null;
+  if (d.boardAudio) {
+    const entry = await fetchClip(presentOwner, presentPractice.id, d, 'boardAudio').catch(() => null);
+    if (entry) audio = new Audio(entry.url);
+  }
+  const strokes = d.board.strokes;
+  const speed = +d.board.speed || 1;
+  const inkEnd = strokes.reduce((m, st) => Math.max(m, st.gone != null ? st.gone + ERASE_SECS : 0, ...st.pts.map(q => q.t || 0)), 0);
+  const t0 = performance.now();
+  const me = { sec, btn, layer, audio, raf: 0 };
+  prBoard = me;
+  btn.textContent = '■ Stop chalk talk';
+  audio?.play().catch(() => {});
+  const frame = () => {
+    if (prBoard !== me) return;
+    const el = (performance.now() - t0) / 1000;
+    layer.innerHTML = boardInkSVG(strokes, el * speed);
+    const audioDone = !audio || audio.ended || audio.paused;
+    if (el >= inkEnd / speed + 0.5 && audioDone) { stopPrBoard(); return; }
+    me.raf = requestAnimationFrame(frame);
+  };
+  me.raf = requestAnimationFrame(frame);
+}
+
 let prCnPlaying = null;
 $('#present-body').addEventListener('click', async e => {
+  const bb = e.target.closest('.pr-board-btn');
+  if (bb) { togglePrBoard(bb.closest('.pr-drill'), bb); return; }
   const cn = e.target.closest('.pr-cn-play');
   if (cn) {
     if (prCnPlaying) { prCnPlaying.stop(); prCnPlaying = null; return; }
@@ -4796,6 +4846,7 @@ function presentHTML(p) {
           <select class="pr-speed" title="${d.narration ? 'Speed is fixed: the coach recorded a voice-over at this speed' : 'Playback speed'}" ${d.narration ? 'disabled' : ''}>${['0.25', '0.5', '0.75', '0.9', '1', '1.5', '2'].map(s => `<option value="${s}" ${+s === (+d.animSpeed || 1) ? 'selected' : ''}>${s}×</option>`).join('')}</select>
           <label class="check small"><input type="checkbox" class="pr-paths" ${d.showPaths !== false ? 'checked' : ''}> paths</label>
           <span class="pr-impact"></span>
+          ${d.board?.strokes?.length ? `<button class="pr-board-btn" title="Chalk talk — the coach draws on this ice and talks it through${d.boardAudio ? '' : ' (no voice recorded)'}">🖍 Chalk talk</button>` : ''}
         </div>
         ${hasVideo(d) ? '</div>' : ''}
         <div class="pr-text"><div class="pr-cue" hidden></div>
@@ -4885,6 +4936,7 @@ const presentAnims = [];
 const presentPSTiles = []; // little looping 3D viewers on power skating cards
 let presentPSObserver = null; // runs a tile's loop only while it is actually on screen
 function stopPresentAnims() {
+  stopPrBoard();
   hushVoice();
   for (const a of presentAnims) { cancelAnimationFrame(a.raf); if (a.intro) { a.intro.cancelled = true; a.intro.stop(); } a.stopNarr?.(); }
   presentAnims.length = 0;

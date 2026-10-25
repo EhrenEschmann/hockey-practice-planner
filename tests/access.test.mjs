@@ -70,6 +70,8 @@ const copy = publishedCopy({ ...p1, sharedWith: ['x@x.io'], sentTeamAt: 1 }, 'OW
   const team = publishedCopy(q, 'o', 'team');
   assert.deepEqual(team.drills.map(d => [d.id, d.at]), [['a', 0], ['c', 13]], 'the team does not get it, and the next drill still starts at minute 13');
   assert.ok(!('audience' in team.drills[0]));
+  assert.deepEqual(team.coachOnly, { count: 1, minutes: 3 }, 'the team copy knows how much coach-led time it is missing, not what it is');
+  assert.ok(!('coachOnly' in publishedCopy(q, 'o')), 'the coaches get the drill itself instead');
 }
 assert.deepEqual(Object.keys(copy).sort(), ['date', 'drills', 'id', 'owner', 'team']);
 assert.equal(copy.drills.length, 1, 'hidden drills are not published');

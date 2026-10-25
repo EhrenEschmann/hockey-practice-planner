@@ -4763,7 +4763,7 @@ function presentHTML(p) {
     <div class="pr-team">${escHtml(docTitle(p))}</div>
     <div class="pr-meta">${escHtml(whenLabel(p, true))}</div>
     ${p.coaches ? `<div class="pr-meta">Coaches: ${escHtml(p.coaches)}</div>` : ''}
-    <div class="pr-meta">${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${game ? '' : ` · ${total} min`}${startMin != null ? ` · start @ ${clockFull(startMin)}` : ''}</div>
+    <div class="pr-meta">${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${game ? '' : ` · ${total} min`}${p.coachOnly?.count ? ` <span class="pr-coachonly" title="Part of the practice the coaches run without a diagram here">+ ${p.coachOnly.minutes} min coach-led (${p.coachOnly.count} segment${p.coachOnly.count === 1 ? '' : 's'})</span>` : ''}${startMin != null ? ` · start @ ${clockFull(startMin)}` : ''}</div>
     <div class="pr-meta pr-review" title="${escHtml(est.detail)}">⏱ About ${est.min} min to review this plan${est.detail ? ` <span class="muted">(${escHtml(est.detail)})</span>` : ''}</div>
     </div>
     ${drills.map((d, i) => {

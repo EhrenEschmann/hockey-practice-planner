@@ -820,3 +820,4 @@ body.board-mode #video-pane{display:none}
 body.board-mode #rink{cursor:crosshair}
 #board-layer path{fill:none;stroke-linecap:round;stroke-linejoin:round}
 #btn-board.has-board{border-color:#f5a623;color:#f5a623}
+.pr-coachonly{color:#f4c542} /* the team's overview: coach-led time it does not get a card for */

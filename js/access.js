@@ -56,8 +56,10 @@ export function publishedCopy(p, owner, as = 'coach') {
   if (as === 'team') {
     let at = 0;
     for (const d of shown) { d.at = at; at += +d.duration || 0; }
+    const co = shown.filter(d => d.audience === 'coaches');
     c.drills = shown.filter(d => d.audience !== 'coaches');
     for (const d of c.drills) { delete d.audience; delete d.coachNotes; delete d.coachnote; } // coach-only notes stay off the team's copy
+    if (co.length) c.coachOnly = { count: co.length, minutes: co.reduce((s, d) => s + (+d.duration || 0), 0) }; // the overview says the time is set aside, without saying what it is
   } else c.drills = shown;
   c.owner = owner;
   return c;

@@ -224,10 +224,12 @@ export function parseRoute({ pathname = '/', hash = '' } = {}) {
   // /coach/{teamId}/tasks and /games are the team home's other tabs (the first is the practice list).
   if ((a === 'coach' || a === 'team') && seg.length === 3 && LIST_TABS.includes(c)) return { view: a, teamId: b, pid: null, did: null, tab: c };
   if ((a === 'coach' || a === 'team') && seg.length <= 3) return c ? { view: a, teamId: b, pid: c, did: null } : { view: a, teamId: null, pid: b || null, did: null, ambiguous: !!b };
+  if (a === 'ask' && seg.length === 3) return { view: 'ask', pollId: b, token: c, pid: null, did: null };
   if (a === 'request-access' && seg.length === 1) return { view: 'request', pid: null, did: null };
   return { view: 'unknown', pid: null, did: null };
 }
-export function routePath({ view, teamId = null, pid, did, tab = null }) {
+export function routePath({ view, teamId = null, pid, did, tab = null, pollId = null, token = null }) {
+  if (view === 'ask') return `/ask/${pollId}/${token}`;
   if (view === 'editor') return `/editor${pid ? `/${pid}${did ? `/${did}` : ''}` : ''}`;
   if (view === 'coach' || view === 'team') return `/${view}${teamId ? `/${teamId}` : ''}${pid ? `/${pid}` : teamId && tab && tab !== defaultTab(view) ? `/${tab}` : ''}`;
   if (view === 'request') return '/request-access';
@@ -245,6 +247,8 @@ export function resolveRoute(route, who) {
   const { view } = route;
   if (view === 'unknown') return { go: '/' };
   if (route.legacy && view !== 'root') return { go: routePath(route) };
+  // A player's personal answer link works for anyone who holds it — the token is the identity.
+  if (view === 'ask') return route.pollId && route.token ? { screen: 'ask', pollId: route.pollId, token: route.token } : { go: '/' };
   if (persona === 'anonymous') return { screen: 'signin' };
   // A lone id after /coach or /team: a team this person is on, else a practice (an older link). A practice whose team
   // is known gets its full path; otherwise it is opened as it is and the app fills the team in once it has loaded.

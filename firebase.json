@@ -3,7 +3,9 @@
     "rules": "firestore.rules"
   },
   "hosting": {
-    "predeploy": ["node scripts/stamp-version.mjs"],
+    "predeploy": [
+      "node scripts/stamp-version.mjs"
+    ],
     "public": ".",
     "ignore": [
       "firebase.json",
@@ -35,7 +37,7 @@
         ]
       },
       {
-        "//": "Modules and styles: revalidate too — sw.js is network-first and serves the cache only when offline.",
+        "//": "Modules and styles: revalidate too \u2014 sw.js is network-first and serves the cache only when offline.",
         "source": "**/*.@(js|css)",
         "headers": [
           {
@@ -72,6 +74,10 @@
       },
       {
         "source": "/request-access",
+        "destination": "/index.html"
+      },
+      {
+        "source": "/ask/**",
         "destination": "/index.html"
       }
     ]

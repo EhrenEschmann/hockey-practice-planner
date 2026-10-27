@@ -314,12 +314,25 @@
     </div>
   </div>
 </div>
+<div id="ask-screen" hidden></div>
+<div id="askmgr" hidden>
+  <div class="lib-panel">
+    <div class="lib-head">
+      <b>📊 Questions to the players</b>
+      <span class="muted small">each player answers (and can change it) through their own link</span>
+      <span class="spacer"></span>
+      <button id="askmgr-close" title="Close (Esc)"><span data-icon="x"></span> Done</button>
+    </div>
+    <div id="askmgr-body"></div>
+  </div>
+</div>
 <div id="teammgr" hidden>
   <div class="lib-panel">
     <div class="lib-head">
       <b>👥 Team</b>
       <select id="team-select" title="Which team to manage"></select>
       <button id="team-add" title="Add a team">＋ Team</button>
+      <button id="team-ask" title="Questions to the players — tournament interest, availability, preferences — answered through personal links">📊 Questions</button>
       <button id="team-del" class="danger" title="Delete this team from the roster"><span data-icon="x"></span> Delete team</button>
       <span class="spacer"></span>
       <span class="muted small">Saved to your account</span>

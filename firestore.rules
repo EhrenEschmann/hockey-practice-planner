@@ -135,6 +135,23 @@ service cloud.firestore {
       allow read, write: if isPlanner() && request.auth.uid == uid;
     }
 
+    // ---- questions to the players ("polls"): each player answers through an unguessable personal link.
+    //      The link's token is the identity: the poll id and token are random, so possession of the URL is
+    //      what grants access — the same model as an unlisted document link. Planner manages everything.
+    match /polls/{pollId} {
+      allow read: if request.auth != null;
+      allow write: if isPlanner();
+      match /answers/{token} {
+        allow get: if request.auth != null;
+        allow list: if isPlanner();
+        allow create, delete: if isPlanner();
+        allow update: if isPlanner() || (request.auth != null
+          && request.resource.data.player == resource.data.player
+          && request.resource.data.choice is string && request.resource.data.choice.size() <= 120
+          && request.resource.data.note is string && request.resource.data.note.size() <= 500);
+      }
+    }
+
     // ---- sign-ins that got nowhere: someone on no roster opened the app — one document per account, in their own
     //      name, so the planner can see who tried (and let them in). Nothing else is readable to them.
     match /attempts/{uid} {

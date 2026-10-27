@@ -821,3 +821,31 @@ body.board-mode #rink{cursor:crosshair}
 #board-layer path{fill:none;stroke-linecap:round;stroke-linejoin:round}
 #btn-board.has-board{border-color:#f5a623;color:#f5a623}
 .pr-coachonly{color:#f4c542} /* the team's overview: coach-led time it does not get a card for */
+
+/* a player's personal answer page */
+#ask-screen{position:fixed;inset:0;z-index:700;background:var(--bg);overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px}
+#ask-screen[hidden]{display:none}
+.ask-card{width:min(560px,100%);background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.ask-q{margin:8px 0 2px;font-size:22px;line-height:1.3}
+.ask-for{margin:4px 0 14px}
+.ask-opts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.ask-opt{padding:12px 18px;font-size:16px;border-radius:10px}
+.ask-opt.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.ask-card textarea{margin-bottom:8px}
+
+/* questions manager */
+#askmgr{position:fixed;inset:0;z-index:260;background:rgba(10,12,16,.6);display:flex;align-items:center;justify-content:center}
+#askmgr[hidden]{display:none}
+#askmgr .lib-panel{width:min(860px,94vw);max-height:88vh;display:flex;flex-direction:column}
+#askmgr-body{overflow-y:auto;padding:12px 14px}
+.ask-new{border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--panel-2)}
+.ask-new h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.ask-poll{margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+.ask-poll-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ask-rows{margin-top:6px;display:flex;flex-direction:column;gap:2px}
+.ask-row{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:5px}
+.ask-row:nth-child(odd){background:var(--panel-2)}
+.ask-name{min-width:140px}
+.ask-ans{color:var(--muted)}
+.ask-ans.on{color:var(--accent-2);font-weight:600}
+.ask-notetxt{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}

@@ -1229,6 +1229,7 @@ document.addEventListener('keydown', e => {
   if (!$('#library').hidden) { if (e.key === 'Escape') closeLibrary(); return; } // the library modal captures the keyboard
   if (!$('#tasks').hidden) { if (e.key === 'Escape' && !isEditing()) closeTasks(); return; } // the Tasks panel
   if (!$('#teammgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeTeamMgr(); return; } // same for the team manager
+  if (!$('#askmgr').hidden) { if (e.key === 'Escape' && !isEditing()) closeAskMgr(); return; } // and the questions manager
   if (boardMode) { // the whiteboard owns the keys: Esc leaves, C (or Delete) clears the ink, Backspace undoes a stroke
     if (e.key === 'Escape') exitBoard();
     else if (!isEditing() && (e.key === 'c' || e.key === 'C' || e.key === 'Delete')) $('#board-clear').click();
@@ -2321,6 +2322,121 @@ function currentMgrTeam() {
     || teams.find(t => (t.name || '').toLowerCase() === (store.practice.team || '').toLowerCase())
     || teams[0] || null;
 }
+
+// ---------- questions to the players: create a poll, hand out one link per player, watch the answers ----------
+let askAnswers = {}; // pollId → { token: answer }
+const pollLink = (pollId, token) => `${location.origin}${routePath({ view: 'ask', pollId, token })}`;
+
+async function openAskMgr() {
+  $('#teammgr').hidden = true;
+  $('#askmgr').hidden = false;
+  if (!(store.data.polls || []).length && cloudSync?.user && cloudBackend?.loadPollIndex) {
+    try { const idx = await cloudBackend.loadPollIndex(cloudSync.user.uid); if (idx?.polls?.length) { store.data.polls = idx.polls; store.persist(); } } catch { /* local list stands */ }
+  }
+  renderAskMgr();
+  refreshAskAnswers();
+}
+function closeAskMgr() { $('#askmgr').hidden = true; }
+
+async function refreshAskAnswers() {
+  if (!cloudBackend?.loadPollAnswers) return;
+  for (const poll of store.data.polls || []) {
+    try { askAnswers[poll.id] = await cloudBackend.loadPollAnswers(poll.id); } catch { /* offline: show what we have */ }
+  }
+  if (!$('#askmgr').hidden) renderAskMgr();
+}
+
+function savePollRegistry() {
+  store.persist();
+  if (cloudSync?.user && cloudBackend?.savePollIndex) cloudBackend.savePollIndex(cloudSync.user.uid, { polls: store.data.polls || [], updatedAt: Date.now() }).catch(() => {});
+}
+
+function renderAskMgr() {
+  const teams = (store.roster.teams || []).filter(t => (t.name || '').trim());
+  const polls = store.data.polls || [];
+  $('#askmgr-body').innerHTML = `
+    <div class="ask-new">
+      <h3>New question</h3>
+      <label class="field"><span>Question</span><input id="askq" placeholder="e.g. Can you play the Thanksgiving tournament (Nov 27–29)?" maxlength="200"></label>
+      <label class="field"><span>Answer choices (comma-separated)</span><input id="asko" value="Yes, No, Maybe" maxlength="200"></label>
+      <label class="field"><span>Team</span><select id="askt">${teams.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('')}</select></label>
+      <div class="row"><button id="ask-create" class="primary" ${teams.length ? '' : 'disabled title="Add a team with players under 👥 Team first"'}>Create — one link per player</button></div>
+    </div>
+    ${polls.map(poll => {
+      const ans = askAnswers[poll.id] || {};
+      const answered = poll.players.filter(pl => ans[pl.token]?.choice).length;
+      const counts = {};
+      for (const pl of poll.players) { const c = ans[pl.token]?.choice; if (c) counts[c] = (counts[c] || 0) + 1; }
+      return `<div class="ask-poll" data-poll="${poll.id}">
+        <div class="ask-poll-head"><b>${escHtml(poll.question)}</b>
+          <span class="muted small">${escHtml(poll.team)} · ${usDate(new Date(poll.createdAt).toISOString().slice(0, 10))} · ${answered}/${poll.players.length} answered${Object.keys(counts).length ? ' — ' + Object.entries(counts).map(([k, n]) => `${escHtml(k)}: ${n}`).join(' · ') : ''}</span>
+          <span class="spacer"></span>
+          <button data-pact="copyall" title="Copy every player's link, one per line — paste into the team chat">🔗 Copy all links</button>
+          <button data-pact="refresh" title="Fetch the latest answers">⟳</button>
+          <button data-pact="del" class="danger" title="Delete this question and its answers">${icon('x')}</button>
+        </div>
+        <div class="ask-rows">${poll.players.map(pl => {
+          const a = ans[pl.token];
+          return `<div class="ask-row">
+            <span class="ask-name">${escHtml(pl.name)}</span>
+            <span class="ask-ans ${a?.choice ? 'on' : ''}">${escHtml(a?.choice || '—')}</span>
+            ${a?.note ? `<span class="ask-notetxt" title="${escHtml(a.note)}">💬 ${escHtml(a.note.slice(0, 60))}</span>` : ''}
+            <span class="spacer"></span>
+            <button data-pact="copy" data-token="${pl.token}" title="Copy ${escHtml(pl.name)}’s personal link">🔗</button>
+          </div>`;
+        }).join('')}</div>
+      </div>`;
+    }).join('') || '<p class="muted" style="margin-top:12px">No questions yet.</p>'}`;
+}
+
+async function createPoll() {
+  const question = $('#askq').value.trim();
+  const options = $('#asko').value.split(',').map(x => x.trim()).filter(Boolean).slice(0, 6);
+  const team = store.roster.teams.find(t => t.id === $('#askt').value);
+  if (!question) { alert('Write the question first.'); return; }
+  if (!team) { alert('Pick a team.'); return; }
+  const players = (team.players || []).filter(pl => (pl.name || '').trim());
+  if (!players.length) { alert(`No players on “${team.name}” yet — add them under 👥 Team.`); return; }
+  if (!cloudSync?.user || !cloudBackend?.savePoll) { alert('Sign in first — answers are collected through your cloud account.'); return; }
+  const poll = {
+    id: uid() + uid(), question, options: options.length ? options : ['Yes', 'No'],
+    teamId: team.id, team: team.name || '', createdAt: Date.now(),
+    players: players.map(pl => ({ id: pl.id, name: pl.name, token: uid() + uid() })),
+  };
+  try {
+    await cloudBackend.savePoll(poll.id, { question: poll.question, options: poll.options, team: poll.team, createdAt: poll.createdAt });
+    for (const pl of poll.players) await cloudBackend.savePollAnswer(poll.id, pl.token, { player: pl.name, choice: '', note: '', createdAt: Date.now() });
+  } catch (e) { alert(`Could not create the question: ${e?.message || e}`); return; }
+  store.data.polls = [poll, ...(store.data.polls || [])];
+  savePollRegistry();
+  renderAskMgr();
+}
+
+$('#team-ask').addEventListener('click', openAskMgr);
+$('#askmgr-close').addEventListener('click', closeAskMgr);
+$('#askmgr').addEventListener('click', async e => {
+  if (e.target === $('#askmgr')) return closeAskMgr();
+  if (e.target.closest('#ask-create')) { createPoll(); return; }
+  const btn = e.target.closest('[data-pact]'); if (!btn) return;
+  const pollEl = btn.closest('.ask-poll');
+  const poll = (store.data.polls || []).find(x => x.id === pollEl?.dataset.poll); if (!poll) return;
+  const flash = txt => { const old = btn.textContent; btn.textContent = txt; setTimeout(() => { btn.textContent = old; }, 1400); };
+  if (btn.dataset.pact === 'copy') {
+    const url = pollLink(poll.id, btn.dataset.token);
+    try { await navigator.clipboard.writeText(url); flash('✓'); } catch { prompt('Copy this link:', url); }
+  } else if (btn.dataset.pact === 'copyall') {
+    const text = poll.players.map(pl => `${pl.name}: ${pollLink(poll.id, pl.token)}`).join('\n');
+    try { await navigator.clipboard.writeText(text); flash('✓ Copied'); } catch { prompt('Copy these links:', text); }
+  } else if (btn.dataset.pact === 'refresh') {
+    try { askAnswers[poll.id] = await cloudBackend.loadPollAnswers(poll.id); renderAskMgr(); } catch (err) { alert(`Could not fetch answers: ${err?.message || err}`); }
+  } else if (btn.dataset.pact === 'del') {
+    if (!confirm(`Delete “${poll.question}” and all its answers? The links stop working.`)) return;
+    try { await cloudBackend.removePoll(poll.id, poll.players.map(pl => pl.token)); } catch (err) { alert(`Could not delete: ${err?.message || err}`); return; }
+    store.data.polls = store.data.polls.filter(x => x.id !== poll.id);
+    savePollRegistry();
+    renderAskMgr();
+  }
+});
 
 function openTeamMgr() {
   finishActive();
@@ -5333,7 +5449,9 @@ function refreshScreen() {
   else if (r.screen === 'practice' && r.teamId && ['coach', 'team', 'planner'].includes(who.persona)) paintTabs(r.as, r.teamId, practiceItems(r.as).find(x => x.pid === r.pid)?.kind === 'game' ? 'games' : 'practice');
   else $('#present-tabs').hidden = true;
   const offlineMsg = `Couldn't connect. Check your internet connection — a content blocker or a filtered Wi-Fi network can also stop it — then try again.${cloudBootError ? ` (${cloudBootError})` : ''}`;
+  $('#ask-screen').hidden = r.screen !== 'ask';
   switch (r.screen) {
+    case 'ask': leavePractice(); showAsk(r); break;
     case 'practice': showPractice(r); paintWhen(); break; // the list may have changed under an open practice (a newer one released)
     case 'list': leavePractice(); showList(r); break;
     case 'teams': leavePractice(); showTeams(r); break;
@@ -5909,6 +6027,82 @@ $('#present-home').addEventListener('click', () => { // this team's list; on sev
 let myRequest;           // undefined = not loaded; null = none filed; else the requests/{uid} document
 let myRequestFor = null;
 let attemptLogged = null; // uid whose failed sign-in this session already recorded
+// ---------- a player's personal answer page (/ask/{pollId}/{token}) ----------
+let askState = null; // { pollId, token, poll, answer, pending, loading, anonTried }
+async function showAsk(r) {
+  $('#present-title').textContent = '';
+  $('#present-gate').hidden = true; // the answer page is its own gate
+  const scr = $('#ask-screen');
+  scr.hidden = false;
+  if (!askState || askState.pollId !== r.pollId || askState.token !== r.token) {
+    askState = { pollId: r.pollId, token: r.token, poll: null, answer: null, pending: null, loading: false, anonTried: false };
+  }
+  const a = askState;
+  const card = html => { scr.innerHTML = `<div class="ask-card">${html}</div>`; };
+  const u = cloudSync?.user;
+  if (!cloudBackend) { card('<p>This link needs a connection — try again online.</p>'); return; }
+  if (!u) {
+    if (!a.anonTried && cloudSync?.signInAnon) { // no account needed: slip in as a guest
+      a.anonTried = true;
+      card('<p class="muted">One moment…</p>');
+      cloudSync.signInAnon().catch(() => card('<p>Could not open the question. Reload to try again.</p>'));
+      return;
+    }
+    card('<p class="muted">One moment…</p>');
+    return;
+  }
+  if (!a.poll && !a.loading) {
+    a.loading = true;
+    card('<p class="muted">Loading…</p>');
+    try {
+      const [poll, answer] = await Promise.all([cloudBackend.loadPoll(a.pollId), cloudBackend.loadPollAnswer(a.pollId, a.token)]);
+      a.loading = false;
+      if (!poll || !answer) { card('<p>This question is no longer open — ask your coach for a fresh link.</p>'); return; }
+      a.poll = poll; a.answer = answer; a.pending = answer.choice || null;
+    } catch (e) { a.loading = false; card(`<p>Could not load the question: ${escHtml(e?.message || String(e))}</p>`); return; }
+  }
+  if (a.poll) renderAsk();
+}
+
+function renderAsk(status = '') {
+  const a = askState;
+  $('#ask-screen').innerHTML = `<div class="ask-card">
+    <div class="muted small">🏒 ${escHtml(a.poll.team || 'Your team')} asks${a.poll.createdAt ? ` · ${usDate(new Date(a.poll.createdAt).toISOString().slice(0, 10))}` : ''}</div>
+    <h2 class="ask-q">${escHtml(a.poll.question)}</h2>
+    <div class="ask-for">Answering for <b>${escHtml(a.answer.player || 'you')}</b></div>
+    <div class="ask-opts">${(a.poll.options?.length ? a.poll.options : ['Yes', 'No']).map(o =>
+      `<button class="ask-opt${a.pending === o ? ' on' : ''}" data-opt="${escHtml(o)}">${escHtml(o)}</button>`).join('')}</div>
+    <textarea id="ask-note" rows="2" maxlength="500" placeholder="Anything to add? (optional)">${escHtml(a.answer.note || '')}</textarea>
+    <div class="row">
+      <button id="ask-save" class="primary" ${a.pending ? '' : 'disabled'}>${a.answer.choice ? 'Update my answer' : 'Send my answer'}</button>
+      <span id="ask-status" class="muted small">${escHtml(status || (a.answer.choice ? `Current answer: ${a.answer.choice}${a.answer.answeredAt ? ` · ${stamp(a.answer.answeredAt)}` : ''}` : ''))}</span>
+    </div>
+    <p class="muted small">You can come back to this link and change your answer any time.</p>
+  </div>`;
+}
+
+$('#ask-screen').addEventListener('click', async e => {
+  const a = askState; if (!a?.poll) return;
+  const opt = e.target.closest('.ask-opt');
+  if (opt) {
+    a.pending = opt.dataset.opt;
+    const note = $('#ask-note')?.value ?? a.answer.note ?? '';
+    a.answer.note = note;
+    renderAsk();
+    return;
+  }
+  if (e.target.closest('#ask-save') && a.pending) {
+    const note = ($('#ask-note')?.value || '').slice(0, 500);
+    const doc = { player: a.answer.player || '', choice: a.pending, note, answeredAt: Date.now() };
+    renderAsk('Sending…');
+    try {
+      await cloudBackend.savePollAnswer(a.pollId, a.token, doc);
+      a.answer = { ...a.answer, ...doc };
+      renderAsk('Saved ✓ — thanks!');
+    } catch (err) { renderAsk(`Could not save: ${err?.message || err}`); }
+  }
+});
+
 async function showRequest() {
   $('#present-title').textContent = '';
   const u = cloudSync?.user; if (!u) return;

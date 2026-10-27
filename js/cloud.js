@@ -129,6 +129,19 @@ export async function firebaseBackend(config) {
     async removePerson(email) { await fs.deleteDoc(fs.doc(db, 'people', email)); },
     subscribePerson(email, cb) { return fs.onSnapshot(fs.doc(db, 'people', email), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err)); },
     /** An older link that named only the practice: which team is it under? */
+    // ---- questions to the players: the poll doc (no tokens inside) and one answer doc per personal link
+    async savePoll(pollId, doc) { await fs.setDoc(fs.doc(db, 'polls', pollId), doc); },
+    async loadPoll(pollId) { const s = await fs.getDoc(fs.doc(db, 'polls', pollId)); return s.exists() ? s.data() : null; },
+    async removePoll(pollId, tokens) {
+      for (const t of tokens || []) await fs.deleteDoc(fs.doc(db, 'polls', pollId, 'answers', t)).catch(() => {});
+      await fs.deleteDoc(fs.doc(db, 'polls', pollId));
+    },
+    async savePollAnswer(pollId, token, doc) { await fs.setDoc(fs.doc(db, 'polls', pollId, 'answers', token), doc, { merge: true }); },
+    async loadPollAnswer(pollId, token) { const s = await fs.getDoc(fs.doc(db, 'polls', pollId, 'answers', token)); return s.exists() ? s.data() : null; },
+    async loadPollAnswers(pollId) { return Object.fromEntries((await fs.getDocs(fs.collection(db, 'polls', pollId, 'answers'))).docs.map(d => [d.id, d.data()])); },
+    async savePollIndex(uid, doc) { await fs.setDoc(fs.doc(db, 'users', uid, 'meta', 'polls'), doc); },
+    async loadPollIndex(uid) { const s = await fs.getDoc(fs.doc(db, 'users', uid, 'meta', 'polls')); return s.exists() ? s.data() : null; },
+    /** An older link that named only the practice: which team is it under? */
     async lookupTeam(pid) { const s = await fs.getDoc(fs.doc(db, 'practiceIndex', pid)); return s.exists() ? s.data().teamId : null; },
     // ---- viewers: one team's released headers, live; one practice (header + body), live
     subscribeTeamPractices(t, stages, cb) {

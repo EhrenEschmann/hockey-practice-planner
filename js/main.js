@@ -4624,25 +4624,30 @@ function shareView(d) {
  * Print: every drill overlaid on one full-rink picture — the whole practice's use of the ice at a glance.
  * Each drill's area is numbered to match the drill list below (a drill with nothing but nets gets no number).
  */
-function combinedOverview(drills, rink) {
+/** The bounding box of what a drill actually draws on the ice (nets ignored); null when nothing is drawn. */
+function drillInkBox(d) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const o of d.objects) {
+    if (o.type === 'net') continue;
+    const pts = [];
+    if (o.x != null) pts.push({ x: o.x, y: o.y });
+    if ((o.type === 'zone' || o.type === 'focus') && o.x != null) pts.push({ x: o.x + o.w, y: o.y + o.h });
+    (o.path || []).forEach(q => pts.push(q));
+    (o.points || []).forEach(q => pts.push(q));
+    for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
+    for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+  }
+  return x0 === Infinity ? null : { x0, y0, x1, y1 };
+}
+/** 1-based numbers for the drills that show on the overview, in order; null for a drill with nothing drawn. */
+function overviewNumbers(drills) { let n = 0; return drills.map(d => drillInkBox(d) ? ++n : null); }
+function combinedOverview(drills, rink, nums = null) {
   if (!drills.length) return null;
-  const boxes = drills.map(d => {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const o of d.objects) {
-      if (o.type === 'net') continue;
-      const pts = [];
-      if (o.x != null) pts.push({ x: o.x, y: o.y });
-      if ((o.type === 'zone' || o.type === 'focus') && o.x != null) pts.push({ x: o.x + o.w, y: o.y + o.h });
-      (o.path || []).forEach(q => pts.push(q));
-      (o.points || []).forEach(q => pts.push(q));
-      for (const ev of o.events || []) { if (ev.target) pts.push(ev.target); if (ev.bank) pts.push(ev.bank); }
-      for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
-    }
-    return x0 === Infinity ? null : { x0, y0, x1, y1 };
-  });
+  const boxes = drills.map(drillInkBox);
   const merged = { ...drills[0], objects: drills.flatMap(d => d.objects.filter(o => o.type !== 'focus')) }; // no gray-out masks on the shared picture
   // Each drill's number as a badge at the top-left of its space — a white-ringed disc that reads on top of anything.
-  const badges = drills.length > 1 ? boxes.map((b, i) => b ? `<g transform="translate(${G.round1(G.clamp(b.x0 - 0.5, 3, RINK.W - 3))} ${G.round1(G.clamp(b.y0 - 1, 3.5, RINK.H - 3))})"><circle r="3.4" fill="#111" stroke="#fff" stroke-width=".6"/><text y="1.5" font-size="4.4" font-weight="700" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${i + 1}</text></g>` : '').join('') : '';
+  const num = i => nums ? nums[i] : i + 1;
+  const badges = drills.length > 1 ? boxes.map((b, i) => b && num(i) != null ? `<g transform="translate(${G.round1(G.clamp(b.x0 - 0.5, 3, RINK.W - 3))} ${G.round1(G.clamp(b.y0 - 1, 3.5, RINK.H - 3))})"><circle r="3.4" fill="#111" stroke="#fff" stroke-width=".6"/><text y="1.5" font-size="4.4" font-weight="700" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${num(i)}</text></g>` : '').join('') : '';
   return standaloneSVG(merged, rink, SVG_STYLE, { x: -3, y: -3, w: RINK.W + 6, h: RINK.H + 6 }).replace(/<\/svg>\s*$/, `<g class="ov-badges">${badges}</g></svg>`);
 }
 
@@ -4786,7 +4791,8 @@ async function exportLongImage() {
 async function exportADMSheet() {
   const p = store.practice, drills = activeDrills(p), rink = rinkSVG(surfaceOf(p));
   if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
-  const ovSVG = combinedOverview(drills, rink); if (!ovSVG) { alert('Nothing drawn on the ice yet.'); return; }
+  const nums = overviewNumbers(drills); // only the drills that show on the ice carry a number, 1…n in order
+  const ovSVG = combinedOverview(drills, rink, nums); if (!ovSVG) { alert('Nothing drawn on the ice yet.'); return; }
   const W = 1700, M = 64, INNER = W - 2 * M, GAP = 48, COLW = (INNER - GAP) / 2, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 26px system-ui, sans-serif', meta: '20px system-ui, sans-serif', body: '22px system-ui, sans-serif', bodyB: 'bold 22px system-ui, sans-serif' };
   const LH = 30;
@@ -4795,7 +4801,7 @@ async function exportADMSheet() {
   let t = startMin;
   const entries = drills.map((d, i) => {
     const at = t; if (t != null) t += (+d.duration || 0);
-    const lines = [[F.head, `${i + 1}. ${d.name}`, '#111']];
+    const lines = [[F.head, `${nums[i] != null ? `${nums[i]}. ` : ''}${d.name}`, '#111']];
     const meta = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? ` · ${clockFull(at)}` : ''}`; if (meta) lines.push([F.meta, meta, '#555']);
     for (const z of zoneRules(d)) { lines.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, COLW - 24)) lines.push([F.body, w, '#111', 24]); }
     if (d.notes) for (const w of wrapText(d.notes, F.body, COLW)) lines.push([F.body, w, '#222']);

@@ -4483,16 +4483,10 @@ function combinedOverview(drills, rink) {
     }
     return x0 === Infinity ? null : { x0, y0, x1, y1 };
   });
-  const merged = {
-    ...drills[0],
-    objects: [
-      ...drills.flatMap(d => d.objects.filter(o => o.type !== 'focus')), // no gray-out masks on the shared picture
-      ...(drills.length > 1
-        ? boxes.flatMap((b, i) => b ? [{ id: `ovlabel${i}`, type: 'text', x: G.round1(G.clamp(b.x0 + 1, 2, RINK.W - 4)), y: G.round1(G.clamp(b.y0 - 1.5, 4, RINK.H - 2)), text: `${i + 1}`, size: 5, color: '#111' }] : [])
-        : []),
-    ],
-  };
-  return standaloneSVG(merged, rink, SVG_STYLE, { x: -3, y: -3, w: RINK.W + 6, h: RINK.H + 6 });
+  const merged = { ...drills[0], objects: drills.flatMap(d => d.objects.filter(o => o.type !== 'focus')) }; // no gray-out masks on the shared picture
+  // Each drill's number as a badge at the top-left of its space — a white-ringed disc that reads on top of anything.
+  const badges = drills.length > 1 ? boxes.map((b, i) => b ? `<g transform="translate(${G.round1(G.clamp(b.x0 - 0.5, 3, RINK.W - 3))} ${G.round1(G.clamp(b.y0 - 1, 3.5, RINK.H - 3))})"><circle r="3.4" fill="#111" stroke="#fff" stroke-width=".6"/><text y="1.5" font-size="4.4" font-weight="700" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${i + 1}</text></g>` : '').join('') : '';
+  return standaloneSVG(merged, rink, SVG_STYLE, { x: -3, y: -3, w: RINK.W + 6, h: RINK.H + 6 }).replace(/<\/svg>\s*$/, `<g class="ov-badges">${badges}</g></svg>`);
 }
 
 /**
@@ -4556,24 +4550,33 @@ $('#btn-long-image').addEventListener('click', () => { closePopovers(); exportLo
  * notes — ending with dismissal. Drawn on a canvas (text by hand, each diagram from its own SVG), so it needs no
  * server and comes out the same on every device.
  */
+// ----- drawing a practice on a canvas (the long image and the ADM sheet) -----
+const measCtx = document.createElement('canvas').getContext('2d');
+/** Lines of `text` that fit `maxW` in `font`, honouring the writer's own line breaks. */
+function wrapText(text, font, maxW) {
+  measCtx.font = font; const out = [];
+  for (const para of String(text || '').split('\n')) {
+    let line = '';
+    for (const word of para.split(/\s+/).filter(Boolean)) { const next = line ? `${line} ${word}` : word; if (measCtx.measureText(next).width > maxW && line) { out.push(line); line = word; } else line = next; }
+    out.push(line);
+  }
+  return out;
+}
+/** A self-contained SVG string as an Image, ready to draw. */
+const loadSVG = svg => new Promise((res, rej) => { const img = new Image(); const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); img.onload = () => { URL.revokeObjectURL(url); res(img); }; img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('a diagram could not be drawn')); }; img.src = url; });
+/** A canvas of W × H CSS px at `scale`, white, scaled; returns [canvas, ctx]. */
+function sheetCanvas(W, H, scale) {
+  const c = document.createElement('canvas'); c.width = Math.round(W * scale); c.height = Math.round(H * scale);
+  const ctx = c.getContext('2d'); ctx.scale(scale, scale); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.textBaseline = 'top';
+  return [c, ctx];
+}
+const savePNG = (c, name) => new Promise((res, rej) => c.toBlob(b => b ? (download(name, b), res()) : rej(new Error('the image could not be encoded')), 'image/png'));
 async function exportLongImage() {
   const p = store.practice, drills = activeDrills(p), rink = rinkSVG(surfaceOf(p));
   if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
   const W = 1400, M = 64, INNER = W - 2 * M, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
   const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 30px system-ui, sans-serif', meta: '22px system-ui, sans-serif', body: '23px system-ui, sans-serif', bodyB: 'bold 23px system-ui, sans-serif' };
   const LH = 32; // body line height
-  const meas = document.createElement('canvas').getContext('2d');
-  const wrap = (text, font, maxW) => { // lines of text that fit maxW, honouring the writer's own line breaks
-    meas.font = font; const out = [];
-    for (const para of String(text || '').split('\n')) {
-      let line = '';
-      for (const word of para.split(/\s+/).filter(Boolean)) { const next = line ? `${line} ${word}` : word; if (meas.measureText(next).width > maxW && line) { out.push(line); line = word; } else line = next; }
-      out.push(line);
-    }
-    return out;
-  };
-  // Every diagram as an image first (each a self-contained SVG), so the layout can be measured before drawing.
-  const loadSVG = svg => new Promise((res, rej) => { const img = new Image(); const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); img.onload = () => { URL.revokeObjectURL(url); res(img); }; img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('a diagram could not be drawn')); }; img.src = url; });
   // The full-ice breakdown first: every drill's space on one rink, numbered — the same overview the printed sheet opens with.
   const ovSVG = combinedOverview(drills, rink);
   const ov = ovSVG ? { img: await loadSVG(ovSVG), h: Math.round(INNER * (RINK.H + 6) / (RINK.W + 6)) } : null;
@@ -4581,18 +4584,16 @@ async function exportLongImage() {
     const v = shareView(d), img = await loadSVG(standaloneSVG(d, rink, SVG_STYLE, v));
     const figH = Math.round(INNER * v.h / v.w);
     const text = []; // [font, line, colour]
-    for (const z of zoneRules(d)) { text.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrap(`• ${l}`, F.body, INNER - 24)) text.push([F.body, w, '#111', 24]); }
-    if (d.notes) for (const w of wrap(d.notes, F.body, INNER)) text.push([F.body, w, '#222']);
+    for (const z of zoneRules(d)) { text.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, INNER - 24)) text.push([F.body, w, '#111', 24]); }
+    if (d.notes) for (const w of wrapText(d.notes, F.body, INNER)) text.push([F.body, w, '#222']);
     if (hasVideo(d)) text.push([F.meta, `🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : d.video || ''}`, '#555']);
-    const cn = String(d.coachNotes || '').trim(); if (cn) { text.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrap(cn, F.body, INNER)) text.push([F.body, w, '#92400e']); }
+    const cn = String(d.coachNotes || '').trim(); if (cn) { text.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, INNER)) text.push([F.body, w, '#92400e']); }
     return { d, img, figH, text, h: 48 + figH + 16 + text.length * LH + 40 };
   }));
   const headH = 150 + (p.coaches ? LH : 0) + (ov ? 48 + ov.h + 40 : 0), H = headH + items.reduce((a, it) => a + it.h, 0) + 80;
   const scale = Math.min(2, Math.floor((32000 / H) * 10) / 10); // crisp on a phone, under the browser's canvas limit
-  const c = document.createElement('canvas'); c.width = Math.round(W * scale); c.height = Math.round(H * scale);
-  const ctx = c.getContext('2d'); ctx.scale(scale, scale);
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-  ctx.textBaseline = 'top'; ctx.fillStyle = '#111';
+  const [c, ctx] = sheetCanvas(W, H, scale);
+  ctx.fillStyle = '#111';
   let y = M;
   ctx.font = F.title; ctx.fillText(docTitle(p), M, y); y += 50;
   ctx.font = F.sub; ctx.fillStyle = '#444'; ctx.fillText(whenLabel(p, true), M, y); y += LH;
@@ -4618,8 +4619,56 @@ async function exportLongImage() {
   ctx.fillStyle = '#e5e7eb'; ctx.fillRect(M, y, INNER, 2); y += 18;
   ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText('* Dismissal', M, y);
   if (startMin != null) { ctx.font = F.meta; ctx.fillStyle = '#555'; ctx.textAlign = 'right'; ctx.fillText(clockFull(startMin + total), W - M, y + 6); ctx.textAlign = 'left'; }
-  await new Promise((res, rej) => c.toBlob(b => b ? (download(`${safeName(practiceLabel(p))}_plan.png`, b), res()) : rej(new Error('the image could not be encoded')), 'image/png'));
+  await savePNG(c, `${safeName(practiceLabel(p))}_plan.png`);
 }
+/**
+ * The ADM sheet: the station-practice page — one full ice sheet with every drill drawn on it where it runs, each
+ * numbered, and under it the drills listed by number with their name, minutes, clock time and description, in two
+ * columns. The same overview the print opens with, made the whole point of the page.
+ */
+async function exportADMSheet() {
+  const p = store.practice, drills = activeDrills(p), rink = rinkSVG(surfaceOf(p));
+  if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
+  const ovSVG = combinedOverview(drills, rink); if (!ovSVG) { alert('Nothing drawn on the ice yet.'); return; }
+  const W = 1700, M = 64, INNER = W - 2 * M, GAP = 48, COLW = (INNER - GAP) / 2, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 26px system-ui, sans-serif', meta: '20px system-ui, sans-serif', body: '22px system-ui, sans-serif', bodyB: 'bold 22px system-ui, sans-serif' };
+  const LH = 30;
+  const ov = await loadSVG(ovSVG), ovH = Math.round(INNER * (RINK.H + 6) / (RINK.W + 6));
+  // The legend: each drill's lines, measured for the column width.
+  let t = startMin;
+  const entries = drills.map((d, i) => {
+    const at = t; if (t != null) t += (+d.duration || 0);
+    const lines = [[F.head, `${i + 1}. ${d.name}`, '#111']];
+    const meta = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? ` · ${clockFull(at)}` : ''}`; if (meta) lines.push([F.meta, meta, '#555']);
+    for (const z of zoneRules(d)) { lines.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, COLW - 24)) lines.push([F.body, w, '#111', 24]); }
+    if (d.notes) for (const w of wrapText(d.notes, F.body, COLW)) lines.push([F.body, w, '#222']);
+    const cn = String(d.coachNotes || '').trim(); if (cn) { lines.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, COLW)) lines.push([F.body, w, '#92400e']); }
+    return { lines, h: lines.length * LH + 26 };
+  });
+  // Two columns, filled top to bottom in order: the first column takes entries until it holds about half the height.
+  const sum = entries.reduce((a, e) => a + e.h, 0); let acc = 0, split = entries.length;
+  for (let i = 0; i < entries.length; i++) { acc += entries[i].h; if (acc >= sum / 2) { split = i + 1; break; } }
+  const cols = [entries.slice(0, split), entries.slice(split)];
+  const colH = Math.max(...cols.map(col => col.reduce((a, e) => a + e.h, 0)));
+  const headH = 150 + (p.coaches ? LH : 0), H = headH + 48 + ovH + 48 + colH + M;
+  const scale = Math.min(2, Math.floor((32000 / H) * 10) / 10);
+  const [c, ctx] = sheetCanvas(W, H, scale);
+  let y = M;
+  ctx.fillStyle = '#111'; ctx.font = F.title; ctx.fillText(`${docTitle(p)} — ADM practice`, M, y); y += 50;
+  ctx.font = F.sub; ctx.fillStyle = '#444'; ctx.fillText(whenLabel(p, true), M, y); y += LH;
+  if (p.coaches) { ctx.fillText(`Coaches: ${p.coaches}`, M, y); y += LH; }
+  ctx.fillText(`${startMin != null ? `Start @ ${clockFull(startMin)} · ` : ''}${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${isGame(p) ? '' : ` · ${total} min`}`, M, y); y += LH + 16;
+  ctx.drawImage(ov, M, y, INNER, ovH); ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.strokeRect(M + 0.5, y + 0.5, INNER - 1, ovH - 1); y += ovH + 48;
+  cols.forEach((col, ci) => {
+    const x = M + ci * (COLW + GAP); let cy = y;
+    for (const e of col) {
+      for (const [font, line, colour, indent] of e.lines) { ctx.font = font; ctx.fillStyle = colour; ctx.fillText(line, x + (indent || 0), cy); cy += LH; }
+      cy += 26;
+    }
+  });
+  await savePNG(c, `${safeName(practiceLabel(p))}_ADM.png`);
+}
+$('#btn-adm-sheet').addEventListener('click', () => { closePopovers(); exportADMSheet().catch(e => alert(`ADM sheet failed: ${e?.message || e}`)); });
 $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
   const drills = activeDrills(p);

@@ -4401,6 +4401,7 @@ const safeName = s => (s || 'practice').replace(/[^\w\-]+/g, '_');
 $('#btn-export-json').addEventListener('click', () => { closePopovers(); $('#btn-export').click(); });
 wirePopover('#btn-export-more', '#export-pop', '#btn-export-json');
 wirePopover('#btn-present-more', '#present-pop', '#btn-present-coach');
+wirePopover('#btn-print-more', '#print-pop', '#btn-print-page');
 wirePopover('#btn-teams', '#team-pop', '#team-manage');
 wirePopover('#btn-account', '#account-pop', '#btn-settings');
 $('#btn-export').addEventListener('click', () => {
@@ -4547,6 +4548,71 @@ const stamp = ms => { const d = new Date(ms); return `${pad2(d.getMonth() + 1)}/
 const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`; };
 const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? dayDate(date, true) : (date || '');
 
+$('#btn-print-page').addEventListener('click', () => { closePopovers(); $('#btn-print').click(); });
+$('#btn-long-image').addEventListener('click', () => { closePopovers(); exportLongImage().catch(e => alert(`Image export failed: ${e?.message || e}`)); });
+/**
+ * The whole practice as one tall PNG: title and date, then every drill top to bottom — its number, name, minutes and
+ * clock time, its diagram (the same framing the print and the viewer use), station rules, notes and coaches-only
+ * notes — ending with dismissal. Drawn on a canvas (text by hand, each diagram from its own SVG), so it needs no
+ * server and comes out the same on every device.
+ */
+async function exportLongImage() {
+  const p = store.practice, drills = activeDrills(p), rink = rinkSVG(surfaceOf(p));
+  if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
+  const W = 1400, M = 64, INNER = W - 2 * M, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 30px system-ui, sans-serif', meta: '22px system-ui, sans-serif', body: '23px system-ui, sans-serif', bodyB: 'bold 23px system-ui, sans-serif' };
+  const LH = 32; // body line height
+  const meas = document.createElement('canvas').getContext('2d');
+  const wrap = (text, font, maxW) => { // lines of text that fit maxW, honouring the writer's own line breaks
+    meas.font = font; const out = [];
+    for (const para of String(text || '').split('\n')) {
+      let line = '';
+      for (const word of para.split(/\s+/).filter(Boolean)) { const next = line ? `${line} ${word}` : word; if (meas.measureText(next).width > maxW && line) { out.push(line); line = word; } else line = next; }
+      out.push(line);
+    }
+    return out;
+  };
+  // Every diagram as an image first (each a self-contained SVG), so the layout can be measured before drawing.
+  const loadSVG = svg => new Promise((res, rej) => { const img = new Image(); const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); img.onload = () => { URL.revokeObjectURL(url); res(img); }; img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('a diagram could not be drawn')); }; img.src = url; });
+  const items = await Promise.all(drills.map(async d => {
+    const v = shareView(d), img = await loadSVG(standaloneSVG(d, rink, SVG_STYLE, v));
+    const figH = Math.round(INNER * v.h / v.w);
+    const text = []; // [font, line, colour]
+    for (const z of zoneRules(d)) { text.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrap(`• ${l}`, F.body, INNER - 24)) text.push([F.body, w, '#111', 24]); }
+    if (d.notes) for (const w of wrap(d.notes, F.body, INNER)) text.push([F.body, w, '#222']);
+    if (hasVideo(d)) text.push([F.meta, `🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : d.video || ''}`, '#555']);
+    const cn = String(d.coachNotes || '').trim(); if (cn) { text.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrap(cn, F.body, INNER)) text.push([F.body, w, '#92400e']); }
+    return { d, img, figH, text, h: 48 + figH + 16 + text.length * LH + 40 };
+  }));
+  const headH = 150 + (p.coaches ? LH : 0), H = headH + items.reduce((a, it) => a + it.h, 0) + 80;
+  const scale = Math.min(2, Math.floor((32000 / H) * 10) / 10); // crisp on a phone, under the browser's canvas limit
+  const c = document.createElement('canvas'); c.width = Math.round(W * scale); c.height = Math.round(H * scale);
+  const ctx = c.getContext('2d'); ctx.scale(scale, scale);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = 'top'; ctx.fillStyle = '#111';
+  let y = M;
+  ctx.font = F.title; ctx.fillText(docTitle(p), M, y); y += 50;
+  ctx.font = F.sub; ctx.fillStyle = '#444'; ctx.fillText(whenLabel(p, true), M, y); y += LH;
+  if (p.coaches) { ctx.fillText(`Coaches: ${p.coaches}`, M, y); y += LH; }
+  ctx.fillText(`${startMin != null ? `Start @ ${clockFull(startMin)} · ` : ''}${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${isGame(p) ? '' : ` · ${total} min`}`, M, y); y += LH + 8;
+  let t = startMin;
+  items.forEach((it, i) => {
+    const d = it.d, at = t; if (t != null) t += (+d.duration || 0);
+    ctx.fillStyle = '#e5e7eb'; ctx.fillRect(M, y, INNER, 2); y += 18; // a rule between drills
+    ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText(`${i + 1}. ${d.name}`, M, y);
+    ctx.font = F.meta; ctx.fillStyle = '#555';
+    const right = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? `  ·  ${clockFull(at)}` : ''}`;
+    ctx.textAlign = 'right'; ctx.fillText(right, W - M, y + 6); ctx.textAlign = 'left';
+    y += 48;
+    ctx.drawImage(it.img, M, y, INNER, it.figH); ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.strokeRect(M + 0.5, y + 0.5, INNER - 1, it.figH - 1); y += it.figH + 16;
+    for (const [font, line, colour, indent] of it.text) { ctx.font = font; ctx.fillStyle = colour; ctx.fillText(line, M + (indent || 0), y); y += LH; }
+    y += 40;
+  });
+  ctx.fillStyle = '#e5e7eb'; ctx.fillRect(M, y, INNER, 2); y += 18;
+  ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText('* Dismissal', M, y);
+  if (startMin != null) { ctx.font = F.meta; ctx.fillStyle = '#555'; ctx.textAlign = 'right'; ctx.fillText(clockFull(startMin + total), W - M, y + 6); ctx.textAlign = 'left'; }
+  await new Promise((res, rej) => c.toBlob(b => b ? (download(`${safeName(practiceLabel(p))}_plan.png`, b), res()) : rej(new Error('the image could not be encoded')), 'image/png'));
+}
 $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
   const drills = activeDrills(p);

@@ -110,7 +110,13 @@
       <button id="btn-png" title="The current drill's diagram as a PNG image">🖼 Export PNG</button>
     </div>
   </div>
-  <button id="btn-print" title="Print practice plan">Print</button>
+  <div id="print-wrap" class="split">
+    <button id="btn-print" class="split-main" title="Print the practice plan (the default — the arrow has more)">Print</button><button id="btn-print-more" class="split-arrow" title="Other ways to get the plan out">▾</button>
+    <div id="print-pop" class="split-pop" hidden>
+      <button id="btn-print-page" title="The practice plan on paper (or as a PDF from the print dialog)">🖨 Print</button>
+      <button id="btn-long-image" title="The whole practice as one tall PNG — every drill's diagram, times and notes top to bottom — to send as a picture">🖼 One long image (PNG)</button>
+    </div>
+  </div>
   <div id="present-wrap" class="split">
     <button id="btn-present" class="split-main" title="Open this practice's presentation in a new tab as the coaches see it (the default — the arrow offers the team's view)">📺 Present</button><button id="btn-present-more" class="split-arrow" title="Present as the coaches or as the team">▾</button>
     <div id="present-pop" class="split-pop" hidden>

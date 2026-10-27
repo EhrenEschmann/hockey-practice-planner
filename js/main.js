@@ -4574,6 +4574,9 @@ async function exportLongImage() {
   };
   // Every diagram as an image first (each a self-contained SVG), so the layout can be measured before drawing.
   const loadSVG = svg => new Promise((res, rej) => { const img = new Image(); const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); img.onload = () => { URL.revokeObjectURL(url); res(img); }; img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('a diagram could not be drawn')); }; img.src = url; });
+  // The full-ice breakdown first: every drill's space on one rink, numbered — the same overview the printed sheet opens with.
+  const ovSVG = combinedOverview(drills, rink);
+  const ov = ovSVG ? { img: await loadSVG(ovSVG), h: Math.round(INNER * (RINK.H + 6) / (RINK.W + 6)) } : null;
   const items = await Promise.all(drills.map(async d => {
     const v = shareView(d), img = await loadSVG(standaloneSVG(d, rink, SVG_STYLE, v));
     const figH = Math.round(INNER * v.h / v.w);
@@ -4584,7 +4587,7 @@ async function exportLongImage() {
     const cn = String(d.coachNotes || '').trim(); if (cn) { text.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrap(cn, F.body, INNER)) text.push([F.body, w, '#92400e']); }
     return { d, img, figH, text, h: 48 + figH + 16 + text.length * LH + 40 };
   }));
-  const headH = 150 + (p.coaches ? LH : 0), H = headH + items.reduce((a, it) => a + it.h, 0) + 80;
+  const headH = 150 + (p.coaches ? LH : 0) + (ov ? 48 + ov.h + 40 : 0), H = headH + items.reduce((a, it) => a + it.h, 0) + 80;
   const scale = Math.min(2, Math.floor((32000 / H) * 10) / 10); // crisp on a phone, under the browser's canvas limit
   const c = document.createElement('canvas'); c.width = Math.round(W * scale); c.height = Math.round(H * scale);
   const ctx = c.getContext('2d'); ctx.scale(scale, scale);
@@ -4595,6 +4598,10 @@ async function exportLongImage() {
   ctx.font = F.sub; ctx.fillStyle = '#444'; ctx.fillText(whenLabel(p, true), M, y); y += LH;
   if (p.coaches) { ctx.fillText(`Coaches: ${p.coaches}`, M, y); y += LH; }
   ctx.fillText(`${startMin != null ? `Start @ ${clockFull(startMin)} · ` : ''}${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${isGame(p) ? '' : ` · ${total} min`}`, M, y); y += LH + 8;
+  if (ov) {
+    ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText('Full ice — where each drill runs', M, y); y += 48;
+    ctx.drawImage(ov.img, M, y, INNER, ov.h); ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.strokeRect(M + 0.5, y + 0.5, INNER - 1, ov.h - 1); y += ov.h + 40;
+  }
   let t = startMin;
   items.forEach((it, i) => {
     const d = it.d, at = t; if (t != null) t += (+d.duration || 0);

@@ -232,6 +232,8 @@ export function makeSim(drill) {
   const objs = drill.objects;
   const byId = id => objs.find(o => o.id === id);
   const isSkater = id => isPlayer(byId(id)); // any puck-handling player (skater or coach)
+  /** The corner of the ice nearest a point (just inside the rounded boards): where a dump goes unless told otherwise. */
+  const nearestCorner = p => { const R = RINK.R * 0.3, cs = [[R, R], [RINK.W - R, R], [R, RINK.H - R], [RINK.W - R, RINK.H - R]].map(([x, y]) => ({ x, y })); return cs.sort((a, b) => G.dist(a, p) - G.dist(b, p))[0]; };
   /** Where to draw an event marker: the player's spot on their path — none for players that don't move. */
   const markAt = (id, t) => (byId(id)?.path?.length ? skaterPos(id, t) : null);
   const timings = new Map();
@@ -405,7 +407,7 @@ export function makeSim(drill) {
     for (const ev of p.events || []) {
       // An impact that strips the carrier before this event fires hands the puck over first,
       // so a pass or shot added after the steal belongs to — and is timed by — the winner.
-      if (carrier && (ev.type === 'pass' || ev.type === 'shoot')) {
+      if (carrier && (ev.type === 'pass' || ev.type === 'shoot' || ev.type === 'dump')) {
         for (const st of steals) {
           if (st.used || st.from !== carrier || st.t <= t) continue;
           const want = ev.by === 'receiver' ? st.t : evTime(carrier, ev);
@@ -491,20 +493,25 @@ export function makeSim(drill) {
         Object.assign(rec, { ok: true, t: tr, arrive: tr + travel, from, to, bank: bankPt, impliedSpeed, offBy, by: byReceiver ? 'receiver' : 'carrier',
           mark: byReceiver ? markAt(ev.to, tr + travel) : markAt(rec.carrier, tr),
           releaseMark: byReceiver ? markAt(rec.carrier, tr) : null }); // the derived P beside a pinned R
-      } else if (ev.type === 'shoot') {
+      } else if (ev.type === 'shoot' || ev.type === 'dump') {
         // A shot (or a coach's chip) can bank off the boards at ev.bank on its way — e.g. rimmed around the end boards.
+        // A DUMP is the coach putting a puck somewhere on purpose — into a corner, along the boards, behind a barrier —
+        // at pass speed, nobody squaring up to it: it lies there until someone picks it up.
+        const dump = ev.type === 'dump';
         const bank = ev.bank && Number.isFinite(+ev.bank.x) && Number.isFinite(+ev.bank.y) ? { x: +ev.bank.x, y: +ev.bank.y } : null;
         const want = evTime(carrier, ev), tr = Math.max(t, want);
         rec.late = tr > want + 1e-6;
         pushCarried(tr);
         const from = puckAt(carrier, tr);
-        const to = ev.target || nearestNet(from);
-        const travel = (bank ? G.dist(from, bank) + G.dist(bank, to) : G.dist(from, to)) / shotSpeed;
+        const to = ev.target || (dump ? nearestCorner(from) : nearestNet(from));
+        const speed = dump ? passSpeed : shotSpeed;
+        const travel = (bank ? G.dist(from, bank) + G.dist(bank, to) : G.dist(from, to)) / speed;
+        const tag = dump ? { dump: true } : { shot: from };
         if (bank) {
-          const tb = tr + G.dist(from, bank) / shotSpeed;
-          segs.push({ t0: tr, t1: tb, kind: 'flying', shot: from, from, to: bank }, { t0: tb, t1: tr + travel, kind: 'flying', shot: from, from: bank, to });
-        } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', shot: from, from, to });
-        t = tr + travel; carrier = null; loose = to; shotFrom = from;
+          const tb = tr + G.dist(from, bank) / speed;
+          segs.push({ t0: tr, t1: tb, kind: 'flying', ...tag, from, to: bank }, { t0: tb, t1: tr + travel, kind: 'flying', ...tag, from: bank, to });
+        } else segs.push({ t0: tr, t1: tr + travel, kind: 'flying', ...tag, from, to });
+        t = tr + travel; carrier = null; loose = to; shotFrom = dump ? null : from;
         Object.assign(rec, { ok: true, t: tr, from, to, bank, mark: markAt(rec.carrier, tr) });
       }
     }

@@ -336,8 +336,9 @@ const draw = {
     const lines = opts.showPaths === false ? '' : ps.info.map((r, i) => {
       if (!r.ok || !r.from) return '';
       if (r.type !== 'pass') {
-        if (!r.bank) return `<line class="shot-line" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], '#8a8f99', 1.5, 'shot-head')}`;
-        return `<polyline class="shot-line" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#8a8f99', 1.5, 'shot-head')}
+        const cls = r.type === 'dump' ? 'dump-line' : 'shot-line', col = r.type === 'dump' ? '#b45309' : '#8a8f99';
+        if (!r.bank) return `<line class="${cls}" x1="${n(r.from.x)}" y1="${n(r.from.y)}" x2="${n(r.to.x)}" y2="${n(r.to.y)}"/>${arrowHead([r.from, r.to], col, 1.5, 'shot-head')}`;
+        return `<polyline class="${cls}" fill="none" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], col, 1.5, 'shot-head')}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>`;
       }
       // The arrival end of a pass is a handle too: dragging it along the receiver's path times the pass by the
@@ -353,7 +354,7 @@ const draw = {
       return `<polyline class="pass-line" points="${ptsStr([r.from, r.bank, r.to])}"/>${arrowHead([r.bank, r.to], '#333', 1.2, 'pass-head')}
         <g class="bank-mark${sel ? ' draggable' : ''}" data-bank="${i}" transform="translate(${n(r.bank.x)} ${n(r.bank.y)})"><circle r="1.1"/><text y=".5" font-size="1.3" text-anchor="middle">B</text></g>${arrive}`;
     }).join('');
-    const letter = { pass: 'P', shoot: 'S', pickup: 'U' };
+    const letter = { pass: 'P', shoot: 'S', dump: 'D', pickup: 'U' };
     const marks = opts.showPaths === false ? '' : ps.info.map((r, i) => {
       if (!(r.ok && r.mark)) return '';
       // The R of a banked pass is derived from where the reflected puck crosses the receiver's path:

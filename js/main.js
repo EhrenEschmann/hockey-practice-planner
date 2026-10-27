@@ -4049,7 +4049,7 @@ function renderProps() {
   body.innerHTML = `<p class="pin-row"><b>${TYPE_NAMES[o.type] || o.type}</b> ${head}</p>${fields}${custom}${ptList}<div class="row">${extra.join('')}</div>`;
 }
 
-const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
+const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', dump: 'Dump', pickup: 'Pickup' };
 
 /** "Starts moving" controls for a skater or coach: at t = 0, or when another player reaches a waypoint. */
 function triggerProps(o) {
@@ -4161,6 +4161,15 @@ function puckProps(o) {
         : '<span class="muted">nearest net</span>';
       body = `<span>${who}</span>${where()}<span>shoots at</span>${tgt}<button data-act="pick" data-ev="${i}">Pick target</button>${bankUI}${mark}`;
     }
+    else if (ev.type === 'dump') {
+      const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
+      const tgt = ev.target
+        ? `<span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="tx" value="${G.round1(ev.target.x)}" title="x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="ty" value="${G.round1(ev.target.y)}" title="y (ft)"></span>`
+        : '<span class="muted">the nearest corner</span>';
+      body = `<span>${who}</span>${where()}<span>dumps it to</span>${tgt}<button data-act="pick" data-ev="${i}" title="Click a spot on the ice — a corner, along the boards, behind a barrier">Pick spot</button>${bankUI}${mark}
+        <span class="muted small">It lies there until a player picks it up (+ Pickup) — at pass speed, and goalies pay it no mind.</span>`;
+    }
     else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where()}${mark}`;
     return `<div class="event">
       <div class="event-head">
@@ -4177,7 +4186,7 @@ function puckProps(o) {
   const stealNote = steal ? `<p class="muted">💥 Stolen at t = ${steal.t.toFixed(1)} s: ${playerName(getObj(steal.from))} loses it to ${playerName(getObj(steal.to))} (impact loser).</p>` : '';
   return `${stealNote}<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, o.pile ? 'In the puck pile' : 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
-    <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
+    <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="adddump" title="Put the puck somewhere — a corner, the boards, behind a barrier — for someone to go and get">+ Dump</button><button data-act="addpickup">+ Pickup</button></div>
     <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives, B = a board bounce) — drag them to move them. Drag the puck onto a skater to hand it over.</p>`;
 }
 
@@ -4392,7 +4401,7 @@ propsBody.addEventListener('click', e => {
     }
     case 'givepuck': { const pk = { id: uid(), ...newPuck(o, o.id) }; commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }
-    case 'addpass': case 'addshoot': case 'addpickup': {
+    case 'addpass': case 'addshoot': case 'adddump': case 'addpickup': {
       const carrier = finalCarrier(o);
       // The sim knows when possession changes hands — default new events to a player's first
       // waypoint after the puck's last event, so a chain (pass, get it back, shoot) doesn't pile up at the path end.
@@ -4425,6 +4434,8 @@ propsBody.addEventListener('click', e => {
         }
       } else if (btn.dataset.act === 'addshoot') {
         ev = { type: 'shoot', wp, target: null };
+      } else if (btn.dataset.act === 'adddump') {
+        ev = { type: 'dump', wp, target: null }; // the nearest corner until a spot is picked
       } else {
         const at = sim.puckPos(o.id, Infinity);
         ev = { type: 'pickup', skater: carrier ? null : nearestSkater(at, null)?.id || null, wp: 0 };
@@ -4436,7 +4447,7 @@ propsBody.addEventListener('click', e => {
     case 'evdel': commit(() => o.events.splice(evIndex, 1)); renderProps(); break;
     case 'evup': commit(() => { [o.events[evIndex - 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex - 1]]; }); renderProps(); break;
     case 'evdown': commit(() => { [o.events[evIndex + 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex + 1]]; }); renderProps(); break;
-    case 'pick': pickTarget = { puckId: o.id, ev: evIndex, kind: 'target' }; $('#hint').textContent = 'Click on the ice to set the shot target (Esc to cancel)'; break;
+    case 'pick': pickTarget = { puckId: o.id, ev: evIndex, kind: 'target' }; $('#hint').textContent = o.events[evIndex]?.type === 'dump' ? 'Click the spot on the ice the puck is dumped to — a corner, the boards, behind a barrier (Esc to cancel)' : 'Click on the ice to set the shot target (Esc to cancel)'; break;
     case 'bounce': pickTarget = { puckId: o.id, ev: evIndex, kind: 'bank' }; $('#hint').textContent = 'Click near the boards to set where the puck bounces (Esc to cancel)'; break;
     case 'mark': pickTarget = { puckId: o.id, ev: evIndex, kind: 'dist' }; $('#hint').textContent = "Click a spot on the skater's path to mark where the pass / shot happens (Esc to cancel)"; break;
     case 'unmark': commit(() => { delete o.events[evIndex].dist; }); renderProps(); break;
@@ -4511,6 +4522,7 @@ const safeName = s => (s || 'practice').replace(/[^\w\-]+/g, '_');
 $('#btn-export-json').addEventListener('click', () => { closePopovers(); $('#btn-export').click(); });
 wirePopover('#btn-export-more', '#export-pop', '#btn-export-json');
 wirePopover('#btn-present-more', '#present-pop', '#btn-present-coach');
+wirePopover('#btn-print-more', '#print-pop', '#btn-print-page');
 wirePopover('#btn-teams', '#team-pop', '#team-manage');
 wirePopover('#btn-account', '#account-pop', '#btn-settings');
 $('#btn-export').addEventListener('click', () => {
@@ -4592,16 +4604,10 @@ function combinedOverview(drills, rink) {
     }
     return x0 === Infinity ? null : { x0, y0, x1, y1 };
   });
-  const merged = {
-    ...drills[0],
-    objects: [
-      ...drills.flatMap(d => d.objects.filter(o => o.type !== 'focus')), // no gray-out masks on the shared picture
-      ...(drills.length > 1
-        ? boxes.flatMap((b, i) => b ? [{ id: `ovlabel${i}`, type: 'text', x: G.round1(G.clamp(b.x0 + 1, 2, RINK.W - 4)), y: G.round1(G.clamp(b.y0 - 1.5, 4, RINK.H - 2)), text: `${i + 1}`, size: 5, color: '#111' }] : [])
-        : []),
-    ],
-  };
-  return standaloneSVG(merged, rink, SVG_STYLE, { x: -3, y: -3, w: RINK.W + 6, h: RINK.H + 6 });
+  const merged = { ...drills[0], objects: drills.flatMap(d => d.objects.filter(o => o.type !== 'focus')) }; // no gray-out masks on the shared picture
+  // Each drill's number as a badge at the top-left of its space — a white-ringed disc that reads on top of anything.
+  const badges = drills.length > 1 ? boxes.map((b, i) => b ? `<g transform="translate(${G.round1(G.clamp(b.x0 - 0.5, 3, RINK.W - 3))} ${G.round1(G.clamp(b.y0 - 1, 3.5, RINK.H - 3))})"><circle r="3.4" fill="#111" stroke="#fff" stroke-width=".6"/><text y="1.5" font-size="4.4" font-weight="700" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${i + 1}</text></g>` : '').join('') : '';
+  return standaloneSVG(merged, rink, SVG_STYLE, { x: -3, y: -3, w: RINK.W + 6, h: RINK.H + 6 }).replace(/<\/svg>\s*$/, `<g class="ov-badges">${badges}</g></svg>`);
 }
 
 /**
@@ -4657,6 +4663,133 @@ const stamp = ms => { const d = new Date(ms); return `${pad2(d.getMonth() + 1)}/
 const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`; };
 const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? dayDate(date, true) : (date || '');
 
+$('#btn-print-page').addEventListener('click', () => { closePopovers(); $('#btn-print').click(); });
+$('#btn-long-image').addEventListener('click', () => { closePopovers(); exportLongImage().catch(e => alert(`Image export failed: ${e?.message || e}`)); });
+/**
+ * The whole practice as one tall PNG: title and date, then every drill top to bottom — its number, name, minutes and
+ * clock time, its diagram (the same framing the print and the viewer use), station rules, notes and coaches-only
+ * notes — ending with dismissal. Drawn on a canvas (text by hand, each diagram from its own SVG), so it needs no
+ * server and comes out the same on every device.
+ */
+// ----- drawing a practice on a canvas (the long image and the ADM sheet) -----
+const measCtx = document.createElement('canvas').getContext('2d');
+/** Lines of `text` that fit `maxW` in `font`, honouring the writer's own line breaks. */
+function wrapText(text, font, maxW) {
+  measCtx.font = font; const out = [];
+  for (const para of String(text || '').split('\n')) {
+    let line = '';
+    for (const word of para.split(/\s+/).filter(Boolean)) { const next = line ? `${line} ${word}` : word; if (measCtx.measureText(next).width > maxW && line) { out.push(line); line = word; } else line = next; }
+    out.push(line);
+  }
+  return out;
+}
+/** A self-contained SVG string as an Image, ready to draw. */
+const loadSVG = svg => new Promise((res, rej) => { const img = new Image(); const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); img.onload = () => { URL.revokeObjectURL(url); res(img); }; img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('a diagram could not be drawn')); }; img.src = url; });
+/** A canvas of W × H CSS px at `scale`, white, scaled; returns [canvas, ctx]. */
+function sheetCanvas(W, H, scale) {
+  const c = document.createElement('canvas'); c.width = Math.round(W * scale); c.height = Math.round(H * scale);
+  const ctx = c.getContext('2d'); ctx.scale(scale, scale); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.textBaseline = 'top';
+  return [c, ctx];
+}
+const savePNG = (c, name) => new Promise((res, rej) => c.toBlob(b => b ? (download(name, b), res()) : rej(new Error('the image could not be encoded')), 'image/png'));
+async function exportLongImage() {
+  const p = store.practice, drills = activeDrills(p), rink = rinkSVG(surfaceOf(p));
+  if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
+  const W = 1400, M = 64, INNER = W - 2 * M, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 30px system-ui, sans-serif', meta: '22px system-ui, sans-serif', body: '23px system-ui, sans-serif', bodyB: 'bold 23px system-ui, sans-serif' };
+  const LH = 32; // body line height
+  // The full-ice breakdown first: every drill's space on one rink, numbered — the same overview the printed sheet opens with.
+  const ovSVG = combinedOverview(drills, rink);
+  const ov = ovSVG ? { img: await loadSVG(ovSVG), h: Math.round(INNER * (RINK.H + 6) / (RINK.W + 6)) } : null;
+  const items = await Promise.all(drills.map(async d => {
+    const v = shareView(d), img = await loadSVG(standaloneSVG(d, rink, SVG_STYLE, v));
+    const figH = Math.round(INNER * v.h / v.w);
+    const text = []; // [font, line, colour]
+    for (const z of zoneRules(d)) { text.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, INNER - 24)) text.push([F.body, w, '#111', 24]); }
+    if (d.notes) for (const w of wrapText(d.notes, F.body, INNER)) text.push([F.body, w, '#222']);
+    if (hasVideo(d)) text.push([F.meta, `🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : d.video || ''}`, '#555']);
+    const cn = String(d.coachNotes || '').trim(); if (cn) { text.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, INNER)) text.push([F.body, w, '#92400e']); }
+    return { d, img, figH, text, h: 48 + figH + 16 + text.length * LH + 40 };
+  }));
+  const headH = 150 + (p.coaches ? LH : 0) + (ov ? 48 + ov.h + 40 : 0), H = headH + items.reduce((a, it) => a + it.h, 0) + 80;
+  const scale = Math.min(2, Math.floor((32000 / H) * 10) / 10); // crisp on a phone, under the browser's canvas limit
+  const [c, ctx] = sheetCanvas(W, H, scale);
+  ctx.fillStyle = '#111';
+  let y = M;
+  ctx.font = F.title; ctx.fillText(docTitle(p), M, y); y += 50;
+  ctx.font = F.sub; ctx.fillStyle = '#444'; ctx.fillText(whenLabel(p, true), M, y); y += LH;
+  if (p.coaches) { ctx.fillText(`Coaches: ${p.coaches}`, M, y); y += LH; }
+  ctx.fillText(`${startMin != null ? `Start @ ${clockFull(startMin)} · ` : ''}${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${isGame(p) ? '' : ` · ${total} min`}`, M, y); y += LH + 8;
+  if (ov) {
+    ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText('Full ice — where each drill runs', M, y); y += 48;
+    ctx.drawImage(ov.img, M, y, INNER, ov.h); ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.strokeRect(M + 0.5, y + 0.5, INNER - 1, ov.h - 1); y += ov.h + 40;
+  }
+  let t = startMin;
+  items.forEach((it, i) => {
+    const d = it.d, at = t; if (t != null) t += (+d.duration || 0);
+    ctx.fillStyle = '#e5e7eb'; ctx.fillRect(M, y, INNER, 2); y += 18; // a rule between drills
+    ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText(`${i + 1}. ${d.name}`, M, y);
+    ctx.font = F.meta; ctx.fillStyle = '#555';
+    const right = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? `  ·  ${clockFull(at)}` : ''}`;
+    ctx.textAlign = 'right'; ctx.fillText(right, W - M, y + 6); ctx.textAlign = 'left';
+    y += 48;
+    ctx.drawImage(it.img, M, y, INNER, it.figH); ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.strokeRect(M + 0.5, y + 0.5, INNER - 1, it.figH - 1); y += it.figH + 16;
+    for (const [font, line, colour, indent] of it.text) { ctx.font = font; ctx.fillStyle = colour; ctx.fillText(line, M + (indent || 0), y); y += LH; }
+    y += 40;
+  });
+  ctx.fillStyle = '#e5e7eb'; ctx.fillRect(M, y, INNER, 2); y += 18;
+  ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText('* Dismissal', M, y);
+  if (startMin != null) { ctx.font = F.meta; ctx.fillStyle = '#555'; ctx.textAlign = 'right'; ctx.fillText(clockFull(startMin + total), W - M, y + 6); ctx.textAlign = 'left'; }
+  await savePNG(c, `${safeName(practiceLabel(p))}_plan.png`);
+}
+/**
+ * The ADM sheet: the station-practice page — one full ice sheet with every drill drawn on it where it runs, each
+ * numbered, and under it the drills listed by number with their name, minutes, clock time and description, in two
+ * columns. The same overview the print opens with, made the whole point of the page.
+ */
+async function exportADMSheet() {
+  const p = store.practice, drills = activeDrills(p), rink = rinkSVG(surfaceOf(p));
+  if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
+  const ovSVG = combinedOverview(drills, rink); if (!ovSVG) { alert('Nothing drawn on the ice yet.'); return; }
+  const W = 1700, M = 64, INNER = W - 2 * M, GAP = 48, COLW = (INNER - GAP) / 2, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 26px system-ui, sans-serif', meta: '20px system-ui, sans-serif', body: '22px system-ui, sans-serif', bodyB: 'bold 22px system-ui, sans-serif' };
+  const LH = 30;
+  const ov = await loadSVG(ovSVG), ovH = Math.round(INNER * (RINK.H + 6) / (RINK.W + 6));
+  // The legend: each drill's lines, measured for the column width.
+  let t = startMin;
+  const entries = drills.map((d, i) => {
+    const at = t; if (t != null) t += (+d.duration || 0);
+    const lines = [[F.head, `${i + 1}. ${d.name}`, '#111']];
+    const meta = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? ` · ${clockFull(at)}` : ''}`; if (meta) lines.push([F.meta, meta, '#555']);
+    for (const z of zoneRules(d)) { lines.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, COLW - 24)) lines.push([F.body, w, '#111', 24]); }
+    if (d.notes) for (const w of wrapText(d.notes, F.body, COLW)) lines.push([F.body, w, '#222']);
+    const cn = String(d.coachNotes || '').trim(); if (cn) { lines.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, COLW)) lines.push([F.body, w, '#92400e']); }
+    return { lines, h: lines.length * LH + 26 };
+  });
+  // Two columns, filled top to bottom in order: the first column takes entries until it holds about half the height.
+  const sum = entries.reduce((a, e) => a + e.h, 0); let acc = 0, split = entries.length;
+  for (let i = 0; i < entries.length; i++) { acc += entries[i].h; if (acc >= sum / 2) { split = i + 1; break; } }
+  const cols = [entries.slice(0, split), entries.slice(split)];
+  const colH = Math.max(...cols.map(col => col.reduce((a, e) => a + e.h, 0)));
+  const headH = 150 + (p.coaches ? LH : 0), H = headH + 48 + ovH + 48 + colH + M;
+  const scale = Math.min(2, Math.floor((32000 / H) * 10) / 10);
+  const [c, ctx] = sheetCanvas(W, H, scale);
+  let y = M;
+  ctx.fillStyle = '#111'; ctx.font = F.title; ctx.fillText(`${docTitle(p)} — ADM practice`, M, y); y += 50;
+  ctx.font = F.sub; ctx.fillStyle = '#444'; ctx.fillText(whenLabel(p, true), M, y); y += LH;
+  if (p.coaches) { ctx.fillText(`Coaches: ${p.coaches}`, M, y); y += LH; }
+  ctx.fillText(`${startMin != null ? `Start @ ${clockFull(startMin)} · ` : ''}${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${isGame(p) ? '' : ` · ${total} min`}`, M, y); y += LH + 16;
+  ctx.drawImage(ov, M, y, INNER, ovH); ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.strokeRect(M + 0.5, y + 0.5, INNER - 1, ovH - 1); y += ovH + 48;
+  cols.forEach((col, ci) => {
+    const x = M + ci * (COLW + GAP); let cy = y;
+    for (const e of col) {
+      for (const [font, line, colour, indent] of e.lines) { ctx.font = font; ctx.fillStyle = colour; ctx.fillText(line, x + (indent || 0), cy); cy += LH; }
+      cy += 26;
+    }
+  });
+  await savePNG(c, `${safeName(practiceLabel(p))}_ADM.png`);
+}
+$('#btn-adm-sheet').addEventListener('click', () => { closePopovers(); exportADMSheet().catch(e => alert(`ADM sheet failed: ${e?.message || e}`)); });
 $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
   const drills = activeDrills(p);

@@ -87,6 +87,8 @@ export const SVG_STYLE = `
   .bank-mark.draggable circle{stroke:#3b82f6;stroke-width:.45}
   .shot-line{fill:none;stroke:#8a8f99;stroke-width:.22;stroke-opacity:.8;stroke-dasharray:2.4 1.2} /* lighter and long-dashed, so a shot reads apart from the short-dashed pass */
   .shot-overlay{opacity:.5;pointer-events:none}
+  .dump-line{fill:none;stroke:#b45309;stroke-width:.3;stroke-opacity:.8;stroke-dasharray:.6 1} /* a dumped puck: dotted, in the coach's amber */
+  .ev-mark.dump circle{stroke:#b45309}
   .puck-ring{fill:none;stroke:#3b82f6;stroke-width:.3}
   .ev-mark circle{fill:#fff;stroke:#333;stroke-width:.3}
   .ev-mark.shoot circle{stroke:#d7263d}

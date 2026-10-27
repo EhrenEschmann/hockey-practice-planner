@@ -2331,6 +2331,7 @@ function currentMgrTeam() {
 
 // ---------- questions to the players: create a poll, hand out one link per player, watch the answers ----------
 let askAnswers = {}; // pollId → { token: answer }
+let askEditing = null; // pollId whose question is open for inline editing in the manager
 const pollLink = (pollId, token) => `${location.origin}${routePath({ view: 'ask', pollId, token })}`;
 
 async function openAskMgr() {
@@ -2349,7 +2350,7 @@ async function refreshAskAnswers() {
   for (const poll of store.data.polls || []) {
     try { askAnswers[poll.id] = await cloudBackend.loadPollAnswers(poll.id); } catch { /* offline: show what we have */ }
   }
-  if (!$('#askmgr').hidden) renderAskMgr();
+  if (!$('#askmgr').hidden && !askEditing) renderAskMgr();
 }
 
 function savePollRegistry() {
@@ -2373,15 +2374,21 @@ function renderAskMgr() {
       const answered = poll.players.filter(pl => ans[pl.token]?.choice).length;
       const counts = {};
       for (const pl of poll.players) { const c = ans[pl.token]?.choice; if (c) counts[c] = (counts[c] || 0) + 1; }
-      return `<div class="ask-poll" data-poll="${poll.id}">
-        <div class="ask-poll-head"><b>${escHtml(poll.question)}</b>
+      const head = askEditing === poll.id ? `<div class="ask-poll-head ask-edit">
+          <label class="field"><span>Question</span><input class="ask-eq" value="${escHtml(poll.question)}" maxlength="200"></label>
+          <label class="field"><span>Answer choices (comma-separated)</span><input class="ask-eo" value="${escHtml(poll.options.join(', '))}" maxlength="200"></label>
+          <div class="row"><button data-pact="esave" class="primary">Save</button><button data-pact="ecancel">Cancel</button></div>
+        </div>` : `<div class="ask-poll-head"><b>${escHtml(poll.question)}</b>
           <span class="muted small">${escHtml(poll.team)} · ${usDate(new Date(poll.createdAt).toISOString().slice(0, 10))} · ${answered}/${poll.players.length} answered${Object.keys(counts).length ? ' — ' + Object.entries(counts).map(([k, n]) => `${escHtml(k)}: ${n}`).join(' · ') : ''}</span>
           <span class="spacer"></span>
+          <button data-pact="edit" title="Edit the question or its answer choices — the links keep working, answers already given stay">✎</button>
           <button data-pact="teamlink" title="Copy ONE link for the whole team: the Questions tab — each parent taps their own player there">🔗 Team link</button>
           <button data-pact="copyall" title="Copy every player's link, one per line — paste into the team chat">🔗 Copy all links</button>
           <button data-pact="refresh" title="Fetch the latest answers">⟳</button>
           <button data-pact="del" class="danger" title="Delete this question and its answers">${icon('x')}</button>
-        </div>
+        </div>`;
+      return `<div class="ask-poll" data-poll="${poll.id}">
+        ${head}
         <div class="ask-rows">${poll.players.map(pl => {
           const a = ans[pl.token];
           return `<div class="ask-row">
@@ -2440,6 +2447,23 @@ $('#askmgr').addEventListener('click', async e => {
     try { await navigator.clipboard.writeText(text); flash('✓ Copied'); } catch { prompt('Copy these links:', text); }
   } else if (btn.dataset.pact === 'refresh') {
     try { askAnswers[poll.id] = await cloudBackend.loadPollAnswers(poll.id); renderAskMgr(); } catch (err) { alert(`Could not fetch answers: ${err?.message || err}`); }
+  } else if (btn.dataset.pact === 'edit') {
+    askEditing = poll.id; renderAskMgr();
+  } else if (btn.dataset.pact === 'ecancel') {
+    askEditing = null; renderAskMgr();
+  } else if (btn.dataset.pact === 'esave') {
+    const question = pollEl.querySelector('.ask-eq').value.trim();
+    const options = pollEl.querySelector('.ask-eo').value.split(',').map(x => x.trim()).filter(Boolean).slice(0, 6);
+    if (!question) { alert('Write the question first.'); return; }
+    btn.disabled = true;
+    try {
+      await cloudBackend.savePoll(poll.id, { question, options: options.length ? options : ['Yes', 'No'], team: poll.team, createdAt: poll.createdAt });
+      await cloudBackend.saveTeamPoll?.(poll.teamId, poll.id, { id: poll.id, question, options: options.length ? options : ['Yes', 'No'], createdAt: poll.createdAt, players: poll.players });
+    } catch (err) { btn.disabled = false; alert(`Could not save: ${err?.message || err}`); return; }
+    poll.question = question; poll.options = options.length ? options : ['Yes', 'No'];
+    askEditing = null;
+    savePollRegistry();
+    renderAskMgr();
   } else if (btn.dataset.pact === 'del') {
     if (!confirm(`Delete “${poll.question}” and all its answers? The links stop working.`)) return;
     try { await cloudBackend.removePoll(poll.id, poll.players.map(pl => pl.token)); await cloudBackend.removeTeamPoll?.(poll.teamId, poll.id); } catch (err) { alert(`Could not delete: ${err?.message || err}`); return; }

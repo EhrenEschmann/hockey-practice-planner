@@ -842,6 +842,8 @@ body.board-mode #rink{cursor:crosshair}
 .ask-new h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .ask-poll{margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .ask-poll-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ask-poll-head.ask-edit{flex-direction:column;align-items:stretch}
+.ask-poll-head.ask-edit .row{display:flex;gap:8px}
 .ask-rows{margin-top:6px;display:flex;flex-direction:column;gap:2px}
 .ask-row{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:5px}
 .ask-row:nth-child(odd){background:var(--panel-2)}

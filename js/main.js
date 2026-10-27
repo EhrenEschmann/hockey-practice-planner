@@ -3928,7 +3928,7 @@ function renderProps() {
   body.innerHTML = `<p class="pin-row"><b>${TYPE_NAMES[o.type] || o.type}</b> ${head}</p>${fields}${custom}${ptList}<div class="row">${extra.join('')}</div>`;
 }
 
-const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', pickup: 'Pickup' };
+const EV_TYPES = { pass: 'Pass', shoot: 'Shoot', dump: 'Dump', pickup: 'Pickup' };
 
 /** "Starts moving" controls for a skater or coach: at t = 0, or when another player reaches a waypoint. */
 function triggerProps(o) {
@@ -4040,6 +4040,15 @@ function puckProps(o) {
         : '<span class="muted">nearest net</span>';
       body = `<span>${who}</span>${where()}<span>shoots at</span>${tgt}<button data-act="pick" data-ev="${i}">Pick target</button>${bankUI}${mark}`;
     }
+    else if (ev.type === 'dump') {
+      const bankUI = `<label class="check"><input type="checkbox" data-ev="${i}" data-evprop="bank" ${ev.bank ? 'checked' : ''}> off the boards</label>`
+        + (ev.bank ? `<button data-act="bounce" data-ev="${i}" title="Click near the boards to set where the puck bounces (or drag the B marker on the ice)">Bounce point…</button>` : '');
+      const tgt = ev.target
+        ? `<span class="wp-pos"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="tx" value="${G.round1(ev.target.x)}" title="x (ft)"><input class="wp-xy" type="number" step="any" data-ev="${i}" data-evprop="ty" value="${G.round1(ev.target.y)}" title="y (ft)"></span>`
+        : '<span class="muted">the nearest corner</span>';
+      body = `<span>${who}</span>${where()}<span>dumps it to</span>${tgt}<button data-act="pick" data-ev="${i}" title="Click a spot on the ice — a corner, along the boards, behind a barrier">Pick spot</button>${bankUI}${mark}
+        <span class="muted small">It lies there until a player picks it up (+ Pickup) — at pass speed, and goalies pay it no mind.</span>`;
+    }
     else body = `<select data-ev="${i}" data-evprop="skater">${skaterOptions(ev.skater, '— player —')}</select><span>picks it up</span>${where()}${mark}`;
     return `<div class="event">
       <div class="event-head">
@@ -4056,7 +4065,7 @@ function puckProps(o) {
   const stealNote = steal ? `<p class="muted">💥 Stolen at t = ${steal.t.toFixed(1)} s: ${playerName(getObj(steal.from))} loses it to ${playerName(getObj(steal.to))} (impact loser).</p>` : '';
   return `${stealNote}<label class="field inline"><span>Starts with</span><select data-prop="carrier">${skaterOptions(o.carrier, o.pile ? 'In the puck pile' : 'Loose on the ice')}</select></label>
     <div class="field"><span>Events (in order)</span>${rows || '<p class="muted">No passes or shots yet.</p>'}</div>
-    <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="addpickup">+ Pickup</button></div>
+    <div class="row"><button data-act="addpass">+ Pass</button><button data-act="addshoot">+ Shoot</button><button data-act="adddump" title="Put the puck somewhere — a corner, the boards, behind a barrier — for someone to go and get">+ Dump</button><button data-act="addpickup">+ Pickup</button></div>
     <p class="muted small">Waypoint numbers are shown on the ice while the puck is selected (0 = the skater's start). P / S / U markers on the path show where each pass, shot or pickup happens (R = where a receiver-timed pass arrives, B = a board bounce) — drag them to move them. Drag the puck onto a skater to hand it over.</p>`;
 }
 
@@ -4271,7 +4280,7 @@ propsBody.addEventListener('click', e => {
     }
     case 'givepuck': { const pk = { id: uid(), ...newPuck(o, o.id) }; commit(() => drill().objects.push(pk)); select(pk.id); renderProps(); break; }
     case 'selpuck': { const pk = drill().objects.find(p => p.type === 'puck' && p.carrier === o.id); if (pk) { select(pk.id); renderProps(); } break; }
-    case 'addpass': case 'addshoot': case 'addpickup': {
+    case 'addpass': case 'addshoot': case 'adddump': case 'addpickup': {
       const carrier = finalCarrier(o);
       // The sim knows when possession changes hands — default new events to a player's first
       // waypoint after the puck's last event, so a chain (pass, get it back, shoot) doesn't pile up at the path end.
@@ -4304,6 +4313,8 @@ propsBody.addEventListener('click', e => {
         }
       } else if (btn.dataset.act === 'addshoot') {
         ev = { type: 'shoot', wp, target: null };
+      } else if (btn.dataset.act === 'adddump') {
+        ev = { type: 'dump', wp, target: null }; // the nearest corner until a spot is picked
       } else {
         const at = sim.puckPos(o.id, Infinity);
         ev = { type: 'pickup', skater: carrier ? null : nearestSkater(at, null)?.id || null, wp: 0 };
@@ -4315,7 +4326,7 @@ propsBody.addEventListener('click', e => {
     case 'evdel': commit(() => o.events.splice(evIndex, 1)); renderProps(); break;
     case 'evup': commit(() => { [o.events[evIndex - 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex - 1]]; }); renderProps(); break;
     case 'evdown': commit(() => { [o.events[evIndex + 1], o.events[evIndex]] = [o.events[evIndex], o.events[evIndex + 1]]; }); renderProps(); break;
-    case 'pick': pickTarget = { puckId: o.id, ev: evIndex, kind: 'target' }; $('#hint').textContent = 'Click on the ice to set the shot target (Esc to cancel)'; break;
+    case 'pick': pickTarget = { puckId: o.id, ev: evIndex, kind: 'target' }; $('#hint').textContent = o.events[evIndex]?.type === 'dump' ? 'Click the spot on the ice the puck is dumped to — a corner, the boards, behind a barrier (Esc to cancel)' : 'Click on the ice to set the shot target (Esc to cancel)'; break;
     case 'bounce': pickTarget = { puckId: o.id, ev: evIndex, kind: 'bank' }; $('#hint').textContent = 'Click near the boards to set where the puck bounces (Esc to cancel)'; break;
     case 'mark': pickTarget = { puckId: o.id, ev: evIndex, kind: 'dist' }; $('#hint').textContent = "Click a spot on the skater's path to mark where the pass / shot happens (Esc to cancel)"; break;
     case 'unmark': commit(() => { delete o.events[evIndex].dist; }); renderProps(); break;

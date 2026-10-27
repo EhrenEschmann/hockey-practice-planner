@@ -204,7 +204,7 @@ export function calendarFocus(items, today) {
 }
 
 /** Where a URL points: { view: 'root' | 'editor' | 'coach' | 'team' | 'request' | 'unknown', pid, did, legacy }. */
-export const LIST_TABS = ['dashboard', 'practice', 'tasks', 'games']; // the team home's tabs; the bare path is the coach's dashboard or the team's practice list
+export const LIST_TABS = ['dashboard', 'practice', 'tasks', 'games', 'questions']; // the team home's tabs; the bare path is the coach's dashboard or the team's practice list
 export const defaultTab = view => (view === 'coach' ? 'dashboard' : 'practice');
 export function parseRoute({ pathname = '/', hash = '' } = {}) {
   let h = hash;

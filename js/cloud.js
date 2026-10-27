@@ -129,7 +129,12 @@ export async function firebaseBackend(config) {
     async removePerson(email) { await fs.deleteDoc(fs.doc(db, 'people', email)); },
     subscribePerson(email, cb) { return fs.onSnapshot(fs.doc(db, 'people', email), s => cb(s.exists() ? s.data() : null, null), err => cb(null, err)); },
     /** An older link that named only the practice: which team is it under? */
-    // ---- questions to the players: the poll doc (no tokens inside) and one answer doc per personal link
+    // ---- questions to the players: the poll doc (no tokens inside) and one answer doc per personal link.
+    //      The team's copy (teams/{t}/polls) carries the player tokens so the team's Questions tab can route
+    //      a parent to their player — readable by roster members only.
+    async saveTeamPoll(t, pollId, doc) { await fs.setDoc(fs.doc(db, 'teams', t, 'polls', pollId), doc); },
+    async loadTeamPolls(t) { return (await fs.getDocs(fs.collection(db, 'teams', t, 'polls'))).docs.map(d => d.data()); },
+    async removeTeamPoll(t, pollId) { await fs.deleteDoc(fs.doc(db, 'teams', t, 'polls', pollId)); },
     async savePoll(pollId, doc) { await fs.setDoc(fs.doc(db, 'polls', pollId), doc); },
     async loadPoll(pollId) { const s = await fs.getDoc(fs.doc(db, 'polls', pollId)); return s.exists() ? s.data() : null; },
     async removePoll(pollId, tokens) {

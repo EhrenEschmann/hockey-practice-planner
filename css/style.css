@@ -849,3 +849,14 @@ body.board-mode #rink{cursor:crosshair}
 .ask-ans{color:var(--muted)}
 .ask-ans.on{color:var(--accent-2);font-weight:600}
 .ask-notetxt{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+
+/* team Questions tab: the signup sheet */
+.qt-poll{margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel)}
+.qt-q{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.qt-sub{margin:2px 0 8px}
+.qt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.qt-player{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel-2);text-decoration:none;color:inherit}
+.qt-player span{color:var(--muted);font-size:12.5px}
+.qt-player.answered{border-color:var(--accent)}
+.qt-player.answered span{color:var(--accent-2);font-weight:600}
+#ask-back{display:inline-block;margin-bottom:6px;text-decoration:none}

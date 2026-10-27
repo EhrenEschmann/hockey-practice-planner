@@ -55,6 +55,11 @@ service cloud.firestore {
         allow read: if isAdmin(teamId) || isMember(teamId);
         allow write: if isAdmin(teamId);
       }
+      // The team's signup sheet for a question: the players and their answer-link tokens.
+      match /polls/{pollId} {
+        allow read: if isAdmin(teamId) || isMember(teamId);
+        allow write: if isAdmin(teamId);
+      }
       // Headers: a list query must carry the stage filter the reader is entitled to, so the rules can prove it.
       match /practices/{pid} {
         allow read: if isAdmin(teamId) || viewable(teamId, resource.data);

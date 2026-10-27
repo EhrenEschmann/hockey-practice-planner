@@ -2371,6 +2371,7 @@ function renderAskMgr() {
         <div class="ask-poll-head"><b>${escHtml(poll.question)}</b>
           <span class="muted small">${escHtml(poll.team)} · ${usDate(new Date(poll.createdAt).toISOString().slice(0, 10))} · ${answered}/${poll.players.length} answered${Object.keys(counts).length ? ' — ' + Object.entries(counts).map(([k, n]) => `${escHtml(k)}: ${n}`).join(' · ') : ''}</span>
           <span class="spacer"></span>
+          <button data-pact="teamlink" title="Copy ONE link for the whole team: the Questions tab — each parent taps their own player there">🔗 Team link</button>
           <button data-pact="copyall" title="Copy every player's link, one per line — paste into the team chat">🔗 Copy all links</button>
           <button data-pact="refresh" title="Fetch the latest answers">⟳</button>
           <button data-pact="del" class="danger" title="Delete this question and its answers">${icon('x')}</button>
@@ -2406,6 +2407,7 @@ async function createPoll() {
   try {
     await cloudBackend.savePoll(poll.id, { question: poll.question, options: poll.options, team: poll.team, createdAt: poll.createdAt });
     for (const pl of poll.players) await cloudBackend.savePollAnswer(poll.id, pl.token, { player: pl.name, choice: '', note: '', createdAt: Date.now() });
+    await cloudBackend.saveTeamPoll?.(poll.teamId, poll.id, { id: poll.id, question: poll.question, options: poll.options, createdAt: poll.createdAt, players: poll.players });
   } catch (e) { alert(`Could not create the question: ${e?.message || e}`); return; }
   store.data.polls = [poll, ...(store.data.polls || [])];
   savePollRegistry();
@@ -2421,7 +2423,10 @@ $('#askmgr').addEventListener('click', async e => {
   const pollEl = btn.closest('.ask-poll');
   const poll = (store.data.polls || []).find(x => x.id === pollEl?.dataset.poll); if (!poll) return;
   const flash = txt => { const old = btn.textContent; btn.textContent = txt; setTimeout(() => { btn.textContent = old; }, 1400); };
-  if (btn.dataset.pact === 'copy') {
+  if (btn.dataset.pact === 'teamlink') {
+    const url = `${location.origin}${routePath({ view: 'team', teamId: poll.teamId, tab: 'questions' })}`;
+    try { await navigator.clipboard.writeText(url); flash('✓ Copied'); } catch { prompt('Copy this link:', url); }
+  } else if (btn.dataset.pact === 'copy') {
     const url = pollLink(poll.id, btn.dataset.token);
     try { await navigator.clipboard.writeText(url); flash('✓'); } catch { prompt('Copy this link:', url); }
   } else if (btn.dataset.pact === 'copyall') {
@@ -2431,7 +2436,7 @@ $('#askmgr').addEventListener('click', async e => {
     try { askAnswers[poll.id] = await cloudBackend.loadPollAnswers(poll.id); renderAskMgr(); } catch (err) { alert(`Could not fetch answers: ${err?.message || err}`); }
   } else if (btn.dataset.pact === 'del') {
     if (!confirm(`Delete “${poll.question}” and all its answers? The links stop working.`)) return;
-    try { await cloudBackend.removePoll(poll.id, poll.players.map(pl => pl.token)); } catch (err) { alert(`Could not delete: ${err?.message || err}`); return; }
+    try { await cloudBackend.removePoll(poll.id, poll.players.map(pl => pl.token)); await cloudBackend.removeTeamPoll?.(poll.teamId, poll.id); } catch (err) { alert(`Could not delete: ${err?.message || err}`); return; }
     store.data.polls = store.data.polls.filter(x => x.id !== poll.id);
     savePollRegistry();
     renderAskMgr();
@@ -5630,7 +5635,7 @@ function showTeams(r) {
   $('#present-scroll').scrollTop = 0;
 }
 /** A team's home, as an app: Practice (the one the calendar points at, then the rest), Tasks (a club team's week) and Games (notes). */
-const LIST_TAB_DEFS = [['dashboard', 'Dashboard', 'dashboard'], ['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games']]; // Dashboard: coaches only
+const LIST_TAB_DEFS = [['dashboard', 'Dashboard', 'dashboard'], ['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games'], ['questions', 'Questions', 'notes']]; // Dashboard: coaches only
 let listKey = null; // which home is on screen, so a repaint doesn't wipe the Tasks tab while someone types
 /** The bottom tab bar: Dashboard (coaches) · Practice · Tasks (club teams) · Games — `tab` is the lit one. */
 function paintTabs(as, teamId, tab) {
@@ -5655,6 +5660,7 @@ function showList(r) {
   const club = r.teamId ? clubsFor().find(c => c.id === r.teamId) : null;
   const key = `${as}/${r.teamId}/${tab}`;
   if (tab === 'tasks') { if (listKey === key && $('#tasks-tab')) return; listKey = key; renderTasksTab(club, as); $('#present-scroll').scrollTop = 0; return; }
+  if (tab === 'questions') { listKey = key; renderQuestionsTab(r, key); $('#present-scroll').scrollTop = 0; return; }
   listKey = key;
   const empty = loading ? '<p class="muted">Loading…</p>' : rec?.error && !rec.items.length ? `<p class="warn">Could not load this team's practices: ${escHtml(rec.error.message || rec.error)}</p>` : null;
   const row = x => `<a class="pl-item" href="${itemPath(as, x)}" data-nav>
@@ -6027,6 +6033,36 @@ $('#present-home').addEventListener('click', () => { // this team's list; on sev
 let myRequest;           // undefined = not loaded; null = none filed; else the requests/{uid} document
 let myRequestFor = null;
 let attemptLogged = null; // uid whose failed sign-in this session already recorded
+// ---------- the team's Questions tab: one shared page — a parent taps their player and answers for them ----------
+async function renderQuestionsTab(r, key) {
+  const body = $('#present-body');
+  body.innerHTML = '<div class="pl-list"><p class="muted">Loading questions…</p></div>';
+  let polls = [];
+  try { polls = await cloudBackend.loadTeamPolls(r.teamId); }
+  catch (e) { if (listKey === key) body.innerHTML = `<div class="pl-list"><p class="warn">Could not load the questions: ${escHtml(e?.message || String(e))}</p></div>`; return; }
+  if (listKey !== key) return; // navigated away while loading
+  polls.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  // current answers, so the sheet shows who said what (fetched by each player's token)
+  const answers = {};
+  await Promise.all(polls.flatMap(poll => (poll.players || []).map(async pl => {
+    try { answers[`${poll.id}/${pl.token}`] = await cloudBackend.loadPollAnswer(poll.id, pl.token); } catch { /* unanswered */ }
+  })));
+  if (listKey !== key) return;
+  body.innerHTML = `<div class="pl-list">
+    <h2>Questions</h2>
+    ${polls.length ? polls.map(poll => `
+      <div class="qt-poll">
+        <div class="qt-q"><b>${escHtml(poll.question)}</b><span class="muted small">${usDate(new Date(poll.createdAt || 0).toISOString().slice(0, 10))}</span></div>
+        <div class="qt-sub muted small">Tap your player to answer for them — you can change it any time.</div>
+        <div class="qt-grid">${(poll.players || []).map(pl => {
+          const a = answers[`${poll.id}/${pl.token}`];
+          return `<a class="qt-player${a?.choice ? ' answered' : ''}" href="${routePath({ view: 'ask', pollId: poll.id, token: pl.token })}" data-nav>
+            <b>${escHtml(pl.name)}</b><span>${escHtml(a?.choice || 'not answered')}</span></a>`;
+        }).join('')}</div>
+      </div>`).join('') : '<p class="muted">No questions right now.</p>'}
+  </div>`;
+}
+
 // ---------- a player's personal answer page (/ask/{pollId}/{token}) ----------
 let askState = null; // { pollId, token, poll, answer, pending, loading, anonTried }
 async function showAsk(r) {
@@ -6067,6 +6103,7 @@ async function showAsk(r) {
 function renderAsk(status = '') {
   const a = askState;
   $('#ask-screen').innerHTML = `<div class="ask-card">
+    ${history.length > 1 ? '<a href="#" id="ask-back" class="muted small">‹ Back to the team page</a>' : ''}
     <div class="muted small">🏒 ${escHtml(a.poll.team || 'Your team')} asks${a.poll.createdAt ? ` · ${usDate(new Date(a.poll.createdAt).toISOString().slice(0, 10))}` : ''}</div>
     <h2 class="ask-q">${escHtml(a.poll.question)}</h2>
     <div class="ask-for">Answering for <b>${escHtml(a.answer.player || 'you')}</b></div>
@@ -6082,6 +6119,7 @@ function renderAsk(status = '') {
 }
 
 $('#ask-screen').addEventListener('click', async e => {
+  if (e.target.closest('#ask-back')) { e.preventDefault(); history.back(); return; }
   const a = askState; if (!a?.poll) return;
   const opt = e.target.closest('.ask-opt');
   if (opt) {

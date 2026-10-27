@@ -2414,7 +2414,7 @@ async function createPoll() {
   renderAskMgr();
 }
 
-$('#team-ask').addEventListener('click', openAskMgr);
+$('#btn-ask').addEventListener('click', openAskMgr);
 $('#askmgr-close').addEventListener('click', closeAskMgr);
 $('#askmgr').addEventListener('click', async e => {
   if (e.target === $('#askmgr')) return closeAskMgr();

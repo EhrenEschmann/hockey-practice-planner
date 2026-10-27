@@ -853,6 +853,9 @@ body.board-mode #rink{cursor:crosshair}
 .ask-notetxt{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
 
 /* team Questions tab: the signup sheet */
+.qt-switch{display:flex;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+.qt-switch button{padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--panel-2);color:inherit;font-size:13.5px;cursor:pointer}
+.qt-switch button.on{border-color:var(--accent);background:var(--panel);font-weight:600}
 .qt-poll{margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel)}
 .qt-q{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .qt-sub{margin:2px 0 8px}

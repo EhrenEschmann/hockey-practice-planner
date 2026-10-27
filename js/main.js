@@ -6203,6 +6203,7 @@ let myRequest;           // undefined = not loaded; null = none filed; else the 
 let myRequestFor = null;
 let attemptLogged = null; // uid whose failed sign-in this session already recorded
 // ---------- the team's Questions tab: one shared page — a parent taps their player and answers for them ----------
+let qtSkater = null; // which of the viewer's own skaters the team Questions tab is showing
 async function renderQuestionsTab(r, key) {
   const body = $('#present-body');
   body.innerHTML = '<div class="pl-list"><p class="muted">Loading questions…</p></div>';
@@ -6211,25 +6212,50 @@ async function renderQuestionsTab(r, key) {
   catch (e) { if (listKey === key) body.innerHTML = `<div class="pl-list"><p class="warn">Could not load the questions: ${escHtml(e?.message || String(e))}</p></div>`; return; }
   if (listKey !== key) return; // navigated away while loading
   polls.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  // current answers, so the sheet shows who said what (fetched by each player's token)
+  // The team link shows a family their own skater(s); the coach link shows the whole sheet, any player answerable.
+  const myEmail = String(cloudSync?.user?.email || '').toLowerCase();
+  let mine = [];
+  if (who.persona === 'planner') {
+    const t = (store.roster.teams || []).find(x => x.id === r.teamId);
+    mine = (t?.players || []).filter(pl => pl.id && (pl.contacts || []).some(c => String(c.email || '').toLowerCase() === myEmail)).map(pl => ({ id: pl.id, name: pl.name || '' }));
+  } else mine = ((who.teams || []).find(t => t.id === r.teamId)?.players || []).filter(pl => pl.id);
+  const parentView = r.as === 'team' && mine.length > 0;
+  // current answers — a family fetches only its own skaters', the coach sheet everyone's
   const answers = {};
-  await Promise.all(polls.flatMap(poll => (poll.players || []).map(async pl => {
+  await Promise.all(polls.flatMap(poll => (poll.players || []).filter(pl => !parentView || mine.some(x => x.id === pl.id)).map(async pl => {
     try { answers[`${poll.id}/${pl.token}`] = await cloudBackend.loadPollAnswer(poll.id, pl.token); } catch { /* unanswered */ }
   })));
   if (listKey !== key) return;
-  body.innerHTML = `<div class="pl-list">
-    <h2>Questions</h2>
-    ${polls.length ? polls.map(poll => `
-      <div class="qt-poll">
-        <div class="qt-q"><b>${escHtml(poll.question)}</b><span class="muted small">${usDate(new Date(poll.createdAt || 0).toISOString().slice(0, 10))}</span></div>
-        <div class="qt-sub muted small">Tap your player to answer for them — you can change it any time.</div>
-        <div class="qt-grid">${(poll.players || []).map(pl => {
-          const a = answers[`${poll.id}/${pl.token}`];
-          return `<a class="qt-player${a?.choice ? ' answered' : ''}" href="${routePath({ view: 'ask', pollId: poll.id, token: pl.token })}" data-nav>
+  const when = poll => usDate(new Date(poll.createdAt || 0).toISOString().slice(0, 10));
+  const tile = (poll, pl) => {
+    const a = answers[`${poll.id}/${pl.token}`];
+    return `<a class="qt-player${a?.choice ? ' answered' : ''}" href="${routePath({ view: 'ask', pollId: poll.id, token: pl.token })}" data-nav>
             <b>${escHtml(pl.name)}</b><span>${escHtml(a?.choice || 'not answered')}</span></a>`;
-        }).join('')}</div>
-      </div>`).join('') : '<p class="muted">No questions right now.</p>'}
-  </div>`;
+  };
+  const paint = () => {
+    if (listKey !== key) return;
+    if (parentView && !mine.some(x => x.id === qtSkater)) qtSkater = mine[0].id;
+    const skater = parentView ? mine.find(x => x.id === qtSkater) : null;
+    const card = poll => parentView ? `
+      <div class="qt-poll">
+        <div class="qt-q"><b>${escHtml(poll.question)}</b><span class="muted small">${when(poll)}</span></div>
+        ${(() => { const pl = (poll.players || []).find(x => x.id === qtSkater);
+          return pl ? `<div class="qt-sub muted small">Tap to answer for ${escHtml(pl.name)} — you can change it any time.</div><div class="qt-grid">${tile(poll, pl)}</div>`
+            : `<p class="muted small">This question doesn’t include ${escHtml(skater?.name || 'your skater')}.</p>`; })()}
+      </div>` : `
+      <div class="qt-poll">
+        <div class="qt-q"><b>${escHtml(poll.question)}</b><span class="muted small">${when(poll)}</span></div>
+        <div class="qt-sub muted small">Tap a player to see or change their answer.</div>
+        <div class="qt-grid">${(poll.players || []).map(pl => tile(poll, pl)).join('')}</div>
+      </div>`;
+    body.innerHTML = `<div class="pl-list">
+      <h2>Questions</h2>
+      ${parentView && mine.length > 1 ? `<div class="qt-switch">${mine.map(x => `<button class="qt-sk${x.id === qtSkater ? ' on' : ''}" data-skater="${x.id}">${escHtml(x.name)}</button>`).join('')}</div>` : ''}
+      ${polls.length ? polls.map(card).join('') : '<p class="muted">No questions right now.</p>'}
+    </div>`;
+    for (const b of body.querySelectorAll('[data-skater]')) b.addEventListener('click', () => { qtSkater = b.dataset.skater; paint(); });
+  };
+  paint();
 }
 
 // ---------- a player's personal answer page (/ask/{pollId}/{token}) ----------

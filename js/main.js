@@ -635,7 +635,10 @@ async function startBoardPlayback({ silent = false } = {}) {
   if (!silent) {
     if (b.staged) { audioUrl = URL.createObjectURL(b.staged.blob); audio = new Audio(audioUrl); }
     else if (b.audioMeta) {
+      if (!clipMem.has(keyFor(ownerFor(), store.practice.id, drill(), 'boardAudio'))) { b.fetching = true; renderBoardBar(); }
       const entry = await fetchClip(ownerFor(), store.practice.id, drill(), 'boardAudio');
+      b.fetching = false;
+      if (boardMode !== b) return; // board mode was left while the voice came down
       if (entry) audio = new Audio(entry.url);
     }
     audio?.play().catch(() => {});
@@ -696,7 +699,8 @@ function renderBoardBar() {
   $('#board-revoice').textContent = b.rec && b.revoice ? `■ Stop (${bNow().toFixed(0)} s)` : '🎙 Re-record voice';
   $('#board-revoice').classList.toggle('danger', !!b.rec && b.revoice);
   $('#board-play').hidden = !!b.rec || (!b.strokes.length && !b.staged && !b.audioMeta);
-  $('#board-play').textContent = b.playing ? '■ Stop' : '▶ Replay';
+  $('#board-play').textContent = b.fetching ? '… downloading' : b.playing ? '■ Stop' : '▶ Replay';
+  $('#board-play').disabled = !!b.fetching;
   $('#board-save').disabled = !b.dirty;
   $('#board-status').textContent = b.rec ? (b.revoice ? '● New voice — the drawing is replaying, talk over it' : '● Recording — draw as you talk')
     : b.staged ? `New voice staged (${b.staged.secs.toFixed(0)} s) — Save to keep it`
@@ -1717,6 +1721,8 @@ function playClip(entry, { onEnd }) {
   return { stop() { if (done) return; audio.pause(); finish(); }, cancelled: false };
 }
 let introPlaying = null; // the Drills panel's ▶ Listen preview
+let clipFetching = null; // { drillId, kind } while a ▶ tap is still pulling that clip from this device's store or the cloud
+const fetchingClip = (kind, d) => clipFetching?.kind === kind && clipFetching.drillId === d.id;
 
 // ----- narration: the coach's voice over the animation. Decoded once and played through WebAudio, which can start at
 // any offset (a MediaRecorder WebM can't be seeked reliably), so ⏸ / ▶ and the timeline keep voice and picture together.
@@ -3184,8 +3190,11 @@ async function coachNoteAction(act) {
     renderPlan();
   } else if (act === 'cnplay') {
     if (cnPlaying) { cnPlaying.stop(); cnPlaying = null; renderPlan(); return; }
+    if (clipFetching) return;
+    if (!clipMem.has(key)) { clipFetching = { drillId: d.id, kind: 'coachnote' }; renderPlan(); }
     const entry = await fetchClip(ownerFor(), pid, d, 'coachnote');
-    if (!entry) return;
+    clipFetching = null;
+    if (!entry) { renderPlan(); return; }
     cnPlaying = playClip(entry, { onEnd: () => { cnPlaying = null; renderPlan(); } });
     renderPlan();
   } else if (act === 'cndel') {
@@ -3234,8 +3243,11 @@ async function introAction(iact, li) {
     renderPlan();
   } else if (iact === 'play') {
     if (introPlaying) { introPlaying.stop(); return; }
+    if (clipFetching) return;
+    if (!clipMem.has(key)) { clipFetching = { drillId: d.id, kind: 'intro' }; renderPlan(); } // not in memory yet: show the download while IndexedDB / the cloud answers
     const entry = await fetchClip(ownerFor(), pid, d);
-    if (!entry) { status('No clip available on this device.'); return; }
+    clipFetching = null;
+    if (!entry) { renderPlan(); status('No clip available on this device.'); return; }
     introPlaying = playClip(entry, { onEnd: () => { introPlaying = null; renderPlan(); } });
     introPlaying.drillId = d.id;
     renderPlan();
@@ -3612,7 +3624,7 @@ function renderPlan() {
           <textarea data-coachnotes="${i}" rows="2" placeholder="Notes just for the coaches…">${escHtml(d.coachNotes || '')}</textarea>
           <div class="row">
             ${cnRec?.drillId === d.id ? '<button data-act="cnstop" class="danger">■ Stop recording</button>' : `<button data-act="cnrec">● ${d.coachnote ? 'Re-record' : 'Record'} audio</button>`}
-            ${d.coachnote ? `<button data-act="cnplay">${cnPlaying ? '■ Stop' : `▶ Play (${Math.round(d.coachnote.secs)} s)`}</button><button data-act="cndel" title="Delete the audio note">${icon('x')}</button>` : ''}
+            ${d.coachnote ? `<button data-act="cnplay" ${fetchingClip('coachnote', d) ? 'disabled' : ''}>${fetchingClip('coachnote', d) ? '… downloading' : cnPlaying ? '■ Stop' : `▶ Play (${Math.round(d.coachnote.secs)} s)`}</button><button data-act="cndel" title="Delete the audio note">${icon('x')}</button>` : ''}
             <span class="intro-status muted small">${d.coachnote && d.coachnote.cloud !== true ? '⚠ audio not in the cloud — coaches can’t hear it yet' : ''}</span>
           </div>
         </div></li>`
@@ -3626,7 +3638,7 @@ function renderPlan() {
       ${introScriptHTML(d, recording)}
       <div class="row">
         ${recording ? '<button data-iact="stop" class="danger">■ Stop</button>' : `<button data-iact="rec" ${canRecord() ? '' : 'disabled'}>● ${d.intro ? 'Re-record' : 'Record'}</button>`}
-        <button data-iact="play" ${d.intro && !recording ? '' : 'disabled'}>${introPlaying?.drillId === d.id ? '■ Stop' : '▶ Listen'}</button>
+        <button data-iact="play" ${d.intro && !recording && !fetchingClip('intro', d) ? '' : 'disabled'}>${fetchingClip('intro', d) ? '… downloading' : introPlaying?.drillId === d.id ? '■ Stop' : '▶ Listen'}</button>
         ${d.intro && !recording && d.intro.cloud !== true && cloudBackend?.saveClip ? '<button data-iact="upload" class="primary">☁ Upload now</button>' : ''}
         <button data-iact="del" ${d.intro && !recording ? '' : 'disabled'}>✕ Delete</button>
       </div>

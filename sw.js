@@ -4,7 +4,7 @@
 // with internet can still open it cold at the rink.
 const CACHE = 'hpp-v2';
 const PRECACHE = ['./', './index.html', './css/style.css',
-  './js/main.js', './js/access.js', './js/icons.js', './js/render.js', './js/rink.js', './js/sim.js', './js/geometry.js', './js/store.js', './js/cloud.js', './js/powerskate.js', './js/clips.js', './js/video.js',
+  './js/main.js', './js/ui.js', './js/core.js', './js/editor.js', './js/doc.js', './js/present.js', './js/print.js', './js/access.js', './js/icons.js', './js/render.js', './js/rink.js', './js/sim.js', './js/geometry.js', './js/store.js', './js/cloud.js', './js/powerskate.js', './js/clips.js', './js/video.js',
   './js/firebase-config.js', './firebase-config.js'];
 const RUNTIME_HOSTS = ['https://www.gstatic.com/firebasejs/', 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk']; // the Firebase and Anthropic SDK modules are cached too
 const TIMEOUT = 4000; // ms to wait for a flaky one-bar connection before falling back to the cache

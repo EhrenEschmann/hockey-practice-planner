@@ -2382,7 +2382,7 @@ function renderAskMgr() {
           <span class="muted small">${escHtml(poll.team)} · ${usDate(new Date(poll.createdAt).toISOString().slice(0, 10))} · ${answered}/${poll.players.length} answered${Object.keys(counts).length ? ' — ' + Object.entries(counts).map(([k, n]) => `${escHtml(k)}: ${n}`).join(' · ') : ''}</span>
           <span class="spacer"></span>
           <button data-pact="edit" title="Edit the question or its answer choices — the links keep working, answers already given stay">✎</button>
-          <button data-pact="teamlink" title="Copy ONE link for the whole team: the Questions tab — each parent taps their own player there">🔗 Team link</button>
+          <button data-pact="teamlink" title="Copy ONE link for the whole team: the Survey tab — each parent taps their own player there">🔗 Team link</button>
           <button data-pact="copyall" title="Copy every player's link, one per line — paste into the team chat">🔗 Copy all links</button>
           <button data-pact="refresh" title="Fetch the latest answers">⟳</button>
           <button data-pact="del" class="danger" title="Delete this question and its answers">${icon('x')}</button>
@@ -5810,7 +5810,7 @@ function showTeams(r) {
   $('#present-scroll').scrollTop = 0;
 }
 /** A team's home, as an app: Practice (the one the calendar points at, then the rest), Tasks (a club team's week) and Games (notes). */
-const LIST_TAB_DEFS = [['dashboard', 'Dashboard', 'dashboard'], ['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games'], ['questions', 'Questions', 'notes']]; // Dashboard: coaches only
+const LIST_TAB_DEFS = [['dashboard', 'Dashboard', 'dashboard'], ['practice', 'Practice', 'calendar'], ['tasks', 'Tasks', 'tasks'], ['games', 'Games', 'games'], ['questions', 'Survey', 'notes']]; // Dashboard: coaches only
 let listKey = null; // which home is on screen, so a repaint doesn't wipe the Tasks tab while someone types
 /** The bottom tab bar: Dashboard (coaches) · Practice · Tasks (club teams) · Games — `tab` is the lit one. */
 function paintTabs(as, teamId, tab) {
@@ -6212,10 +6212,10 @@ let attemptLogged = null; // uid whose failed sign-in this session already recor
 let qtSkater = null; // which of the viewer's own skaters the team Questions tab is showing
 async function renderQuestionsTab(r, key) {
   const body = $('#present-body');
-  body.innerHTML = '<div class="pl-list"><p class="muted">Loading questions…</p></div>';
+  body.innerHTML = '<div class="pl-list"><p class="muted">Loading the survey…</p></div>';
   let polls = [];
   try { polls = await cloudBackend.loadTeamPolls(r.teamId); }
-  catch (e) { if (listKey === key) body.innerHTML = `<div class="pl-list"><p class="warn">Could not load the questions: ${escHtml(e?.message || String(e))}</p></div>`; return; }
+  catch (e) { if (listKey === key) body.innerHTML = `<div class="pl-list"><p class="warn">Could not load the survey: ${escHtml(e?.message || String(e))}</p></div>`; return; }
   if (listKey !== key) return; // navigated away while loading
   polls.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   // The team link shows a family their own skater(s); the coach link shows the whole sheet, any player answerable.
@@ -6255,9 +6255,9 @@ async function renderQuestionsTab(r, key) {
         <div class="qt-grid">${(poll.players || []).map(pl => tile(poll, pl)).join('')}</div>
       </div>`;
     body.innerHTML = `<div class="pl-list">
-      <h2>Questions</h2>
+      <h2>Survey</h2>
       ${parentView && mine.length > 1 ? `<div class="qt-switch">${mine.map(x => `<button class="qt-sk${x.id === qtSkater ? ' on' : ''}" data-skater="${x.id}">${escHtml(x.name)}</button>`).join('')}</div>` : ''}
-      ${polls.length ? polls.map(card).join('') : '<p class="muted">No questions right now.</p>'}
+      ${polls.length ? polls.map(card).join('') : '<p class="muted">No survey questions right now.</p>'}
     </div>`;
     for (const b of body.querySelectorAll('[data-skater]')) b.addEventListener('click', () => { qtSkater = b.dataset.skater; paint(); });
   };

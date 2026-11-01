@@ -1989,7 +1989,9 @@ function renderAskMgr() {
     }).join('') || '<p class="muted" style="margin-top:12px">No questions yet.</p>'}`;
 }
 
+let askCreating = false; // one question at a time: a second tap while the first is on its way must not make a twin
 async function createPoll() {
+  if (askCreating) return;
   const question = $('#askq').value.trim();
   const options = $('#asko').value.split(',').map(x => x.trim()).filter(Boolean).slice(0, 6);
   const team = store.roster.teams.find(t => t.id === $('#askt').value);
@@ -1998,19 +2000,34 @@ async function createPoll() {
   const players = (team.players || []).filter(pl => (pl.name || '').trim());
   if (!players.length) { alert(`No players on “${team.name}” yet — add them under 👥 Team.`); return; }
   if (!cloudSync?.user || !cloudBackend?.savePoll) { alert('Sign in first — answers are collected through your cloud account.'); return; }
+  // The same question for the same team within the last minute is the double tap this guards against, not a new question.
+  const twin = (store.data.polls || []).find(x => x.teamId === team.id && x.question === question && Date.now() - (x.createdAt || 0) < 60000);
+  if (twin) { alert('That question was just created — it is in the list below.'); return; }
   const poll = {
     id: uid() + uid(), question, options: options.length ? options : ['Yes', 'No'],
     teamId: team.id, team: team.name || '', createdAt: Date.now(),
     players: players.map(pl => ({ id: pl.id, name: pl.name, token: uid() + uid() })),
   };
+  const btn = $('#ask-create'); askCreating = true;
+  if (btn) { btn.disabled = true; btn.textContent = `Creating… (${players.length} link${players.length === 1 ? '' : 's'})`; }
   try {
-    await cloudBackend.savePoll(poll.id, { question: poll.question, options: poll.options, team: poll.team, createdAt: poll.createdAt });
-    for (const pl of poll.players) await cloudBackend.savePollAnswer(poll.id, pl.token, { player: pl.name, choice: '', note: '', createdAt: Date.now() });
-    await cloudBackend.saveTeamPoll?.(poll.teamId, poll.id, { id: poll.id, question: poll.question, options: poll.options, createdAt: poll.createdAt, players: poll.players });
-  } catch (e) { alert(`Could not create the question: ${e?.message || e}`); return; }
+    const pollDoc = { question: poll.question, options: poll.options, team: poll.team, createdAt: poll.createdAt };
+    const teamDoc = { id: poll.id, question: poll.question, options: poll.options, createdAt: poll.createdAt, players: poll.players };
+    const answers = Object.fromEntries(poll.players.map(pl => [pl.token, { player: pl.name, choice: '', note: '', createdAt: poll.createdAt }]));
+    if (cloudBackend.createPoll) await cloudBackend.createPoll({ pollId: poll.id, poll: pollDoc, answers, teamId: poll.teamId, teamDoc }); // one batched write
+    else { // a backend without batches: the old way, one document at a time
+      await cloudBackend.savePoll(poll.id, pollDoc);
+      for (const pl of poll.players) await cloudBackend.savePollAnswer(poll.id, pl.token, answers[pl.token]);
+      await cloudBackend.saveTeamPoll?.(poll.teamId, poll.id, teamDoc);
+    }
+  } catch (e) {
+    askCreating = false; if (btn) { btn.disabled = false; btn.textContent = 'Create — one link per player'; }
+    alert(`Could not create the question: ${e?.message || e}`); return;
+  }
+  askCreating = false;
   store.data.polls = [poll, ...(store.data.polls || [])];
   savePollRegistry();
-  renderAskMgr();
+  renderAskMgr(); // rebuilds the form, button included
 }
 
 $('#btn-ask').addEventListener('click', openAskMgr);

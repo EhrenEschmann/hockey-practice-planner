@@ -136,10 +136,20 @@ export async function firebaseBackend(config) {
     async loadTeamPolls(t) { return (await fs.getDocs(fs.collection(db, 'teams', t, 'polls'))).docs.map(d => d.data()); },
     async removeTeamPoll(t, pollId) { await fs.deleteDoc(fs.doc(db, 'teams', t, 'polls', pollId)); },
     async savePoll(pollId, doc) { await fs.setDoc(fs.doc(db, 'polls', pollId), doc); },
+    /** A new question in ONE round trip: the poll, every player's answer slot and the team's copy, committed together (or not at all). */
+    async createPoll({ pollId, poll, answers, teamId, teamDoc }) {
+      const batch = fs.writeBatch(db);
+      batch.set(fs.doc(db, 'polls', pollId), poll);
+      for (const [token, a] of Object.entries(answers || {})) batch.set(fs.doc(db, 'polls', pollId, 'answers', token), a);
+      if (teamId && teamDoc) batch.set(fs.doc(db, 'teams', teamId, 'polls', pollId), teamDoc);
+      await batch.commit();
+    },
     async loadPoll(pollId) { const s = await fs.getDoc(fs.doc(db, 'polls', pollId)); return s.exists() ? s.data() : null; },
-    async removePoll(pollId, tokens) {
-      for (const t of tokens || []) await fs.deleteDoc(fs.doc(db, 'polls', pollId, 'answers', t)).catch(() => {});
-      await fs.deleteDoc(fs.doc(db, 'polls', pollId));
+    async removePoll(pollId, tokens) { // one round trip, like creating it
+      const batch = fs.writeBatch(db);
+      for (const t of tokens || []) batch.delete(fs.doc(db, 'polls', pollId, 'answers', t));
+      batch.delete(fs.doc(db, 'polls', pollId));
+      await batch.commit();
     },
     async savePollAnswer(pollId, token, doc) { await fs.setDoc(fs.doc(db, 'polls', pollId, 'answers', token), doc, { merge: true }); },
     async loadPollAnswer(pollId, token) { const s = await fs.getDoc(fs.doc(db, 'polls', pollId, 'answers', token)); return s.exists() ? s.data() : null; },

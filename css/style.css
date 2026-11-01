@@ -865,3 +865,4 @@ body.board-mode #rink{cursor:crosshair}
 .qt-player.answered{border-color:var(--accent)}
 .qt-player.answered span{color:var(--accent-2);font-weight:600}
 #ask-back{display:inline-block;margin-bottom:6px;text-decoration:none}
+.qt-q .qt-del{margin-left:auto;padding:4px 10px;font-size:12px;border-radius:999px}

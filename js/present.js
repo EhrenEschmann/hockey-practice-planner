@@ -1403,8 +1403,8 @@ async function renderQuestionsTab(r, key) {
           return pl ? `<div class="qt-sub muted small">Tap to answer for ${escHtml(pl.name)} — you can change it any time.</div><div class="qt-grid">${tile(poll, pl)}</div>`
             : `<p class="muted small">This question doesn’t include ${escHtml(skater?.name || 'your skater')}.</p>`; })()}
       </div>` : `
-      <div class="qt-poll">
-        <div class="qt-q"><b>${escHtml(poll.question)}</b><span class="muted small">${when(poll)}</span></div>
+      <div class="qt-poll" data-poll="${escHtml(poll.id)}">
+        <div class="qt-q"><b>${escHtml(poll.question)}</b><span class="muted small">${when(poll)}</span>${who.persona === 'planner' ? `<button class="qt-del danger" data-qdel="${escHtml(poll.id)}" title="Delete this question and every answer — the links stop working">✕ Delete</button>` : ''}</div>
         <div class="qt-sub muted small">Tap a player to see or change their answer.</div>
         <div class="qt-grid">${(poll.players || []).map(pl => tile(poll, pl)).join('')}</div>
       </div>`;
@@ -1414,8 +1414,25 @@ async function renderQuestionsTab(r, key) {
       ${polls.length ? polls.map(card).join('') : '<p class="muted">No survey questions right now.</p>'}
     </div>`;
     for (const b of body.querySelectorAll('[data-skater]')) b.addEventListener('click', () => { qtSkater = b.dataset.skater; paint(); });
+    for (const b of body.querySelectorAll('[data-qdel]')) b.addEventListener('click', async () => {
+      const poll = polls.find(x => x.id === b.dataset.qdel); if (!poll) return;
+      if (!confirm(`Delete “${poll.question}” and all its answers? The links stop working.`)) return;
+      b.disabled = true; b.textContent = 'Deleting…';
+      try { await deletePoll(poll, r.teamId); } catch (e) { b.disabled = false; b.textContent = '✕ Delete'; alert(`Could not delete: ${e?.message || e}`); return; }
+      polls = polls.filter(x => x.id !== poll.id); paint();
+    });
   };
   paint();
+}
+/** The planner deletes a question from the team's sheet: its answers, the poll, the team's copy — and the planner's own list of questions (📊 Survey) stays in step. */
+async function deletePoll(poll, teamId) {
+  await cloudBackend.removePoll(poll.id, (poll.players || []).map(pl => pl.token));
+  await cloudBackend.removeTeamPoll?.(teamId, poll.id);
+  const uid = cloudSync?.user?.uid;
+  let list = store.data.polls || [];
+  if (uid && cloudBackend.loadPollIndex) { try { const idx = await cloudBackend.loadPollIndex(uid); if (idx?.polls?.length) list = idx.polls; } catch { /* the local list stands */ } }
+  store.data.polls = list.filter(x => x.id !== poll.id); store.persist();
+  if (uid && cloudBackend.savePollIndex) await cloudBackend.savePollIndex(uid, { polls: store.data.polls, updatedAt: Date.now() }).catch(() => {});
 }
 
 // ---------- a player's personal answer page (/ask/{pollId}/{token}) ----------

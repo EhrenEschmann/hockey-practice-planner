@@ -3537,6 +3537,8 @@ function renderProps() {
       const xy = (kx, ky, pt) => `<span class="wp-pos"><input class="wp-xy" type="number" step="any" ${kx} value="${G.round1(pt.x)}" title="x (ft from the left boards)"><input class="wp-xy" type="number" step="any" ${ky} value="${G.round1(pt.y)}" title="y (ft from the top boards)"></span>`;
       const rows = [`<div class="wp-item" data-wprow="start"><span class="wp-num">S</span>${xy('data-prop="x"', 'data-prop="y"', o)}<span class="wp-what muted">start</span><span class="spacer"></span>${cueBtn('start', o.startCue, 'their start')}</div>`];
       if (o.startCue != null) rows.push(`<label class="field inline wp-sub"><span>Say</span><input data-cue="start" value="${escHtml(o.startCue)}" placeholder="e.g. Go on the whistle" autocomplete="off"></label>`);
+      // A follower's waypoints are the leader's, read-only here: say so, and offer to take the route over.
+      if (!own) rows.push(`<div class="wp-follow"><span>Follows <b>${escHtml(playerName(getObj(o.follow)))}</b>'s path — the waypoints, pivots, crossovers and stops are edited on that skater and copied here.</span><button data-act="unfollow" title="Keep a copy of the route as this skater's own, so every waypoint can be edited here — they stop following">Edit here instead</button></div>`);
       o.path.forEach((pt, i) => {
         const flags = [pt.pivot === 'L' ? 'pivot ⟲' : pt.pivot ? 'pivot ⟳' : '', pt.cross === 'L' ? 'crossovers, facing left' : pt.cross === 'R' ? 'crossovers, facing right' : '', +pt.stop > 0 ? `stop ${+pt.stop}s` : ''].filter(Boolean).join(' · ');
         rows.push(`<div class="wp-item" data-wprow="${i}"><span class="wp-num">${i + 1}</span>${own ? xy(`data-wpx="${i}"`, `data-wpy="${i}"`, pt) : `<span class="wp-pos muted">(${Math.round(pt.x)}, ${Math.round(pt.y)})</span>`}<span class="wp-what muted">${flags}</span><span class="spacer"></span>
@@ -3916,6 +3918,7 @@ propsBody.addEventListener('click', e => {
       commit(() => drill().objects.push(copy)); select(copy.id); renderProps(); break;
     }
     case 'clearpath': commit(() => o.path = []); break;
+    case 'unfollow': commit(() => { delete o.follow; delete o.followWp; delete o.followMeet; }); renderProps(); break; // the copied route stays, now their own
     case 'tidypath': commit(() => { o.path = G.beautifyPath([{ x: o.x, y: o.y }, ...(o.path || [])]).slice(1); }); renderProps(); break;
     case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;

@@ -6,7 +6,7 @@ import { RINK, VIEWS, rinkSVG, SVG_STYLE, nearestBoardPoint, surfaceOf, isDrylan
 import { renderObjects, standaloneSVG, SKATER_COLORS, skaterHex, ZONE_COLORS, ARROW_STYLES } from './render.js';
 import { makeSim, facingOf, isPlayer, skaterPoints, DEFAULT_PASS_SPEED, DEFAULT_SHOT_SPEED } from './sim.js';
 import { uid, newDrill, newPractice, practiceLabel, usDate, parseUsDate, cloneObjects, migrateDrill, syncFollowers, isGame, docNoun, itemNoun, docTitle } from './store.js';
-import { STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, parseRoute, routePath, byCalendar, TASK_UNITS, weekKey, weekStart, shiftWeek, migrateClubTeam } from './access.js';
+import { drillSchedule, STAGES, STAGE_LABELS, stageOf, accessFor, rosterTeamFor, parseRoute, routePath, byCalendar, TASK_UNITS, weekKey, weekStart, shiftWeek, migrateClubTeam } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon } from './icons.js';
 import { videoEmbed, videoPlayerHTML, probeVideoFile, transcodeVideo, blobToChunks, chunksToBlob, VIDEO_MAX_WIDTH, VIDEO_WARN_MB, estimateVideoMB } from './video.js';
@@ -3139,7 +3139,7 @@ function renderVideoPane() {
 function renderPlan() {
   const p = store.practice;
   renderVideoPane();
-  const total = activeDrills(p).reduce((a, d) => a + (+d.duration || 0), 0);
+  const sch = drillSchedule(activeDrills(p)), total = sch.total; // side-by-side drills share one slot
   const hiddenCount = p.drills.length - activeDrills(p).length;
   const startMin = parseStart(p), game = isGame(p);
   $('#plan-title').textContent = game ? 'Coaching points' : 'Drills';
@@ -3149,22 +3149,21 @@ function renderPlan() {
     : `${total} min total${startMin != null ? ` · ${clockFull(startMin)}–${clockFull(startMin + total)}` : ''}${hiddenCount ? ` · ${hiddenCount} hidden` : ''}`;
   $('#plan-total').title = game ? 'Game prep has no running clock — coaching points are read in order' : startMin != null ? 'Set the start time in + Practice to change the clock' : 'Set a start time in + Practice to see clock times on each drill';
   // running time: where each (unhidden) drill starts — as a clock time when the practice has one, else minutes in
-  let running = 0;
-  const startOf = new Map();
-  for (const d of p.drills) { if (d.hidden) continue; startOf.set(d.id, running); running += +d.duration || 0; }
+  const numOf = d => d.hidden ? '–' : `${sch.byId.get(d.id)?.label ?? ''}.`;
   const when = d => {
     if (d.hidden) return 'hidden';
     const co = d.audience === 'coaches' ? ' · coaches only' : '';
     if (game) return co.slice(3);
-    const at = startOf.get(d.id);
-    return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clockFull(startMin + at + (+d.duration || 0))}` : `${at === 0 ? 'starts' : `+${at} min`}`}${co}`;
+    const s = sch.byId.get(d.id), at = s.at, dur = s.dur;
+    return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clockFull(startMin + at + dur)}` : `${at === 0 ? 'starts' : `+${at} min`}`}${s.mates > 1 ? ' · side by side' : ''}${co}`;
   };
   const fbCount = d => feedbackAll.filter(f => f.pid === p.id && f.drillId === d.id && !f.resolved).length;
   const list = $('#drill-list');
   // Someone typing in the list must not have their field rebuilt under them — but a focused radio, checkbox
   // or button is no reason to hold back (a click leaves those focused, and their change needs a redraw).
   if (list.contains(document.activeElement) && document.activeElement.matches('textarea, input:not([type]), input[type="text"], input[type="number"], input[type="search"]')) return;
-  const btns = d => `
+  const btns = (d, i) => `
+      <button data-act="pair" class="${d.withPrev ? 'is-paired' : ''}" ${i === 0 || game ? 'disabled' : ''} title="${d.withPrev ? 'Runs alongside the drill above — one slot on the clock, same minutes, players switch lines when done. Click to run it on its own again.' : 'Run this drill alongside the one above: side by side, the same minutes, one slot on the clock — players switch lines when done.'}">⛓</button>
       <button data-act="hide" class="${d.hidden ? 'is-hidden' : d.audience === 'coaches' ? 'is-coaches' : ''}" title="${d.hidden ? 'Hidden from everyone: left out of the plan, print and the coaches’ view — click to show it again' : d.audience === 'coaches' ? 'Coaches only: on the coaches’ minute-by-minute agenda, left out of the team’s copy (their clock times stay right across the gap) — click to hide it from everyone' : 'Shown to everyone — click for coaches only (e.g. free play the team needn’t see), click again to hide it from everyone'}">${d.hidden ? icon('eyeoff') : d.audience === 'coaches' ? icon('coach') : icon('eye')}</button>
       <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (any length — it warns when the clip gets big; optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
       <button data-act="intro" class="${d.intro || d.narration ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="${d.intro || d.narration ? `Audio on this drill: ${[d.intro ? 'intro' : '', d.narration ? 'voice-over' : ''].filter(Boolean).join(' + ')}. ` : ''}Intro in your voice (played before the drill when ▶ is pressed) and a voice-over recorded over the animation — both recorded here">${icon('mic')}</button>
@@ -3174,18 +3173,18 @@ function renderPlan() {
   list.innerHTML = p.drills.map((d, i) => {
     const row = editingDrill === d.id
       ? `<li class="${i === store.drillIndex ? 'active ' : ''}editing" data-index="${i}">
-          <span class="num">${i + 1}.</span>
+          <span class="num">${numOf(d)}</span>
           <input class="dname" value="${escHtml(d.name)}" title="${game ? 'Coaching point' : 'Drill'} name" spellcheck="false">
           <input class="dmin" type="number" min="0" step="1" value="${+d.duration || 0}" title="Minutes" ${game ? 'hidden' : ''}>
           <span class="dur" ${game ? 'hidden' : ''}>min</span>
           <button data-act="save" class="primary" title="Save (Enter)">${icon('check')}</button>
           <button data-act="cancel" title="Cancel (Esc)">${icon('x')}</button>
         </li>`
-      : `<li class="${i === store.drillIndex ? 'active' : ''}${d.hidden ? ' hidden-drill' : ''}" data-index="${i}" draggable="true" title="${d.hidden ? 'Hidden from the plan · drag to reorder' : 'Drag to reorder'}">
-          <span class="num">${i + 1}.</span>
+      : `<li class="${i === store.drillIndex ? 'active' : ''}${d.hidden ? ' hidden-drill' : ''}${d.withPrev && !d.hidden ? ' paired' : ''}" data-index="${i}" draggable="true" title="${d.hidden ? 'Hidden from the plan · drag to reorder' : 'Drag to reorder'}">
+          <span class="num">${numOf(d)}</span>
           <span class="name"><span class="dname-text">${escHtml(d.name)}</span><span class="dwhen">${when(d)}</span></span>
           ${fbCount(d) ? `<button data-act="feedback" class="dfb" title="Unresolved coach feedback on this drill — click to read">💬${fbCount(d)}</button>` : ''}
-          ${btns(d)}
+          ${btns(d, i)}
         </li>`;
     const notes = notesOpenFor === d.id
       ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea>
@@ -3353,6 +3352,11 @@ $('#drill-list').addEventListener('click', e => {
   if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#video-pane .video-url')?.focus(); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
   if (act === 'feedback') { openFeedbackPanel(); return; }
+  if (act === 'pair') { // run alongside the drill above (or stop): the pair shares one slot, so its minutes follow the leader's
+    const d = p.drills[i];
+    commit(() => { if (d.withPrev) delete d.withPrev; else { d.withPrev = true; let k = i; while (k > 0 && p.drills[k].withPrev) k--; d.duration = +p.drills[k].duration || 0; } });
+    renderAll(); return;
+  }
   if (act === 'hide') { // cycle: everyone → coaches only → hidden from all → everyone
     const d = p.drills[i];
     commit(() => { if (d.hidden) { delete d.hidden; delete d.audience; } else if (d.audience === 'coaches') { delete d.audience; d.hidden = true; } else d.audience = 'coaches'; });
@@ -3369,6 +3373,8 @@ $('#drill-list').addEventListener('click', e => {
       commit(() => {
         const d = p.drills.find(x => x.id === editingDrill);
         if (d) { if (name) d.name = name; d.duration = dur; }
+        // Side-by-side drills keep the same minutes: a change on one is a change on the whole group.
+        const i = p.drills.indexOf(d); if (i >= 0) { let k = i; while (k > 0 && p.drills[k].withPrev) k--; for (let j = k; j < p.drills.length && (j === k || p.drills[j].withPrev); j++) p.drills[j].duration = dur; }
       });
     }
     editingDrill = null;

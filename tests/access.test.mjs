@@ -1,6 +1,6 @@
 // Unit tests for js/access.js — the redirect matrix (requirements §5) and who-gets-what.   Run: npm run test:unit
 import assert from 'node:assert/strict';
-import { calendarFocus, stageOf, accessFor, publishedCopy, peopleDocs, memberDocs, playerDocs, teamDoc, practiceHeader, practiceBody, practiceFromParts, parseRoute, routePath, resolveRoute } from '../js/access.js';
+import { drillSchedule, calendarFocus, stageOf, accessFor, publishedCopy, peopleDocs, memberDocs, playerDocs, teamDoc, practiceHeader, practiceBody, practiceFromParts, parseRoute, routePath, resolveRoute } from '../js/access.js';
 import { newPractice, newDrill, practiceLabel, docTitle, itemNoun, docNoun, isGame } from '../js/store.js';
 
 const at = (pathname, hash = '') => parseRoute({ pathname, hash });
@@ -135,3 +135,15 @@ assert.equal(weekStart('2026-W41').toDateString(), new Date(2026, 9, 4).toDateSt
 const moved = migrateClubTeam({ id: 't8', club: true, weeks: { '2026-W41': { tasks: [{ id: 'q', title: 'Old key' }] } } }, '2026-10-04');
 assert.deepEqual(Object.keys(moved.weeks), ['2026-10-04']); assert.equal(moved.weeks['2026-10-04'].tasks[0].title, 'Old key');
 console.log('access.js club: all assertions passed');
+
+// side-by-side drills: one slot on the clock, lettered labels, the longest of the pair sets the slot
+{
+  const s = drillSchedule([{ id: 'a', duration: 10 }, { id: 'b', duration: 8, withPrev: true }, { id: 'c', duration: 8 }, { id: 'd', duration: 5, withPrev: true }, { id: 'e', duration: 5, withPrev: true }]);
+  assert.deepEqual(s.items.map(x => [x.id, x.at, x.dur, x.label, x.mates]), [['a', 0, 10, '1a', 2], ['b', 0, 10, '1b', 2], ['c', 10, 8, '2a', 3], ['d', 10, 8, '2b', 3], ['e', 10, 8, '2c', 3]]);
+  assert.equal(s.total, 18);
+  assert.deepEqual(drillSchedule([{ id: 'x', duration: 5, withPrev: true }]).items[0].label, '1', 'a first drill cannot run alongside anything: its own slot');
+  assert.equal(practiceHeader({ id: 'q', drills: [{ id: 'a', duration: 10 }, { id: 'b', duration: 10, withPrev: true }] }).minutes, 10, 'the header counts the slot once');
+  const team = publishedCopy({ id: 'q', drills: [{ id: 'a', duration: 10 }, { id: 'b', duration: 10, withPrev: true }, { id: 'c', duration: 5 }] }, 'o', 'team');
+  assert.deepEqual(team.drills.map(d => d.at), [0, 0, 10], 'the team copy times side-by-side drills together');
+}
+console.log('access.js schedule: all assertions passed');

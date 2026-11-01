@@ -869,3 +869,9 @@ body.board-mode #rink{cursor:crosshair}
 .wp-follow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 6px;padding:6px 8px;border-radius:6px;background:var(--panel-2);border:1px dashed var(--border);font-size:12px;color:var(--muted)}
 .wp-follow b{color:var(--text)}
 .wp-follow button{padding:3px 9px;font-size:12px;flex:none}
+/* side-by-side drills: the second is tucked under the first with a link mark */
+#drill-list li.paired{margin-left:14px;border-left:3px solid var(--accent-2)}
+#drill-list li button.is-paired{color:var(--accent-2)}
+#drill-list li button[data-act=pair]:not(.is-paired){color:var(--muted);opacity:.6}
+#drill-list li button[data-act=pair]:not(.is-paired):hover{opacity:1;color:var(--text)}
+.pr-side{margin-left:8px;font-size:12px;color:var(--accent-2);font-weight:600}

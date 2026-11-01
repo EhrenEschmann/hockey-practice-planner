@@ -4,7 +4,7 @@ import * as G from './geometry.js';
 import { RINK, rinkSVG, SVG_STYLE, surfaceOf } from './rink.js';
 import { standaloneSVG } from './render.js';
 import { uid, practiceLabel, isGame, itemNoun, docTitle } from './store.js';
-import { rosterTeamFor, routePath } from './access.js';
+import { drillSchedule, rosterTeamFor, routePath } from './access.js';
 import { icon } from './icons.js';
 import { $, download, escHtml, fmtSecs, safeName } from './ui.js';
 import { closePopovers, drill, store, svg, zoneRules } from './core.js';
@@ -34,8 +34,8 @@ function drillInkBox(d) {
   }
   return x0 === Infinity ? null : { x0, y0, x1, y1 };
 }
-/** 1-based numbers for the drills that show on the overview, in order; null for a drill with nothing drawn. */
-function overviewNumbers(drills) { let n = 0; return drills.map(d => drillInkBox(d) ? ++n : null); }
+/** The drill-list labels ("3", or "4a" / "4b" side by side) for the drills that show on the overview; null for a drill with nothing drawn. */
+function overviewNumbers(drills) { const sch = drillSchedule(drills); return drills.map(d => drillInkBox(d) ? sch.byId.get(d.id).label : null); }
 function combinedOverview(drills, rink, nums = null) {
   if (!drills.length) return null;
   const boxes = drills.map(drillInkBox);
@@ -108,11 +108,11 @@ const savePNG = (c, name) => new Promise((res, rej) => c.toBlob(b => b ? (downlo
 async function exportLongImage() {
   const p = store.practice, drills = activeDrills(p), rink = rinkSVG(surfaceOf(p));
   if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
-  const W = 1400, M = 64, INNER = W - 2 * M, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const W = 1400, M = 64, INNER = W - 2 * M, startMin = parseStart(p), sch = drillSchedule(drills), total = sch.total;
   const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 30px system-ui, sans-serif', meta: '22px system-ui, sans-serif', body: '23px system-ui, sans-serif', bodyB: 'bold 23px system-ui, sans-serif' };
   const LH = 32; // body line height
   // The full-ice breakdown first: every drill's space on one rink, numbered — the same overview the printed sheet opens with.
-  const ovSVG = combinedOverview(drills, rink);
+  const ovSVG = combinedOverview(drills, rink, overviewNumbers(drills));
   const ov = ovSVG ? { img: await loadSVG(ovSVG), h: Math.round(INNER * (RINK.H + 6) / (RINK.W + 6)) } : null;
   const items = await Promise.all(drills.map(async d => {
     const v = shareView(d), img = await loadSVG(standaloneSVG(d, rink, SVG_STYLE, v));
@@ -137,11 +137,10 @@ async function exportLongImage() {
     ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText('Full ice — where each drill runs', M, y); y += 48;
     ctx.drawImage(ov.img, M, y, INNER, ov.h); ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 1; ctx.strokeRect(M + 0.5, y + 0.5, INNER - 1, ov.h - 1); y += ov.h + 40;
   }
-  let t = startMin;
-  items.forEach((it, i) => {
-    const d = it.d, at = t; if (t != null) t += (+d.duration || 0);
+  items.forEach(it => {
+    const d = it.d, s = sch.byId.get(d.id), at = startMin != null ? startMin + s.at : null;
     ctx.fillStyle = '#e5e7eb'; ctx.fillRect(M, y, INNER, 2); y += 18; // a rule between drills
-    ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText(`${i + 1}. ${d.name}`, M, y);
+    ctx.fillStyle = '#111'; ctx.font = F.head; ctx.fillText(`${s.label}. ${d.name}${s.mates > 1 ? '  ⇄ side by side' : ''}`, M, y);
     ctx.font = F.meta; ctx.fillStyle = '#555';
     const right = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? `  ·  ${clockFull(at)}` : ''}`;
     ctx.textAlign = 'right'; ctx.fillText(right, W - M, y + 6); ctx.textAlign = 'left';
@@ -165,15 +164,14 @@ async function exportADMSheet() {
   if (!drills.length) { alert('Nothing to export — the practice has no drills.'); return; }
   const nums = overviewNumbers(drills); // only the drills that show on the ice carry a number, 1…n in order
   const ovSVG = combinedOverview(drills, rink, nums); if (!ovSVG) { alert('Nothing drawn on the ice yet.'); return; }
-  const W = 1700, M = 64, INNER = W - 2 * M, GAP = 48, COLW = (INNER - GAP) / 2, startMin = parseStart(p), total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const W = 1700, M = 64, INNER = W - 2 * M, GAP = 48, COLW = (INNER - GAP) / 2, startMin = parseStart(p), sch = drillSchedule(drills), total = sch.total;
   const F = { title: 'bold 40px system-ui, sans-serif', sub: '24px system-ui, sans-serif', head: 'bold 26px system-ui, sans-serif', meta: '20px system-ui, sans-serif', body: '22px system-ui, sans-serif', bodyB: 'bold 22px system-ui, sans-serif' };
   const LH = 30;
   const ov = await loadSVG(ovSVG), ovH = Math.round(INNER * (RINK.H + 6) / (RINK.W + 6));
   // The legend: each drill's lines, measured for the column width.
-  let t = startMin;
   const entries = drills.map((d, i) => {
-    const at = t; if (t != null) t += (+d.duration || 0);
-    const lines = [[F.head, `${nums[i] != null ? `${nums[i]}. ` : ''}${d.name}`, '#111']];
+    const s = sch.byId.get(d.id), at = startMin != null ? startMin + s.at : null;
+    const lines = [[F.head, `${nums[i] != null ? `${nums[i]}. ` : ''}${d.name}${s.mates > 1 ? '  ⇄ side by side' : ''}`, '#111']];
     const meta = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? ` · ${clockFull(at)}` : ''}`; if (meta) lines.push([F.meta, meta, '#555']);
     for (const z of zoneRules(d)) { lines.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, COLW - 24)) lines.push([F.body, w, '#111', 24]); }
     if (d.notes) for (const w of wrapText(d.notes, F.body, COLW)) lines.push([F.body, w, '#222']);
@@ -208,14 +206,13 @@ $('#btn-print').addEventListener('click', () => {
   const p = store.practice;
   const drills = activeDrills(p);
   const rink = rinkSVG(surfaceOf(p));
-  const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const sch = drillSchedule(drills), total = sch.total;
   const startMin = parseStart(p);
-  let t = startMin;
-  const drillRows = drills.map((d, i) => {
-    const at = t; if (t != null) t += (+d.duration || 0);
+  const drillRows = drills.map(d => {
+    const s = sch.byId.get(d.id), at = startMin != null ? startMin + s.at : null;
     return `
       <div class="p-drill">
-        <div class="p-head"><b>${i + 1}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes)</span>${at != null ? `<span class="p-time">${clockFull(at)}</span>` : ''}</div>
+        <div class="p-head"><b>${s.label}. ${escHtml(d.name)}</b><span class="p-meta">(${+d.duration || 0} minutes${s.mates > 1 ? ' · side by side' : ''})</span>${at != null ? `<span class="p-time">${clockFull(at)}</span>` : ''}</div>
         ${standaloneSVG(d, rink, SVG_STYLE, shareView(d))}
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${hasVideo(d) ? `<div class="p-vid">${videoPoster(d) ? `<img class="p-poster" src="${videoPoster(d)}" alt="">` : ''}<span class="p-meta">🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : escHtml(d.video)}</span></div>` : ''}
@@ -227,7 +224,7 @@ $('#btn-print').addEventListener('click', () => {
     <div class="p-title">${escHtml(docTitle(p))}</div>
     <div class="p-sub">${escHtml(whenLabel(p, true))}</div>
     ${p.coaches ? `<div class="p-sub">Coaches: ${escHtml(p.coaches)}</div>` : ''}
-    ${(ov => ov ? `<div class="p-combined">${ov}</div>` : '')(combinedOverview(drills, rink))}
+    ${(ov => ov ? `<div class="p-combined">${ov}</div>` : '')(combinedOverview(drills, rink, overviewNumbers(drills)))}
     <div class="p-sub">${startMin != null ? `Start @ ${clockFull(startMin)}` : ''} <span class="p-meta">${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${isGame(p) ? '' : ` · ${total} min`}</span></div>
     <div class="p-cols">
     ${drillRows}

@@ -6,7 +6,7 @@ import { standaloneSVG } from './render.js';
 import { makeSim, isPlayer } from './sim.js';
 import { uid, practiceLabel, usDate, migrateDrill, isGame, docNoun, itemNoun, docTitle } from './store.js';
 import { loadConfig, firebaseBackend, createSync, friendlyAuthError } from './cloud.js';
-import { stageOf, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus, clubDoc, TASK_UNITS, weekKey, weekStart, shiftWeek, tasksForWeek, legacyWeek, normalWeek } from './access.js';
+import { drillSchedule, stageOf, publishedCopy, parseRoute, routePath, resolveRoute, byCalendar, calendarFocus, clubDoc, TASK_UNITS, weekKey, weekStart, shiftWeek, tasksForWeek, legacyWeek, normalWeek } from './access.js';
 import { PS_ELEMENTS, createPSView } from './powerskate.js';
 import { icon } from './icons.js';
 import { videoEmbed, videoPlayerHTML } from './video.js';
@@ -248,10 +248,10 @@ function presentHTML(p) {
   const fbBtn = key => feedbackOn ? `<button class="pr-fb wp-toggle" data-fb="${key}" title="Only the head coach sees what you write">💬 Feedback</button>` : '';
   const rink = rinkSVG(surfaceOf(p));
   const drills = activeDrills(p);
-  const total = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  const sch = drillSchedule(drills), total = sch.total; // side-by-side drills share one slot on the clock
   const startMin = parseStart(p);
   const est = reviewEstimate(p);
-  let t = startMin ?? 0; // no start time on the practice: the schedule runs from 0:00 instead of a clock time
+  const base = startMin ?? 0; // no start time on the practice: the schedule runs from 0:00 instead of a clock time
   // Each drill's slot on the running clock — exactly when it starts and finishes (data-* feed the live "now" marker).
   const game = isGame(p);
   const whenHTML = (at, dur) => game ? '' : startMin != null
@@ -266,8 +266,9 @@ function presentHTML(p) {
     <div class="pr-meta">${drills.length} ${itemNoun(p)}${drills.length === 1 ? '' : 's'}${game ? '' : ` · ${total} min`}${p.coachOnly?.count ? ` <span class="pr-coachonly" title="Part of the practice the coaches run without a diagram here">+ ${p.coachOnly.minutes} min coach-led (${p.coachOnly.count} segment${p.coachOnly.count === 1 ? '' : 's'})</span>` : ''}${startMin != null ? ` · start @ ${clockFull(startMin)}` : ''}</div>
     <div class="pr-meta pr-review" title="${escHtml(est.detail)}">⏱ About ${est.min} min to review this plan${est.detail ? ` <span class="muted">(${escHtml(est.detail)})</span>` : ''}</div>
     </div>
-    ${drills.map((d, i) => {
-      const at = d.at != null ? (startMin ?? 0) + d.at : t; t = at + (+d.duration || 0); // `at`: the team's copy keeps the slot of a coaches-only drill left out before this one
+    ${drills.map(d => {
+      const s = sch.byId.get(d.id), at = base + (d.at != null ? d.at : s.at), dur = s.dur; // `d.at`: the team's copy keeps the slot of a coaches-only drill left out before this one
+      const head = `<b>${s.label}. ${escHtml(d.name)}</b>${minHTML(d)}${whenHTML(at, dur)}${s.mates > 1 ? '<span class="pr-side" title="Two lines run at once — players switch when they are done">⇄ side by side</span>' : ''}`;
       if (isPSDrill(d)) {
         const tiles = (d.psElements || []).map(k => {
           const e = PS_ELEMENTS.find(x => x.key === k);
@@ -275,7 +276,7 @@ function presentHTML(p) {
         }).join('');
         return `
       <section class="pr-drill" data-did="${d.id}">
-        <header><b>${i + 1}. ${escHtml(d.name)}</b>${minHTML(d)}${whenHTML(at, +d.duration || 0)}</header>
+        <header>${head}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : ''}
         ${videoBlockHTML(d)}
         <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${coachNotesHTML(d)}${fbBtn(d.id)}</div>
@@ -283,7 +284,7 @@ function presentHTML(p) {
       }
       return `
       <section class="pr-drill" data-did="${d.id}">
-        <header><b>${i + 1}. ${escHtml(d.name)}</b>${minHTML(d)}${whenHTML(at, +d.duration || 0)}</header>
+        <header>${head}</header>
         ${hasVideo(d) ? `<div class="pr-tabs"><button class="pr-tab active" data-prtab="video">🎬 Video</button><button class="pr-tab" data-prtab="layout">Layout</button></div>
         <div class="pr-pane" data-pane="video">${videoBlockHTML(d)}</div>
         <div class="pr-pane" data-pane="layout" hidden>` : ''}
@@ -900,7 +901,7 @@ function practiceItems(as) {
   if (who.persona === 'planner') {
     // The coach view is where the planner previews: drafts are listed there (marked), as a coach will see them once sent out. The team view shows only what the team has.
     return store.live.filter(p => as === 'team' ? stageOf(p) === 'team' : true)
-      .map(p => { const ds = (p.drills || []).filter(d => !d.hidden); return { pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, drillCount: ds.length, minutes: ds.reduce((a, d) => a + (+d.duration || 0), 0), drillNames: ds.map(d => d.name || ''), ...(isDryland(p) ? { surface: 'dryland' } : {}), ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }; });
+      .map(p => { const ds = (p.drills || []).filter(d => !d.hidden); return { pid: p.id, role: as, stage: stageOf(p), team: p.team, teamId: p.teamId || teamOf(p)?.id || '', date: p.date, time: p.time, drillCount: ds.length, minutes: drillSchedule(ds).total, drillNames: ds.map(d => d.name || ''), ...(isDryland(p) ? { surface: 'dryland' } : {}), ...(isGame(p) ? { kind: 'game', opponent: p.opponent || '' } : {}) }; });
   }
   return [...teamLists.values()].flatMap(r => r.items);
 }
@@ -1621,9 +1622,8 @@ function drillNowIndex(p) {
   if (start == null || p.date !== today) return 0;
   const min = now.getHours() * 60 + now.getMinutes();
   if (min < start) return 0;
-  const drills = activeDrills(p);
-  let t = start;
-  for (let i = 0; i < drills.length; i++) { if (drills[i].at != null) t = start + drills[i].at; t += +drills[i].duration || 0; if (min < t) return i; }
+  const drills = activeDrills(p), sch = drillSchedule(drills);
+  for (let i = 0; i < drills.length; i++) { const s = sch.byId.get(drills[i].id); if (min < start + (drills[i].at ?? s.at) + s.dur) return i; }
   return 0; // practice is over: back to the first page, not the dismissal card
 }
 

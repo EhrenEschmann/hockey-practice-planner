@@ -54,8 +54,8 @@ export function publishedCopy(p, owner, as = 'coach') {
   for (const k of ['sharedWith', 'sharedTeam', 'stage', 'sentCoachesAt', 'sentTeamAt', 'open']) delete c[k];
   const shown = (c.drills || []).filter(d => !d.hidden);
   if (as === 'team') {
-    let at = 0;
-    for (const d of shown) { d.at = at; at += +d.duration || 0; }
+    const sch = drillSchedule(shown);
+    for (const d of shown) d.at = sch.byId.get(d.id).at;
     const co = shown.filter(d => d.audience === 'coaches');
     c.drills = shown.filter(d => d.audience !== 'coaches');
     for (const d of c.drills) { delete d.audience; delete d.coachNotes; delete d.coachnote; } // coach-only notes stay off the team's copy
@@ -106,6 +106,25 @@ export const teamDoc = t => ({ id: t.id, name: t.name || '', club: !!t.club, adm
 
 // ---- a practice in the cloud: a light HEADER (lists, calendars, the rules) and a heavy BODY (the drills)
 const HEADER_FIELDS = ['id', 'teamId', 'kind', 'surface', 'team', 'opponent', 'date', 'time', 'coaches', 'open', 'shareOnly', 'sharedWith', 'sharedTeam', 'sentCoachesAt', 'sentTeamAt', 'deleted', 'updatedAt', 'owner', 'showPaths'];
+/**
+ * The running order. A drill flagged `withPrev` runs ALONGSIDE the drill before it — two lines side by side, the same
+ * minutes, players switching when done — so the two share one slot on the clock. Returns, per drill in order,
+ * { id, at, dur, slot, label, mates }: `at` minutes into the practice, `dur` the slot's minutes (the longest of its
+ * drills; the editor keeps them equal), `label` "4" alone or "4a" / "4b" side by side; and the total minutes.
+ * Pass the drills that are actually on the plan (hidden ones filtered out).
+ */
+export function drillSchedule(drills) {
+  const items = []; let at = 0, slot = 0, group = [];
+  const flush = () => {
+    if (!group.length) return;
+    const dur = Math.max(...group.map(d => +d.duration || 0)), n = group.length;
+    group.forEach((d, k) => items.push({ id: d.id, at, dur, slot, label: n > 1 ? `${slot + 1}${'abcdefgh'[k] || k + 1}` : `${slot + 1}`, mates: n }));
+    at += dur; slot++; group = [];
+  };
+  for (const d of drills || []) { if (d.withPrev && group.length) group.push(d); else { flush(); group = [d]; } }
+  flush();
+  return { items, total: at, byId: new Map(items.map(x => [x.id, x])) };
+}
 export function practiceHeader(p) {
   const h = {};
   for (const k of HEADER_FIELDS) if (p[k] !== undefined && p[k] !== null) h[k] = p[k];
@@ -113,7 +132,7 @@ export function practiceHeader(p) {
   h.stage = stageOf(p); // the effective stage: a deleted practice reads as a draft
   h.drillNames = drills.map(d => d.name || '').slice(0, 60);
   h.drillCount = drills.length;
-  h.minutes = drills.reduce((a, d) => a + (+d.duration || 0), 0);
+  h.minutes = drillSchedule(drills).total; // side-by-side drills share one slot
   h.hasVideo = drills.some(d => d.upload || d.video);
   return h;
 }

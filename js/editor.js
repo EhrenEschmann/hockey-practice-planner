@@ -3167,7 +3167,7 @@ function renderPlan() {
       <button data-act="hide" class="${d.hidden ? 'is-hidden' : d.audience === 'coaches' ? 'is-coaches' : ''}" title="${d.hidden ? 'Hidden from everyone: left out of the plan, print and the coaches’ view — click to show it again' : d.audience === 'coaches' ? 'Coaches only: on the coaches’ minute-by-minute agenda, left out of the team’s copy (their clock times stay right across the gap) — click to hide it from everyone' : 'Shown to everyone — click for coaches only (e.g. free play the team needn’t see), click again to hide it from everyone'}">${d.hidden ? icon('eyeoff') : d.audience === 'coaches' ? icon('coach') : icon('eye')}</button>
       <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (any length — it warns when the clip gets big; optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
       <button data-act="intro" class="${d.intro || d.narration ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="${d.intro || d.narration ? `Audio on this drill: ${[d.intro ? 'intro' : '', d.narration ? 'voice-over' : ''].filter(Boolean).join(' + ')}. ` : ''}Intro in your voice (played before the drill when ▶ is pressed) and a voice-over recorded over the animation — both recorded here">${icon('mic')}</button>
-      <button data-act="notes" class="${(d.notes || '').trim() || (d.coachNotes || '').trim() || d.coachnote ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes — including coach-only notes and audio">${icon('notes')}</button>
+      <button data-act="notes" class="${(d.notes || '').trim() || (d.goalieNotes || '').trim() || (d.coachNotes || '').trim() || d.coachnote ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes — including goalie instructions and coach-only notes and audio">${icon('notes')}</button>
       <button data-act="sharedrill" title="Send just this drill: copies a link anyone can open — the other coach signs in with Google or anonymously. Press again after edits to update the shared copy.">${icon('send')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
   list.innerHTML = p.drills.map((d, i) => {
@@ -3188,6 +3188,10 @@ function renderPlan() {
         </li>`;
     const notes = notesOpenFor === d.id
       ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea>
+        <div class="goalie-notes">
+          <div class="muted small">🧤 Goalies — what they work on, off to the side, while this drill runs</div>
+          <textarea data-goalienotes="${i}" rows="2" placeholder="e.g. Post-to-post shuffles at the far net with Coach Sam…">${escHtml(d.goalieNotes || '')}</textarea>
+        </div>
         <div class="coach-notes">
           <div class="muted small">👁 Coaches only — never in the team’s copy</div>
           <textarea data-coachnotes="${i}" rows="2" placeholder="Notes just for the coaches…">${escHtml(d.coachNotes || '')}</textarea>
@@ -3302,6 +3306,10 @@ $('#drill-list').addEventListener('input', e => {
   if (el.dataset.notes != null) {
     const d = store.practice.drills[+el.dataset.notes];
     if (d) { d.notes = el.value; store.save(); }
+  }
+  if (el.dataset.goalienotes != null) {
+    const d = store.practice.drills[+el.dataset.goalienotes];
+    if (d) { if (el.value.trim()) d.goalieNotes = el.value; else delete d.goalieNotes; store.save(); }
   }
   if (el.dataset.coachnotes != null) {
     const d = store.practice.drills[+el.dataset.coachnotes];

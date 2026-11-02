@@ -41,6 +41,10 @@ function videoPoster(d) {
   return v && /youtube/i.test(v.host || '') && v.id ? `https://img.youtube.com/vi/${v.id}/hqdefault.jpg` : null;
 }
 const hasVideo = d => !!(d.upload || (d.video && videoEmbed(d.video)));
+/** The goalies' parallel job on a drill card: what they work on off to the side while this drill runs. Everyone sees it. */
+function goalieNotesHTML(d) {
+  return (d.goalieNotes || '').trim() ? `<div class="pr-goalie"><div class="pr-gn-head">🧤 Goalies</div><pre>${escHtml(d.goalieNotes)}</pre></div>` : '';
+}
 /** The coaches-only block on a drill card: shown on the coach link only. */
 function coachNotesHTML(d) {
   if (presentAudience !== 'coach' || (!(d.coachNotes || '').trim() && !d.coachnote)) return '';
@@ -279,7 +283,7 @@ function presentHTML(p) {
         <header>${head}</header>
         ${tiles ? `<div class="pr-psgrid">${tiles}</div>` : ''}
         ${videoBlockHTML(d)}
-        <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${coachNotesHTML(d)}${fbBtn(d.id)}</div>
+        <div class="pr-text">${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${goalieNotesHTML(d)}${coachNotesHTML(d)}${fbBtn(d.id)}</div>
       </section>`;
       }
       return `
@@ -302,7 +306,7 @@ function presentHTML(p) {
         ${hasVideo(d) ? '</div>' : ''}
         <div class="pr-text"><div class="pr-cue" hidden></div>
         ${rulesHTML(d)}
-        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${coachNotesHTML(d)}${fbBtn(d.id)}</div>
+        ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}${goalieNotesHTML(d)}${coachNotesHTML(d)}${fbBtn(d.id)}</div>
       </section>`;
     }).join('')}
     <section class="pr-drill pr-dismissal">

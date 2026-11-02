@@ -121,6 +121,7 @@ async function exportLongImage() {
     for (const z of zoneRules(d)) { text.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, INNER - 24)) text.push([F.body, w, '#111', 24]); }
     if (d.notes) for (const w of wrapText(d.notes, F.body, INNER)) text.push([F.body, w, '#222']);
     if (hasVideo(d)) text.push([F.meta, `🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : d.video || ''}`, '#555']);
+    const gn = String(d.goalieNotes || '').trim(); if (gn) { text.push([F.bodyB, '🧤 Goalies', '#0e7490']); for (const w of wrapText(gn, F.body, INNER)) text.push([F.body, w, '#0e7490']); }
     const cn = String(d.coachNotes || '').trim(); if (cn) { text.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, INNER)) text.push([F.body, w, '#92400e']); }
     return { d, img, figH, text, h: 48 + figH + 16 + text.length * LH + 40 };
   }));
@@ -175,6 +176,7 @@ async function exportADMSheet() {
     const meta = `${isGame(p) ? '' : `${+d.duration || 0} min`}${at != null ? ` · ${clockFull(at)}` : ''}`; if (meta) lines.push([F.meta, meta, '#555']);
     for (const z of zoneRules(d)) { lines.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, COLW - 24)) lines.push([F.body, w, '#111', 24]); }
     if (d.notes) for (const w of wrapText(d.notes, F.body, COLW)) lines.push([F.body, w, '#222']);
+    const gn = String(d.goalieNotes || '').trim(); if (gn) { lines.push([F.bodyB, '🧤 Goalies', '#0e7490']); for (const w of wrapText(gn, F.body, COLW)) lines.push([F.body, w, '#0e7490']); }
     const cn = String(d.coachNotes || '').trim(); if (cn) { lines.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, COLW)) lines.push([F.body, w, '#92400e']); }
     return { lines, h: lines.length * LH + 26 };
   });
@@ -217,6 +219,7 @@ $('#btn-print').addEventListener('click', () => {
         ${zoneRules(d).map(z => `<div class="p-rules"><b>${escHtml(z.label)}</b><ul>${z.lines.map(l => `<li>${escHtml(l)}</li>`).join('')}</ul></div>`).join('')}
         ${hasVideo(d) ? `<div class="p-vid">${videoPoster(d) ? `<img class="p-poster" src="${videoPoster(d)}" alt="">` : ''}<span class="p-meta">🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : escHtml(d.video)}</span></div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
+        ${(d.goalieNotes || '').trim() ? `<div class="p-goalie"><b>🧤 Goalies:</b> ${escHtml(d.goalieNotes)}</div>` : ''}
         ${(d.coachNotes || '').trim() || d.coachnote ? `<div class="p-coach"><b>👁 Coaches only:</b> ${escHtml(d.coachNotes || '')}${d.coachnote ? `${(d.coachNotes || '').trim() ? ' · ' : ''}▶ audio note (${Math.round(d.coachnote.secs)} s, in the app)` : ''}</div>` : ''}
       </div>`;
   }).join('');

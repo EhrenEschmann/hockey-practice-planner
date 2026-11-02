@@ -1923,10 +1923,22 @@ const pollLink = (pollId, token) => `${location.origin}${routePath({ view: 'ask'
 async function openAskMgr() {
   $('#teammgr').hidden = true;
   $('#askmgr').hidden = false;
-  if (!(store.data.polls || []).length && cloudSync?.user && cloudBackend?.loadPollIndex) {
-    try { const idx = await cloudBackend.loadPollIndex(cloudSync.user.uid); if (idx?.polls?.length) { store.data.polls = idx.polls; store.persist(); } } catch { /* local list stands */ }
+  renderAskMgr(); // the local list straight away — the cloud's lands in a moment
+  if (cloudSync?.user && cloudBackend?.loadPollIndex) {
+    try {
+      const idx = await cloudBackend.loadPollIndex(cloudSync.user.uid);
+      if (idx) {
+        // Every machine writes the index on create/edit/delete, so it wins: a question made or removed
+        // on another machine shows up / goes away here. Only a local question newer than the index
+        // survives against it — created here, but its index write never landed.
+        const cloud = idx.polls || [], have = new Set(cloud.map(x => x.id));
+        const localOnly = (store.data.polls || []).filter(x => !have.has(x.id) && (x.createdAt || 0) > (idx.updatedAt || 0));
+        store.data.polls = [...localOnly, ...cloud].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        store.persist();
+        if (!askEditing) renderAskMgr();
+      }
+    } catch { /* offline: the local list stands */ }
   }
-  renderAskMgr();
   refreshAskAnswers();
 }
 function closeAskMgr() { $('#askmgr').hidden = true; }

@@ -54,8 +54,8 @@ export function publishedCopy(p, owner, as = 'coach') {
   for (const k of ['sharedWith', 'sharedTeam', 'stage', 'sentCoachesAt', 'sentTeamAt', 'open']) delete c[k];
   const shown = (c.drills || []).filter(d => !d.hidden);
   if (as === 'team') {
-    const sch = drillSchedule(shown);
-    for (const d of shown) d.at = sch.byId.get(d.id).at;
+    const sch = drillSchedule(shown.filter(d => !d.goalieFor)); // goalie drills run alongside their linked drill — no slot of their own
+    for (const d of shown) { const s = sch.byId.get(d.id); if (s) d.at = s.at; }
     const co = shown.filter(d => d.audience === 'coaches');
     c.drills = shown.filter(d => d.audience !== 'coaches');
     for (const d of c.drills) { delete d.audience; delete d.coachNotes; delete d.coachnote; } // coach-only notes stay off the team's copy
@@ -128,12 +128,13 @@ export function drillSchedule(drills) {
 export function practiceHeader(p) {
   const h = {};
   for (const k of HEADER_FIELDS) if (p[k] !== undefined && p[k] !== null) h[k] = p[k];
-  const drills = (p.drills || []).filter(d => !d.hidden);
+  const shown = (p.drills || []).filter(d => !d.hidden);
+  const drills = shown.filter(d => !d.goalieFor); // the summary counts the clock's drills; goalie drills ride alongside
   h.stage = stageOf(p); // the effective stage: a deleted practice reads as a draft
   h.drillNames = drills.map(d => d.name || '').slice(0, 60);
   h.drillCount = drills.length;
   h.minutes = drillSchedule(drills).total; // side-by-side drills share one slot
-  h.hasVideo = drills.some(d => d.upload || d.video);
+  h.hasVideo = shown.some(d => d.upload || d.video);
   return h;
 }
 export const practiceBody = p => ({ id: p.id, teamId: p.teamId || null, drills: p.drills || [], updatedAt: p.updatedAt || 0 });

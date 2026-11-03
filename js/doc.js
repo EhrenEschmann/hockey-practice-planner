@@ -26,7 +26,10 @@ function shareView(d) {
   return { x: G.round1(x0), y: G.round1(y0), w: G.round1(x1 - x0), h: G.round1(y1 - y0) };
 }
 /** The drills the team actually gets: a hidden drill stays in the editor (to come back to) but is left out of the plan. */
-const activeDrills = p => p.drills.filter(d => !d.hidden);
+// The drills on the plan's clock: hidden ones and goalie drills (they run ALONGSIDE their linked
+// drill — `goalieFor` names it — taking no slot) are left out. Goalie drills render as linked cards.
+const activeDrills = p => p.drills.filter(d => !d.hidden && !d.goalieFor);
+const goalieDrillsOf = (p, d) => (p.drills || []).filter(g => !g.hidden && g.goalieFor === d.id);
 const parseStart = p => !isGame(p) && /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time.split(':').reduce((h, m) => +h * 60 + +m) : null; // a game's time is when it starts, not a running clock
 // Every date and time the app shows is US format: mm/dd/yyyy @ hh:mm AM/PM (never the browser's locale).
 const pad2 = n => String(n).padStart(2, '0');
@@ -48,4 +51,4 @@ const stamp = ms => { const d = new Date(ms); return `${pad2(d.getMonth() + 1)}/
 const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`; };
 const longDate = date => /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? dayDate(date, true) : (date || '');
 
-export { activeDrills, clock, clockFull, dayDate, pad2, parseStart, shareView, stamp, todayISO, whenLabel };
+export { activeDrills, clock, clockFull, dayDate, goalieDrillsOf, pad2, parseStart, shareView, stamp, todayISO, whenLabel };

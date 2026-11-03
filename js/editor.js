@@ -3152,7 +3152,7 @@ function renderPlan() {
   const p = store.practice;
   renderVideoPane();
   const sch = drillSchedule(activeDrills(p)), total = sch.total; // side-by-side drills share one slot
-  const hiddenCount = p.drills.length - activeDrills(p).length;
+  const hiddenCount = p.drills.filter(d => d.hidden).length;
   const startMin = parseStart(p), game = isGame(p);
   $('#plan-title').textContent = game ? 'Coaching points' : 'Drills';
   $('#btn-add-drill').textContent = game ? '+ Add coaching point' : '+ Add drill';
@@ -3161,10 +3161,11 @@ function renderPlan() {
     : `${total} min total${startMin != null ? ` · ${clockFull(startMin)}–${clockFull(startMin + total)}` : ''}${hiddenCount ? ` · ${hiddenCount} hidden` : ''}`;
   $('#plan-total').title = game ? 'Game prep has no running clock — coaching points are read in order' : startMin != null ? 'Set the start time in + Practice to change the clock' : 'Set a start time in + Practice to see clock times on each drill';
   // running time: where each (unhidden) drill starts — as a clock time when the practice has one, else minutes in
-  const numOf = d => d.hidden ? '–' : `${sch.byId.get(d.id)?.label ?? ''}.`;
+  const numOf = d => d.goalieFor ? '🧤' : d.hidden ? '–' : `${sch.byId.get(d.id)?.label ?? ''}.`;
   const when = d => {
     if (d.hidden) return 'hidden';
     const co = d.audience === 'coaches' ? ' · coaches only' : '';
+    if (d.goalieFor) { const par = p.drills.find(x => x.id === d.goalieFor); return `goalies · during ${par ? `“${par.name}”` : 'its drill'}${co}`; }
     if (game) return co.slice(3);
     const s = sch.byId.get(d.id), at = s.at, dur = s.dur;
     return `${+d.duration || 0} min · ${startMin != null ? `${clock(startMin + at)}–${clockFull(startMin + at + dur)}` : `${at === 0 ? 'starts' : `+${at} min`}`}${s.mates > 1 ? ' · side by side' : ''}${co}`;
@@ -3175,14 +3176,14 @@ function renderPlan() {
   // or button is no reason to hold back (a click leaves those focused, and their change needs a redraw).
   if (list.contains(document.activeElement) && document.activeElement.matches('textarea, input:not([type]), input[type="text"], input[type="number"], input[type="search"]')) return;
   const btns = (d, i) => `
-      <button data-act="pair" class="${d.withPrev ? 'is-paired' : ''}" ${i === 0 || game ? 'disabled' : ''} title="${d.withPrev ? 'Runs alongside the drill above — one slot on the clock, same minutes, players switch lines when done. Click to run it on its own again.' : 'Run this drill alongside the one above: side by side, the same minutes, one slot on the clock — players switch lines when done.'}">⛓</button>
+      <button data-act="pair" class="${d.withPrev ? 'is-paired' : ''}" ${i === 0 || game || d.goalieFor ? 'disabled' : ''} title="${d.goalieFor ? 'A goalie drill already runs alongside its linked drill' : d.withPrev ? 'Runs alongside the drill above — one slot on the clock, same minutes, players switch lines when done. Click to run it on its own again.' : 'Run this drill alongside the one above: side by side, the same minutes, one slot on the clock — players switch lines when done.'}">⛓</button>
       <button data-act="hide" class="${d.hidden ? 'is-hidden' : d.audience === 'coaches' ? 'is-coaches' : ''}" title="${d.hidden ? 'Hidden from everyone: left out of the plan, print and the coaches’ view — click to show it again' : d.audience === 'coaches' ? 'Coaches only: on the coaches’ minute-by-minute agenda, left out of the team’s copy (their clock times stay right across the gap) — click to hide it from everyone' : 'Shown to everyone — click for coaches only (e.g. free play the team needn’t see), click again to hide it from everyone'}">${d.hidden ? icon('eyeoff') : d.audience === 'coaches' ? icon('coach') : icon('eye')}</button>
       <button data-act="video" class="${d.video || d.upload ? 'has-video' : ''}${videoOpenFor === d.id ? ' open' : ''}" title="Video for this drill — drop in a file (any length — it warns when the clip gets big; optionally with your own voice over it) or link YouTube / Vimeo / Cloudflare Stream">${icon('video')}</button>
       <button data-act="intro" class="${d.intro || d.narration ? 'has-intro' : ''}${introOpenFor === d.id ? ' open' : ''}" title="${d.intro || d.narration ? `Audio on this drill: ${[d.intro ? 'intro' : '', d.narration ? 'voice-over' : ''].filter(Boolean).join(' + ')}. ` : ''}Intro in your voice (played before the drill when ▶ is pressed) and a voice-over recorded over the animation — both recorded here">${icon('mic')}</button>
       <button data-act="notes" class="${(d.notes || '').trim() || (d.goalieNotes || '').trim() || (d.coachNotes || '').trim() || d.coachnote ? 'has-notes' : ''}${notesOpenFor === d.id ? ' open' : ''}" title="Coaching notes — including goalie instructions and coach-only notes and audio">${icon('notes')}</button>
       <button data-act="sharedrill" title="Send just this drill: copies a link anyone can open — the other coach signs in with Google or anonymously. Press again after edits to update the shared copy.">${icon('send')}</button>
       <button data-act="del" title="Delete" ${p.drills.length === 1 ? 'disabled' : ''}>${icon('x')}</button>`;
-  list.innerHTML = p.drills.map((d, i) => {
+  const chunks = p.drills.map((d, i) => {
     const row = editingDrill === d.id
       ? `<li class="${i === store.drillIndex ? 'active ' : ''}editing" data-index="${i}">
           <span class="num">${numOf(d)}</span>
@@ -3192,7 +3193,7 @@ function renderPlan() {
           <button data-act="save" class="primary" title="Save (Enter)">${icon('check')}</button>
           <button data-act="cancel" title="Cancel (Esc)">${icon('x')}</button>
         </li>`
-      : `<li class="${i === store.drillIndex ? 'active' : ''}${d.hidden ? ' hidden-drill' : ''}${d.withPrev && !d.hidden ? ' paired' : ''}" data-index="${i}" draggable="true" title="${d.hidden ? 'Hidden from the plan · drag to reorder' : 'Drag to reorder'}">
+      : `<li class="${i === store.drillIndex ? 'active' : ''}${d.hidden ? ' hidden-drill' : ''}${d.withPrev && !d.hidden ? ' paired' : ''}${d.goalieFor ? ' goalie-row' : ''}" data-index="${i}" draggable="${d.goalieFor ? 'false' : 'true'}" title="${d.goalieFor ? 'Runs alongside its linked drill — no slot on the clock' : d.hidden ? 'Hidden from the plan · drag to reorder' : 'Drag to reorder'}">
           <span class="num">${numOf(d)}</span>
           <span class="name"><span class="dname-text">${escHtml(d.name)}</span><span class="dwhen">${when(d)}</span></span>
           ${fbCount(d) ? `<button data-act="feedback" class="dfb" title="Unresolved coach feedback on this drill — click to read">💬${fbCount(d)}</button>` : ''}
@@ -3200,10 +3201,13 @@ function renderPlan() {
         </li>`;
     const notes = notesOpenFor === d.id
       ? `<li class="notes-editor"><textarea data-notes="${i}" rows="3" placeholder="Notes / coaching points…">${escHtml(d.notes || '')}</textarea>
-        <div class="goalie-notes">
+        ${d.goalieFor ? '' : `<div class="goalie-notes">
           <div class="muted small">🧤 Goalies — what they work on, off to the side, while this drill runs</div>
           <textarea data-goalienotes="${i}" rows="2" placeholder="e.g. Post-to-post shuffles at the far net with Coach Sam…">${escHtml(d.goalieNotes || '')}</textarea>
-        </div>
+          <div class="row">${(gd => gd
+            ? `<button data-act="goaliedrill">🧤 Open the goalie drill</button><span class="muted small">“${escHtml(gd.name)}” — its own ice, animation, voice and video</span>`
+            : `<button data-act="goaliedrill">🧤 + Goalie drill</button><span class="muted small">a linked drill with its own ice, animation, voice and video</span>`)(p.drills.find(g => g.goalieFor === d.id))}</div>
+        </div>`}
         <div class="coach-notes">
           <div class="muted small">👁 Coaches only — never in the team’s copy</div>
           <textarea data-coachnotes="${i}" rows="2" placeholder="Notes just for the coaches…">${escHtml(d.coachNotes || '')}</textarea>
@@ -3230,8 +3234,13 @@ function renderPlan() {
       <p class="muted small">Plays in your voice before the drill whenever ▶ is pressed — here (unless 🔊 voice is muted in the editor) and always on the coaches’ phones. No length limit — it warns when a clip gets too big for the cloud.</p>
       ${narrationHTML(d)}
     </div></li>` : '';
-    return row + notes + intro;
-  }).join('') + aiEditorHTML(p);
+    return { d, html: row + notes + intro };
+  });
+  // Goalie drills sit under their linked drill, wherever they are in the array (orphans fall to the end).
+  const flow = [];
+  for (const c of chunks) if (!c.d.goalieFor) { flow.push(c); for (const g of chunks) if (g.d.goalieFor === c.d.id) flow.push(g); }
+  for (const c of chunks) if (c.d.goalieFor && !flow.includes(c)) flow.push(c);
+  list.innerHTML = flow.map(c => c.html).join('') + aiEditorHTML(p);
 }
 
 // Drag to reorder drills (↑/↓ buttons remain for touch).
@@ -3368,7 +3377,11 @@ $('#drill-list').addEventListener('click', e => {
   const p = store.practice;
   if (li.matches('.intro-editor')) { introAction(btn?.dataset.iact, li); return; }
   if (li.matches('.ai-editor')) { if (btn?.dataset.aiact) aiAction(btn.dataset.aiact, li); return; }
-  if (li.matches('.notes-editor')) { if (btn?.dataset.act?.startsWith('cn')) coachNoteAction(btn.dataset.act); return; }
+  if (li.matches('.notes-editor')) {
+    if (btn?.dataset.act === 'goaliedrill') { const d = p.drills.find(x => x.id === notesOpenFor); if (d) openGoalieDrill(d); return; }
+    if (btn?.dataset.act?.startsWith('cn')) coachNoteAction(btn.dataset.act);
+    return;
+  }
   if (act === 'video') { videoOpenFor = videoOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; introOpenFor = null; renderPlan(); if (videoOpenFor) $('#video-pane .video-url')?.focus(); return; }
   if (act === 'intro') { introOpenFor = introOpenFor === p.drills[i].id ? null : p.drills[i].id; notesOpenFor = null; videoOpenFor = null; renderPlan(); return; }
   if (act === 'feedback') { openFeedbackPanel(); return; }
@@ -3415,9 +3428,12 @@ $('#drill-list').addEventListener('click', e => {
     return;
   }
   if (act === 'del') {
-    if (!confirm(`Delete "${p.drills[i].name}"?`)) return;
-    if (editingDrill === p.drills[i].id) editingDrill = null;
-    commit(() => { p.drills.splice(i, 1); store.drillIndex = Math.min(i, p.drills.length - 1); });
+    const d = p.drills[i];
+    const linked = d.goalieFor ? [] : p.drills.filter(g => g.goalieFor === d.id); // its goalie drills go with it
+    if (!confirm(`Delete "${d.name}"?${linked.length ? ' Its linked goalie drill goes too.' : ''}`)) return;
+    if (editingDrill === d.id) editingDrill = null;
+    const gone = new Set([d, ...linked]);
+    commit(() => { p.drills = p.drills.filter(x => !gone.has(x)); store.drillIndex = Math.min(i, p.drills.length - 1); });
   }
   sel = null; stopAnim(); renderAll();
 });
@@ -3427,22 +3443,25 @@ function switchDrill(i) {
 }
 
 // ---------- drill library (every drill across all practices) ----------
+let libKind = 'all'; // 'all' | 'main' | 'goalie' — goalie drills are their own kind when searching
 function libraryCards(filter) {
   const q = filter.trim().toLowerCase();
   const practices = [...store.live].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const cards = [];
   for (const p of practices) for (const d of p.drills || []) {
-    if (q && !`${d.name} ${p.team || ''} ${p.date || ''} ${usDate(p.date)}`.toLowerCase().includes(q)) continue;
+    if (libKind !== 'all' && (libKind === 'goalie') !== !!d.goalieFor) continue;
+    if (q && !`${d.name} ${d.goalieFor ? 'goalie' : ''} ${p.team || ''} ${p.date || ''} ${usDate(p.date)}`.toLowerCase().includes(q)) continue;
     const v = d.view || VIEWS.full;
-    cards.push(`<div class="lib-card">
+    cards.push(`<div class="lib-card${d.goalieFor ? ' lib-goalie' : ''}">
       <svg viewBox="${v.x} ${v.y} ${v.w} ${v.h}" preserveAspectRatio="xMidYMid meet">${rinkSVG(surfaceOf(p))}${renderObjects(d, null, { dryland: isDryland(p) })}</svg>
+      ${d.goalieFor ? `<span class="lib-gbadge" title="A goalie drill — it runs alongside the drill it is linked to">🧤 goalie</span>` : ''}
       ${hasVideo(d) ? `<span class="lib-video" title="This drill has a video">${icon('video')} video</span>` : ''}
       <div class="lib-name" title="${escHtml(d.name)}">${escHtml(d.name)}</div>
       <div class="lib-meta" title="${escHtml(practiceLabel(p))}">${escHtml(practiceLabel(p))} · ${+d.duration || 0} min</div>
-      <button data-lib-add="${p.id}:${d.id}">+ Add to this practice</button>
+      <button data-lib-add="${p.id}:${d.id}">${d.goalieFor ? '+ Link to the selected drill' : '+ Add to this practice'}</button>
     </div>`);
   }
-  return cards.length ? cards.join('') : `<div class="lib-empty">${q ? 'No drills match that search.' : 'No drills yet — drills you create in any practice appear here.'}</div>`;
+  return cards.length ? cards.join('') : `<div class="lib-empty">${q || libKind !== 'all' ? 'No drills match that search.' : 'No drills yet — drills you create in any practice appear here.'}</div>`;
 }
 function renderLibrary() {
   $('#lib-target').textContent = practiceLabel(store.practice);
@@ -3453,6 +3472,12 @@ function closeLibrary() { $('#library').hidden = true; }
 $('#btn-library').addEventListener('click', openLibrary);
 $('#lib-close').addEventListener('click', closeLibrary);
 $('#lib-search').addEventListener('input', renderLibrary);
+$('#lib-kind').addEventListener('click', e => {
+  const b = e.target.closest('[data-kind]'); if (!b) return;
+  libKind = b.dataset.kind;
+  $$('#lib-kind button').forEach(x => x.classList.toggle('on', x === b));
+  renderLibrary();
+});
 $('#library').addEventListener('click', e => {
   if (e.target === $('#library')) return closeLibrary(); // click on the backdrop
   const btn = e.target.closest('[data-lib-add]'); if (!btn) return;
@@ -3464,7 +3489,13 @@ $('#library').addEventListener('click', e => {
   markAssetsPending(copy); // the recordings and uploaded video come along: copied in the background below
   copy.objects = cloneObjects(migrateDrill(copy).objects);
   const p = store.practice;
-  commit(() => { p.drills.push(copy); store.drillIndex = p.drills.length - 1; });
+  if (copy.goalieFor) { // a goalie drill from the library links to the drill selected right now (or the one the selected goalie drill runs with)
+    const cur = p.drills[store.drillIndex];
+    const host = cur?.goalieFor ? p.drills.find(x => x.id === cur.goalieFor) ?? cur : cur;
+    if (!host) return;
+    copy.goalieFor = host.id;
+    commit(() => { const k = p.drills.indexOf(host) + 1; p.drills.splice(k, 0, copy); store.drillIndex = k; });
+  } else commit(() => { p.drills.push(copy); store.drillIndex = p.drills.length - 1; });
   copyDrillAssets(pid, src, p.id, copy);
   $('#lib-target').textContent = practiceLabel(store.practice);
   btn.textContent = 'Added ✓'; btn.disabled = true;
@@ -4091,6 +4122,24 @@ wirePopover('#btn-new-practice', '#practice-pop', '#practice-date');
 
 wirePopover('#btn-practices', '#plist-pop', '#plist-create');
 /** Add a drill and open its list row in edit mode, name selected and ready to type over. */
+/**
+ * The drill's linked goalie drill: what the goalies run off to the side while it is on the ice. A full
+ * drill of its own (ice, animation, voice intro, voice-over, chalk talk, video) flagged `goalieFor`, so
+ * it takes no slot on the clock and the library can file it as a goalie drill. One per drill; opening
+ * it again just selects it.
+ */
+function openGoalieDrill(parent) {
+  const p = store.practice;
+  finishActive();
+  notesOpenFor = null;
+  let g = p.drills.find(x => x.goalieFor === parent.id);
+  if (!g) {
+    g = { ...newDrill(1, null), name: `Goalies — ${parent.name}`, duration: +parent.duration || 0, goalieFor: parent.id };
+    commit(() => { p.drills.splice(p.drills.indexOf(parent) + 1, 0, g); });
+  }
+  switchDrill(p.drills.indexOf(g));
+}
+
 function addDrillAndRename() {
   finishActive();
   const p = store.practice;

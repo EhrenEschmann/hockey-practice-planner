@@ -8,7 +8,7 @@ import { drillSchedule, rosterTeamFor, routePath } from './access.js';
 import { icon } from './icons.js';
 import { $, download, escHtml, fmtSecs, safeName } from './ui.js';
 import { closePopovers, drill, store, svg, zoneRules } from './core.js';
-import { activeDrills, clock, clockFull, parseStart, shareView, whenLabel } from './doc.js';
+import { activeDrills, clock, clockFull, goalieDrillsOf, parseStart, shareView, whenLabel } from './doc.js';
 import { cloudBackend, cloudSync, hasVideo, videoPoster } from './present.js';
 
 // The practice document: the share view each drill is shown through outside the editor, the
@@ -59,6 +59,7 @@ async function shareDrill(d, btn) {
   if (!teamId) { alert('Pick a team for this practice first (👥 Team) — the shared drill is filed under it.'); return; }
   const dd = JSON.parse(JSON.stringify(d));
   delete dd.hidden; delete dd.audience;             // sharing it on its own overrides its visibility in the plan
+  delete dd.goalieFor;                              // shared alone, a goalie drill stands as its own one-drill page
   delete dd.coachNotes; delete dd.coachnote;        // coach-only content never rides a public share
   delete dd.upload; delete dd.intro; delete dd.narration; // chunked video / recorded clips live under the original practice and don't travel
   const single = {
@@ -122,6 +123,7 @@ async function exportLongImage() {
     if (d.notes) for (const w of wrapText(d.notes, F.body, INNER)) text.push([F.body, w, '#222']);
     if (hasVideo(d)) text.push([F.meta, `🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : d.video || ''}`, '#555']);
     const gn = String(d.goalieNotes || '').trim(); if (gn) { text.push([F.bodyB, '🧤 Goalies', '#0e7490']); for (const w of wrapText(gn, F.body, INNER)) text.push([F.body, w, '#0e7490']); }
+    for (const g of goalieDrillsOf(p, d)) { text.push([F.bodyB, `🧤 Goalie drill alongside: ${g.name}`, '#0e7490']); if (g.notes) for (const w of wrapText(g.notes, F.body, INNER)) text.push([F.body, w, '#0e7490']); }
     const cn = String(d.coachNotes || '').trim(); if (cn) { text.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, INNER)) text.push([F.body, w, '#92400e']); }
     return { d, img, figH, text, h: 48 + figH + 16 + text.length * LH + 40 };
   }));
@@ -177,6 +179,7 @@ async function exportADMSheet() {
     for (const z of zoneRules(d)) { lines.push([F.bodyB, z.label, '#111']); for (const l of z.lines) for (const w of wrapText(`• ${l}`, F.body, COLW - 24)) lines.push([F.body, w, '#111', 24]); }
     if (d.notes) for (const w of wrapText(d.notes, F.body, COLW)) lines.push([F.body, w, '#222']);
     const gn = String(d.goalieNotes || '').trim(); if (gn) { lines.push([F.bodyB, '🧤 Goalies', '#0e7490']); for (const w of wrapText(gn, F.body, COLW)) lines.push([F.body, w, '#0e7490']); }
+    for (const g of goalieDrillsOf(p, d)) { lines.push([F.bodyB, `🧤 Goalie drill alongside: ${g.name}`, '#0e7490']); if (g.notes) for (const w of wrapText(g.notes, F.body, COLW)) lines.push([F.body, w, '#0e7490']); }
     const cn = String(d.coachNotes || '').trim(); if (cn) { lines.push([F.bodyB, '👁 Coaches only', '#92400e']); for (const w of wrapText(cn, F.body, COLW)) lines.push([F.body, w, '#92400e']); }
     return { lines, h: lines.length * LH + 26 };
   });
@@ -220,6 +223,9 @@ $('#btn-print').addEventListener('click', () => {
         ${hasVideo(d) ? `<div class="p-vid">${videoPoster(d) ? `<img class="p-poster" src="${videoPoster(d)}" alt="">` : ''}<span class="p-meta">🎬 Video: ${d.upload ? `uploaded clip, ${fmtSecs(d.upload.secs)} (in the app)` : escHtml(d.video)}</span></div>` : ''}
         ${d.notes ? `<pre>${escHtml(d.notes)}</pre>` : ''}
         ${(d.goalieNotes || '').trim() ? `<div class="p-goalie"><b>🧤 Goalies:</b> ${escHtml(d.goalieNotes)}</div>` : ''}
+        ${goalieDrillsOf(p, d).map(g => `<div class="p-goalie-drill"><div class="p-head"><b>🧤 ${escHtml(g.name)}</b><span class="p-meta">(goalies, during this drill)</span></div>
+          ${standaloneSVG(g, rink, SVG_STYLE, shareView(g))}
+          ${g.notes ? `<pre>${escHtml(g.notes)}</pre>` : ''}</div>`).join('')}
         ${(d.coachNotes || '').trim() || d.coachnote ? `<div class="p-coach"><b>👁 Coaches only:</b> ${escHtml(d.coachNotes || '')}${d.coachnote ? `${(d.coachNotes || '').trim() ? ' · ' : ''}▶ audio note (${Math.round(d.coachnote.secs)} s, in the app)` : ''}</div>` : ''}
       </div>`;
   }).join('');

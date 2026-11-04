@@ -3977,7 +3977,7 @@ propsBody.addEventListener('click', e => {
     case 'clearpath': commit(() => o.path = []); break;
     case 'unfollow': commit(() => { delete o.follow; delete o.followWp; delete o.followMeet; }); renderProps(); break; // the copied route stays, now their own
     case 'tidypath': commit(() => { o.path = G.beautifyPath([{ x: o.x, y: o.y }, ...(o.path || [])]).slice(1); }); renderProps(); break;
-    case 'extend': setTool('skater'); activeSkater = o.id; select(o.id); break;
+    case 'extend': setTool('skater'); activeSkater = o.id; skaterExtending = true; select(o.id); break; // extending: with "keep placing" on, clicks must add waypoints, not skaters
     case 'focus': setView({ x: o.x - 2, y: o.y - 2, w: o.w + 4, h: o.h + 4 }); break;
     case 'readzone': readAloud([o.label || 'Zone', ...zoneLines(o)]); break;
     case 'rot90': commit(() => { if (o.type === 'focus') rotateFocus(o, 90); else o.rot = ((o.rot || 0) + 90) % 360; }); break;
